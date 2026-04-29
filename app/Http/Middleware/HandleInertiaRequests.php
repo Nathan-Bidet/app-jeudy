@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\HourSheet;
 use App\Support\Access\AccessManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -62,12 +63,35 @@ class HandleInertiaRequests extends Middleware
                     'calendar_category_manage' => (bool) ($user && $accessManager->can($user, 'calendar.category.manage')),
                     'calendar_feed_manage' => (bool) ($user && $accessManager->can($user, 'calendar.feed.manage')),
                     'hours_view' => (bool) ($user && $accessManager->can($user, 'heures.view')),
+                    'hours_create' => (bool) ($user && $accessManager->can($user, 'heures.create')),
                     'admin_users_view' => (bool) ($user && ($accessManager->can($user, 'admin.users.view') || $accessManager->can($user, 'admin.users.manage'))),
                     'admin_sectors_view' => (bool) ($user && ($accessManager->can($user, 'admin.sectors.view') || $accessManager->can($user, 'admin.sectors.manage'))),
                     'admin_entities_view' => (bool) ($user && ($accessManager->can($user, 'admin.entities.view') || $accessManager->can($user, 'admin.entities.manage'))),
                     'admin_logs_view' => (bool) ($user && $accessManager->can($user, 'admin.logs.view')),
                 ],
             ],
+            'hours_reminder' => function () use ($user, $accessManager): array {
+                if (! $user || ! $accessManager->can($user, 'heures.create')) {
+                    return [
+                        'show' => false,
+                    ];
+                }
+
+                $today = now(config('app.timezone', 'Europe/Paris'))->toDateString();
+                $yesterday = now(config('app.timezone', 'Europe/Paris'))->subDay()->toDateString();
+
+                $hasYesterdayEntry = HourSheet::query()
+                    ->where('user_id', (int) $user->id)
+                    ->whereDate('work_date', $yesterday)
+                    ->exists();
+
+                return [
+                    'show' => ! $hasYesterdayEntry,
+                    'message' => 'Vous n’avez pas saisi vos heures pour la journée d’hier.',
+                    'yesterday_date' => $yesterday,
+                    'dismiss_key' => $today,
+                ];
+            },
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'status' => fn () => $request->session()->get('status'),
@@ -141,6 +165,10 @@ class HandleInertiaRequests extends Middleware
             return $leaveRequestId
                 ? route('leaves.index', ['highlight' => $leaveRequestId])
                 : route('leaves.index');
+        }
+
+        if ($type === 'hours_missing_entry_reminder' && Route::has('hours.index')) {
+            return route('hours.index');
         }
 
         return null;

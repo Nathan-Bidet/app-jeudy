@@ -99,6 +99,10 @@ class NotificationController extends Controller
                 : route('leaves.index');
         }
 
+        if ($type === 'hours_missing_entry_reminder' && Route::has('hours.index')) {
+            return route('hours.index');
+        }
+
         return null;
     }
 }
