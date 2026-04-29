@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\HourSheet;
+use App\Services\Hours\ApprovedLeaveDayService;
 use App\Support\Access\AccessManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -79,6 +80,13 @@ class HandleInertiaRequests extends Middleware
 
                 $today = now(config('app.timezone', 'Europe/Paris'))->toDateString();
                 $yesterday = now(config('app.timezone', 'Europe/Paris'))->subDay()->toDateString();
+
+                $approvedLeaveDayService = app(ApprovedLeaveDayService::class);
+                if ($approvedLeaveDayService->isUserOnApprovedLeaveForDate((int) $user->id, $yesterday)) {
+                    return [
+                        'show' => false,
+                    ];
+                }
 
                 $hasYesterdayEntry = HourSheet::query()
                     ->where('user_id', (int) $user->id)

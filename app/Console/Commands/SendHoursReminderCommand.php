@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\HourSheet;
 use App\Models\User;
 use App\Notifications\HoursMissingEntryReminderNotification;
+use App\Services\Hours\ApprovedLeaveDayService;
 use App\Support\Access\AccessManager;
 use Illuminate\Console\Command;
 
@@ -14,15 +15,19 @@ class SendHoursReminderCommand extends Command
 
     protected $description = 'Envoie une notification aux utilisateurs qui n\'ont pas encore saisi leurs heures du jour';
 
-    public function handle(AccessManager $accessManager): int
+    public function handle(AccessManager $accessManager, ApprovedLeaveDayService $approvedLeaveDayService): int
     {
-        $today = now()->toDateString();
+        $today = now(config('app.timezone', 'Europe/Paris'))->toDateString();
 
         $users = User::query()->select(['id', 'sector_id'])->get();
         $sentCount = 0;
 
         foreach ($users as $user) {
             if (! $accessManager->can($user, 'heures.create')) {
+                continue;
+            }
+
+            if ($approvedLeaveDayService->isUserOnApprovedLeaveForDate((int) $user->id, $today)) {
                 continue;
             }
 
