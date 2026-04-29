@@ -1,3 +1,4 @@
+import Modal from '@/Components/Modal';
 import Navbar from '@/Layouts/AppShell/Navbar';
 import Sidebar from '@/Layouts/AppShell/Sidebar';
 import ToastHost from '@/Layouts/AppShell/ToastHost';
@@ -22,7 +23,7 @@ function getInitialTheme() {
 }
 
 export default function AppLayout({ title, header, children }) {
-    const { auth } = usePage().props;
+    const { auth, hours_reminder: hoursReminder } = usePage().props;
     const user = auth?.user;
     const isAdmin = Boolean(auth?.is_admin);
     const permissions = auth?.permissions ?? {};
@@ -35,6 +36,7 @@ export default function AppLayout({ title, header, children }) {
 
     const [mobileOpen, setMobileOpen] = useState(false);
     const [theme, setTheme] = useState(getInitialTheme);
+    const [showHoursReminderModal, setShowHoursReminderModal] = useState(false);
 
     const isDark = theme === 'dark';
     const hasHeader = useMemo(() => Boolean(header || title), [header, title]);
@@ -52,6 +54,30 @@ export default function AppLayout({ title, header, children }) {
     useEffect(() => {
         setMobileOpen(false);
     }, [title]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        if (!hoursReminder?.show || !user?.id) {
+            setShowHoursReminderModal(false);
+            return;
+        }
+
+        const dismissKey = `hours-reminder-dismissed-${user.id}-${hoursReminder.dismiss_key || ''}`;
+        const dismissed = window.localStorage.getItem(dismissKey);
+        setShowHoursReminderModal(!dismissed);
+    }, [hoursReminder?.dismiss_key, hoursReminder?.show, user?.id]);
+
+    const dismissHoursReminder = () => {
+        if (typeof window !== 'undefined' && user?.id && hoursReminder?.dismiss_key) {
+            const dismissKey = `hours-reminder-dismissed-${user.id}-${hoursReminder.dismiss_key}`;
+            window.localStorage.setItem(dismissKey, '1');
+        }
+
+        setShowHoursReminderModal(false);
+    };
 
     return (
         <div className="app-shell min-h-screen bg-[var(--app-bg)] text-[var(--app-text)]">
@@ -101,7 +127,36 @@ export default function AppLayout({ title, header, children }) {
                 </main>
             </div>
 
+            <Modal show={showHoursReminderModal} onClose={dismissHoursReminder} maxWidth="md">
+                <div className="space-y-4 p-5 sm:p-6">
+                    <h2 className="text-lg font-semibold text-gray-900">Rappel Heures</h2>
+                    <p className="text-sm text-gray-700">
+                        {hoursReminder?.message || 'Vous n\'avez pas saisi vos heures pour la journée d\'hier.'}
+                    </p>
+                    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            onClick={dismissHoursReminder}
+                            className="w-full rounded-xl border border-[var(--app-border)] px-4 py-2 text-sm font-medium sm:w-auto"
+                        >
+                            Plus tard
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                dismissHoursReminder();
+                                window.location.assign(route('hours.index'));
+                            }}
+                            className="w-full rounded-xl bg-[#F1BF0C] px-4 py-2 text-sm font-semibold text-black hover:brightness-95 sm:w-auto"
+                        >
+                            Saisir mes heures
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
             <ToastHost />
         </div>
     );
 }
+

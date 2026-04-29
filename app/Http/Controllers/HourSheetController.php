@@ -2,8 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Support\Access\AccessManager;
 use App\Models\HourSheet;
+use App\Models\LeaveRequest;
+use App\Models\User;
+use App\Services\Hours\ApprovedLeaveDayService;
+use App\Support\Access\AccessManager;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +20,11 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class HourSheetController extends Controller
 {
+    public function __construct(
+        private readonly ApprovedLeaveDayService $approvedLeaveDayService
+    ) {
+    }
+
     public function index(Request $request): Response
     {
         $userId = (int) $request->user()->id;
@@ -42,11 +51,17 @@ class HourSheetController extends Controller
 
         $canCreate = app(AccessManager::class)->can($request->user(), 'heures.create');
         $canExport = app(AccessManager::class)->can($request->user(), 'heures.export');
+        $approvedLeaveDays = $this->approvedLeaveDayService->approvedLeaveMapForUser(
+            $userId,
+            config('hours.min_visible_date', '2026-04-27'),
+            now(config('app.timezone', 'Europe/Paris'))->toDateString()
+        );
 
         return Inertia::render('Hours/Index', [
             'hourSheets' => $hourSheets,
             'canCreate' => $canCreate,
             'canExport' => $canExport,
+            'approvedLeaveDays' => $approvedLeaveDays,
         ]);
     }
 
@@ -110,6 +125,37 @@ class HourSheetController extends Controller
             ->orderBy('work_date')
             ->get();
 
+        $userIds = $hourSheets->pluck('user_id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
+        $leaveUserIds = LeaveRequest::query()
+            ->where('status', LeaveRequest::STATUS_APPROVED)
+            ->where(function ($query) use ($validated): void {
+                $query
+                    ->whereBetween('start_at', [$validated['start_date'].' 00:00:00', $validated['end_date'].' 23:59:59'])
+                    ->orWhere(function ($subQuery) use ($validated): void {
+                        $subQuery
+                            ->whereNotNull('end_at')
+                            ->whereBetween('end_at', [$validated['start_date'].' 00:00:00', $validated['end_date'].' 23:59:59']);
+                    })
+                    ->orWhere(function ($subQuery) use ($validated): void {
+                        $subQuery
+                            ->whereNotNull('end_at')
+                            ->where('start_at', '<=', $validated['start_date'].' 00:00:00')
+                            ->where('end_at', '>=', $validated['end_date'].' 23:59:59');
+                    });
+            })
+            ->pluck('target_user_id')
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $userIds = array_values(array_unique(array_merge($userIds, $leaveUserIds)));
+
+        $approvedLeavesByUser = $this->approvedLeaveDayService->approvedLeaveMapForUsers(
+            $userIds,
+            $validated['start_date'],
+            $validated['end_date']
+        );
+
         $downloadName = sprintf(
             'heures_%s_%s.xlsx',
             date('Y-m-d', strtotime($validated['start_date'])),
@@ -124,12 +170,23 @@ class HourSheetController extends Controller
         $writer = new Writer();
         $writer->openToFile($filePath);
 
-        $groupedByUser = $hourSheets->groupBy(fn (HourSheet $sheet): int => (int) $sheet->user_id)->values();
+        $groupedByUser = $hourSheets->groupBy(fn (HourSheet $sheet): int => (int) $sheet->user_id);
+        $usersById = User::query()
+            ->whereIn('id', $userIds)
+            ->get(['id', 'name', 'first_name', 'last_name'])
+            ->keyBy('id');
+        $exportUserIds = array_values(array_unique(array_merge(
+            array_keys($groupedByUser->all()),
+            array_keys($approvedLeavesByUser)
+        )));
+        sort($exportUserIds);
         $usedTitles = [];
 
-        foreach ($groupedByUser as $index => $rows) {
+        foreach ($exportUserIds as $index => $exportUserId) {
+            $rows = $groupedByUser->get($exportUserId, collect());
             $sheetRef = $index === 0 ? $writer->getCurrentSheet() : $writer->addNewSheetAndMakeItCurrent();
-            $title = $this->uniqueSheetTitle($rows->first()?->user, $usedTitles);
+            $user = $usersById->get((int) $exportUserId);
+            $title = $this->uniqueSheetTitle($user, $usedTitles);
             $usedTitles[] = $title;
 
             try {
@@ -152,25 +209,61 @@ class HourSheetController extends Controller
                 'Nuit (Déplacement long)',
             ]));
 
+            $userId = (int) $exportUserId;
+            $rowsByDate = [];
             foreach ($rows as $sheet) {
-                $date = $sheet->work_date;
+                $dateKey = $sheet->work_date?->toDateString();
+                if ($dateKey) {
+                    $rowsByDate[$dateKey] = $sheet;
+                }
+            }
+
+            $leaveMap = $approvedLeavesByUser[$userId] ?? [];
+            $allDates = array_unique(array_merge(array_keys($rowsByDate), array_keys($leaveMap)));
+            sort($allDates);
+
+            foreach ($allDates as $dateKey) {
+                if (isset($rowsByDate[$dateKey])) {
+                    $sheet = $rowsByDate[$dateKey];
+                    $date = $sheet->work_date;
+                    $writer->addRow(Row::fromValues([
+                        $date?->format('d/m/Y'),
+                        $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
+                        $this->formatTimeForExport($sheet->morning_start),
+                        $this->formatTimeForExport($sheet->morning_end),
+                        $this->formatTimeForExport($sheet->afternoon_start),
+                        $this->formatTimeForExport($sheet->afternoon_end),
+                        $this->formatMinutesForExport((int) $sheet->total_minutes),
+                        $sheet->has_breakfast_before_5 ? 'Oui' : 'Non',
+                        $sheet->has_lunch ? 'Oui' : 'Non',
+                        $sheet->has_dinner_after_21 ? 'Oui' : 'Non',
+                        $sheet->has_long_night ? 'Oui' : 'Non',
+                    ]));
+                    continue;
+                }
+
+                if (! isset($leaveMap[$dateKey])) {
+                    continue;
+                }
+
+                $leaveDate = CarbonImmutable::parse($dateKey);
                 $writer->addRow(Row::fromValues([
-                    $date?->format('d/m/Y'),
-                    $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
-                    $this->formatTimeForExport($sheet->morning_start),
-                    $this->formatTimeForExport($sheet->morning_end),
-                    $this->formatTimeForExport($sheet->afternoon_start),
-                    $this->formatTimeForExport($sheet->afternoon_end),
-                    $this->formatMinutesForExport((int) $sheet->total_minutes),
-                    $sheet->has_breakfast_before_5 ? 'Oui' : 'Non',
-                    $sheet->has_lunch ? 'Oui' : 'Non',
-                    $sheet->has_dinner_after_21 ? 'Oui' : 'Non',
-                    $sheet->has_long_night ? 'Oui' : 'Non',
+                    $leaveDate->format('d/m/Y'),
+                    ucfirst((string) $leaveDate->locale('fr')->translatedFormat('l')),
+                    'Congé validé',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
                 ]));
             }
         }
 
-        if ($groupedByUser->isEmpty()) {
+        if ($exportUserIds === []) {
             $writer->getCurrentSheet()->setName('Heures');
             $writer->addRow(Row::fromValues([
                 'Date',
@@ -260,28 +353,24 @@ class HourSheetController extends Controller
         }
 
         $suffix = 2;
-        while ($suffix < 1000) {
-            $suffixText = ' '.$suffix;
-            $maxLen = 31 - mb_strlen($suffixText);
-            $candidate = mb_substr($baseTitle, 0, $maxLen).$suffixText;
+        while (true) {
+            $candidate = $this->sanitizeSheetTitle($baseTitle.' '.$suffix);
             if (! in_array($candidate, $usedTitles, true)) {
                 return $candidate;
             }
             $suffix++;
         }
-
-        return mb_substr($baseTitle, 0, 31);
     }
 
-    private function sanitizeSheetTitle(string $value): string
+    private function sanitizeSheetTitle(string $title): string
     {
-        $sanitized = preg_replace('/[\\\\\\/*\\?\\[\\]:]/', ' ', $value) ?? $value;
-        $sanitized = trim(preg_replace('/\\s+/', ' ', $sanitized) ?? $sanitized);
+        $clean = trim(str_replace(['/', '\\', '?', '*', '[', ']'], ' ', $title));
+        $clean = preg_replace('/\s+/', ' ', $clean) ?: 'Utilisateur';
 
-        if ($sanitized === '') {
-            $sanitized = 'Utilisateur';
+        if (mb_strlen($clean) <= 31) {
+            return $clean;
         }
 
-        return mb_substr($sanitized, 0, 31);
+        return rtrim(mb_substr($clean, 0, 31));
     }
 }

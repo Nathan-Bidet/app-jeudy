@@ -171,7 +171,7 @@ function defaultDayState({ isFriday = false } = {}) {
     };
 }
 
-export default function HoursIndex({ hourSheets = [], canCreate = false, canExport = false }) {
+export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, canCreate = false, canExport = false }) {
     const { flash = {} } = usePage().props;
     const flashError = flash?.error || null;
     const shouldHideUnauthorizedFlash = !canCreate
@@ -266,6 +266,16 @@ export default function HoursIndex({ hourSheets = [], canCreate = false, canExpo
 
         return map;
     }, [hourSheets]);
+    const approvedLeavesByDate = useMemo(() => {
+        const map = {};
+        Object.entries(approvedLeaveDays || {}).forEach(([dateKey, leaveInfo]) => {
+            if (dateKey) {
+                map[dateKey] = leaveInfo || {};
+            }
+        });
+
+        return map;
+    }, [approvedLeaveDays]);
 
     const [formState, setFormState] = useState(() => {
         const initial = {};
@@ -346,7 +356,15 @@ export default function HoursIndex({ hourSheets = [], canCreate = false, canExpo
             return false;
         }
 
-        return !sheetsByDate[day.work_date];
+        const hasHourSheet = Boolean(sheetsByDate[day.work_date]);
+        const hasApprovedLeave = Boolean(approvedLeavesByDate[day.work_date]);
+        const isPastDay = day.work_date < todayIso;
+
+        if (hasApprovedLeave && isPastDay) {
+            return false;
+        }
+
+        return !hasHourSheet || hasApprovedLeave;
     });
 
     const onTimeChange = (dayId, field, value) => {
@@ -494,6 +512,26 @@ export default function HoursIndex({ hourSheets = [], canCreate = false, canExpo
         });
     };
 
+    const historyEntries = useMemo(() => {
+        const entries = [
+            ...hourSheets.map((sheet) => ({
+                type: 'sheet',
+                date: sheet.work_date,
+                key: `sheet-${sheet.work_date}`,
+                data: sheet,
+            })),
+            ...Object.entries(approvedLeavesByDate).map(([date, leave]) => ({
+                type: 'leave',
+                date,
+                key: `leave-${date}`,
+                data: leave,
+            })),
+        ];
+
+        entries.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+        return entries;
+    }, [hourSheets, approvedLeavesByDate]);
+
     return (
         <AppLayout
             title="Heures"
@@ -552,6 +590,21 @@ export default function HoursIndex({ hourSheets = [], canCreate = false, canExpo
                     ) : (
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                             {visibleWeekDays.map((day) => {
+                                const leaveInfo = approvedLeavesByDate[day.work_date];
+                                if (leaveInfo) {
+                                    return (
+                                        <section
+                                            key={day.id}
+                                            className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm"
+                                        >
+                                            <h2 className="text-center text-lg font-semibold uppercase">{day.label}</h2>
+                                            <p className="mt-4 text-sm text-[var(--app-text-soft)]">
+                                                Vous êtes en congé ce jour-là, aucune heure n’est à saisir.
+                                            </p>
+                                        </section>
+                                    );
+                                }
+
                                 const dayState = formState[day.id];
                                 const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
                                 const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
@@ -649,13 +702,21 @@ export default function HoursIndex({ hourSheets = [], canCreate = false, canExpo
                     <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
                         <h2 className="text-lg font-semibold">Historique</h2>
 
-                        {hourSheets.length === 0 ? (
+                        {historyEntries.length === 0 ? (
                             <p className="mt-3 text-sm text-[var(--app-text-soft)]">Aucune journée enregistrée.</p>
                         ) : (
                             <div className="mt-4 space-y-3">
-                                {hourSheets.map((sheet) => (
-                                    <article key={sheet.id} className="rounded-xl border border-[var(--app-border)] bg-white p-3 text-sm text-black">
-                                        {canCreate && inlineEditingByDate[sheet.work_date] ? (() => {
+                                {historyEntries.map((entry) => {
+                                    const sheet = entry.type === 'sheet' ? entry.data : null;
+                                    return (
+                                    <article key={entry.key} className="rounded-xl border border-[var(--app-border)] bg-white p-3 text-sm text-black">
+                                        {entry.type === 'leave' ? (
+                                            <div>
+                                                <p className="font-semibold">Date : {formatHistoryDate(entry.date)}</p>
+                                                <p>Statut : En congé</p>
+                                                <p>Congé validé — aucune heure à saisir</p>
+                                            </div>
+                                        ) : (canCreate && inlineEditingByDate[sheet.work_date] ? (() => {
                                             const dayState = inlineEditingByDate[sheet.work_date];
                                             const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
                                             const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
@@ -774,9 +835,10 @@ export default function HoursIndex({ hourSheets = [], canCreate = false, canExpo
                                                     </button>
                                                 )}
                                             </div>
-                                        )}
+                                        ))}
                                     </article>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </section>
