@@ -125,6 +125,7 @@ class LeaveRequestController extends Controller
 
         $leaveTypes = LeaveType::query()
             ->where('is_active', true)
+            ->visibleForUser((int) $user->id)
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get(['id', 'name', 'max_days'])
@@ -223,9 +224,18 @@ class LeaveRequestController extends Controller
         }
 
         if (! empty($validated['leave_type_id'])) {
-            $leaveType = LeaveType::query()->find((int) $validated['leave_type_id']);
+            $leaveType = LeaveType::query()
+                ->where('is_active', true)
+                ->visibleForUser((int) $request->user()->id)
+                ->find((int) $validated['leave_type_id']);
 
-            if ($leaveType && $leaveType->max_days !== null) {
+            if (! $leaveType) {
+                throw ValidationException::withMessages([
+                    'leave_type_id' => 'Ce type de congé n’est pas disponible pour votre profil.',
+                ]);
+            }
+
+            if ($leaveType->max_days !== null) {
                 foreach ($normalizedPeriods as $periodIndex => $period) {
                     $startDate = Carbon::parse($period['start_at'])->startOfDay();
                     $endDate = Carbon::parse($period['end_at'])->startOfDay();

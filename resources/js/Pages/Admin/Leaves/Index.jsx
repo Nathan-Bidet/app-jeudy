@@ -45,6 +45,8 @@ export default function AdminLeavesIndex({
         sort_order: 0,
         is_unlimited: false,
         is_active: true,
+        visibility_mode: 'all',
+        visible_user_ids: [],
     });
     const [leaveTypeEdits, setLeaveTypeEdits] = useState(
         leaveTypes.reduce((carry, leaveType) => ({
@@ -55,6 +57,10 @@ export default function AdminLeavesIndex({
                 sort_order: leaveType.sort_order ?? 0,
                 is_unlimited: leaveType.max_days === null,
                 is_active: leaveType.is_active,
+                visibility_mode: leaveType.visibility_mode ?? 'all',
+                visible_user_ids: Array.isArray(leaveType.visible_user_ids)
+                    ? leaveType.visible_user_ids.map((id) => Number(id))
+                    : [],
             },
         }), {}),
     );
@@ -191,6 +197,8 @@ export default function AdminLeavesIndex({
                     sort_order: 0,
                     is_unlimited: false,
                     is_active: true,
+                    visibility_mode: 'all',
+                    visible_user_ids: [],
                 });
             },
         });
@@ -423,6 +431,56 @@ export default function AdminLeavesIndex({
                             />
                             <span>Actif</span>
                         </label>
+                        <div className="rounded-lg border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-text)] md:col-span-4">
+                            <p className="mb-2 font-semibold">Visibilité</p>
+                            <div className="flex flex-wrap gap-3">
+                                <label className="flex items-center gap-2">
+                                    <input
+                                        type="radio"
+                                        name="create_visibility_mode"
+                                        value="all"
+                                        checked={leaveTypeCreateForm.data.visibility_mode === 'all'}
+                                        onChange={() => leaveTypeCreateForm.setData('visibility_mode', 'all')}
+                                        className="h-4 w-4"
+                                    />
+                                    <span>Visible par tous</span>
+                                </label>
+                                <label className="flex items-center gap-2">
+                                    <input
+                                        type="radio"
+                                        name="create_visibility_mode"
+                                        value="selected"
+                                        checked={leaveTypeCreateForm.data.visibility_mode === 'selected'}
+                                        onChange={() => leaveTypeCreateForm.setData('visibility_mode', 'selected')}
+                                        className="h-4 w-4"
+                                    />
+                                    <span>Visible uniquement par certains utilisateurs</span>
+                                </label>
+                            </div>
+                            {leaveTypeCreateForm.data.visibility_mode === 'selected' ? (
+                                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                    {users.map((user) => (
+                                        <label key={`create-leave-type-visible-${user.id}`} className="flex items-center gap-2 rounded-lg border border-[var(--app-border)] px-2 py-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={(leaveTypeCreateForm.data.visible_user_ids ?? []).includes(Number(user.id))}
+                                                onChange={() => {
+                                                    const current = new Set((leaveTypeCreateForm.data.visible_user_ids ?? []).map((id) => Number(id)));
+                                                    if (current.has(Number(user.id))) {
+                                                        current.delete(Number(user.id));
+                                                    } else {
+                                                        current.add(Number(user.id));
+                                                    }
+                                                    leaveTypeCreateForm.setData('visible_user_ids', Array.from(current));
+                                                }}
+                                                className="h-4 w-4"
+                                            />
+                                            <span>{user.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
                         <div className="md:col-span-4">
                             <button
                                 type="submit"
@@ -441,6 +499,8 @@ export default function AdminLeavesIndex({
                                 max_days: leaveType.max_days ?? '',
                                 is_unlimited: leaveType.max_days === null,
                                 is_active: leaveType.is_active,
+                                visibility_mode: leaveType.visibility_mode ?? 'all',
+                                visible_user_ids: Array.isArray(leaveType.visible_user_ids) ? leaveType.visible_user_ids : [],
                             };
 
                             return (
@@ -490,6 +550,57 @@ export default function AdminLeavesIndex({
                                         />
                                         <span>Actif</span>
                                     </label>
+                                    <div className="rounded-lg border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-text)] md:col-span-4">
+                                        <p className="mb-2 font-semibold">Visibilité</p>
+                                        <div className="flex flex-wrap gap-3">
+                                            <label className="flex items-center gap-2">
+                                                <input
+                                                    type="radio"
+                                                    name={`visibility_mode_${leaveType.id}`}
+                                                    value="all"
+                                                    checked={(edit.visibility_mode ?? 'all') === 'all'}
+                                                    onChange={() => updateLeaveTypeEdit(leaveType.id, { visibility_mode: 'all' })}
+                                                    className="h-4 w-4"
+                                                />
+                                                <span>Visible par tous</span>
+                                            </label>
+                                            <label className="flex items-center gap-2">
+                                                <input
+                                                    type="radio"
+                                                    name={`visibility_mode_${leaveType.id}`}
+                                                    value="selected"
+                                                    checked={(edit.visibility_mode ?? 'all') === 'selected'}
+                                                    onChange={() => updateLeaveTypeEdit(leaveType.id, { visibility_mode: 'selected' })}
+                                                    className="h-4 w-4"
+                                                />
+                                                <span>Visible uniquement par certains utilisateurs</span>
+                                            </label>
+                                        </div>
+
+                                        {(edit.visibility_mode ?? 'all') === 'selected' ? (
+                                            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                                {users.map((user) => (
+                                                    <label key={`edit-leave-type-${leaveType.id}-visible-${user.id}`} className="flex items-center gap-2 rounded-lg border border-[var(--app-border)] px-2 py-1.5">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={(edit.visible_user_ids ?? []).includes(Number(user.id))}
+                                                            onChange={() => {
+                                                                const current = new Set((edit.visible_user_ids ?? []).map((id) => Number(id)));
+                                                                if (current.has(Number(user.id))) {
+                                                                    current.delete(Number(user.id));
+                                                                } else {
+                                                                    current.add(Number(user.id));
+                                                                }
+                                                                updateLeaveTypeEdit(leaveType.id, { visible_user_ids: Array.from(current) });
+                                                            }}
+                                                            className="h-4 w-4"
+                                                        />
+                                                        <span>{user.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
                                     <div className="md:col-span-4">
                                         <button
                                             type="submit"
