@@ -9,6 +9,7 @@ use App\Models\LeaveHrUser;
 use App\Models\LeaveSectorValidator;
 use App\Models\LeaveUserValidator;
 use App\Models\LeaveType;
+use App\Models\LeaveTypeUserVisibility;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
@@ -71,6 +72,7 @@ class LeaveSettingsController extends Controller
             ->toArray();
 
         $leaveTypes = LeaveType::query()
+            ->with('userVisibilities:user_id,leave_type_id')
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get(['id', 'name', 'max_days', 'sort_order', 'is_active'])
@@ -80,6 +82,12 @@ class LeaveSettingsController extends Controller
                 'max_days' => $leaveType->max_days !== null ? (int) $leaveType->max_days : null,
                 'sort_order' => (int) $leaveType->sort_order,
                 'is_active' => (bool) $leaveType->is_active,
+                'visibility_mode' => $leaveType->userVisibilities->isEmpty() ? 'all' : 'selected',
+                'visible_user_ids' => $leaveType->userVisibilities
+                    ->pluck('user_id')
+                    ->map(fn ($id): int => (int) $id)
+                    ->values()
+                    ->all(),
             ])
             ->values()
             ->all();
@@ -282,6 +290,9 @@ class LeaveSettingsController extends Controller
             'sort_order' => ['required', 'integer'],
             'is_unlimited' => ['nullable', 'boolean'],
             'is_active' => ['nullable', 'boolean'],
+            'visibility_mode' => ['required', 'string', 'in:all,selected'],
+            'visible_user_ids' => ['nullable', 'array'],
+            'visible_user_ids.*' => ['integer', 'exists:users,id'],
         ]);
 
         $isUnlimited = (bool) ($validated['is_unlimited'] ?? false);
@@ -292,7 +303,7 @@ class LeaveSettingsController extends Controller
                 ->withInput();
         }
 
-        LeaveType::query()->create([
+        $leaveType = LeaveType::query()->create([
             'name' => trim((string) $validated['name']),
             'max_days' => $isUnlimited ? null : (int) $maxDays,
             'sort_order' => (int) $validated['sort_order'],
@@ -300,6 +311,26 @@ class LeaveSettingsController extends Controller
                 ? (bool) $validated['is_active']
                 : true,
         ]);
+
+        $visibleUserIds = collect($validated['visible_user_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if (($validated['visibility_mode'] ?? 'all') === 'selected' && $visibleUserIds !== []) {
+            LeaveTypeUserVisibility::query()->insert(
+                array_map(
+                    static fn (int $userId): array => [
+                        'leave_type_id' => (int) $leaveType->id,
+                        'user_id' => $userId,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ],
+                    $visibleUserIds
+                )
+            );
+        }
 
         return back()->with('success', 'Type de congé ajouté.');
     }
@@ -314,6 +345,9 @@ class LeaveSettingsController extends Controller
             'sort_order' => ['required', 'integer'],
             'is_unlimited' => ['nullable', 'boolean'],
             'is_active' => ['required', 'boolean'],
+            'visibility_mode' => ['required', 'string', 'in:all,selected'],
+            'visible_user_ids' => ['nullable', 'array'],
+            'visible_user_ids.*' => ['integer', 'exists:users,id'],
         ]);
 
         $isUnlimited = (bool) ($validated['is_unlimited'] ?? false);
@@ -330,6 +364,30 @@ class LeaveSettingsController extends Controller
             'sort_order' => (int) $validated['sort_order'],
             'is_active' => (bool) $validated['is_active'],
         ]);
+
+        $visibleUserIds = collect($validated['visible_user_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        LeaveTypeUserVisibility::query()
+            ->where('leave_type_id', (int) $leaveType->id)
+            ->delete();
+
+        if (($validated['visibility_mode'] ?? 'all') === 'selected' && $visibleUserIds !== []) {
+            LeaveTypeUserVisibility::query()->insert(
+                array_map(
+                    static fn (int $userId): array => [
+                        'leave_type_id' => (int) $leaveType->id,
+                        'user_id' => $userId,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ],
+                    $visibleUserIds
+                )
+            );
+        }
 
         return back()->with('success', 'Type de congé mis à jour.');
     }

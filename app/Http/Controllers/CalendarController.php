@@ -269,6 +269,7 @@ class CalendarController extends Controller
             ->contains(fn ($id) => (int) $id !== (int) $request->user()?->id);
         $leaveTypes = LeaveType::query()
             ->where('is_active', true)
+            ->visibleForUser((int) $request->user()->id)
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get(['id', 'name', 'max_days'])
