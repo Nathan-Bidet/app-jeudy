@@ -15,6 +15,7 @@ class HourSheet extends Model
         'afternoon_start',
         'afternoon_end',
         'total_minutes',
+        'is_not_worked',
         'has_breakfast_before_5',
         'has_lunch',
         'has_dinner_after_21',
@@ -23,6 +24,7 @@ class HourSheet extends Model
 
     protected $casts = [
         'work_date' => 'date',
+        'is_not_worked' => 'boolean',
         'has_breakfast_before_5' => 'boolean',
         'has_lunch' => 'boolean',
         'has_dinner_after_21' => 'boolean',

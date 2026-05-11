@@ -49,6 +49,7 @@ class User extends Authenticatable
         'sst_valid_until',
         'password',
         'sector_id',
+        'hours_tracking_starts_at',
     ];
 
     /**
@@ -89,6 +90,7 @@ class User extends Authenticatable
             'display_order' => 'integer',
             'occupational_health_valid_until' => 'date',
             'sst_valid_until' => 'date',
+            'hours_tracking_starts_at' => 'date',
         ];
     }
 

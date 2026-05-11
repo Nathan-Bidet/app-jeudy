@@ -75,6 +75,7 @@ class UserManagementController extends Controller
                     'first_name' => $user->first_name,
                     'last_name' => $user->last_name,
                     'email' => $user->email,
+                    'hours_tracking_starts_at' => $user->hours_tracking_starts_at?->toDateString(),
                     'sector_id' => $user->sector_id,
                     'sector_name' => $user->sector?->name,
                     'role' => $user->roles->pluck('name')->first(),
@@ -100,6 +101,7 @@ class UserManagementController extends Controller
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'role' => ['required', Rule::in(['admin', 'utilisateur'])],
             'sector_id' => ['required', 'integer', 'exists:sectors,id'],
+            'hours_tracking_starts_at' => ['nullable', 'date_format:Y-m-d'],
         ]);
 
         $fullName = trim(preg_replace('/\s+/', ' ', $validated['first_name'].' '.$validated['last_name']) ?? '');
@@ -111,6 +113,7 @@ class UserManagementController extends Controller
             'email' => $validated['email'],
             'password' => $validated['password'],
             'sector_id' => (int) $validated['sector_id'],
+            'hours_tracking_starts_at' => $validated['hours_tracking_starts_at'] ?? null,
         ]);
 
         $user->syncRoles([$validated['role']]);
@@ -159,6 +162,7 @@ class UserManagementController extends Controller
             'first_name' => $user->first_name,
             'last_name' => $user->last_name,
             'email' => $user->email,
+            'hours_tracking_starts_at' => $user->hours_tracking_starts_at?->toDateString(),
         ];
 
         $validated = $request->validate([
@@ -166,6 +170,7 @@ class UserManagementController extends Controller
             'last_name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+            'hours_tracking_starts_at' => ['nullable', 'date_format:Y-m-d'],
         ]);
 
         $fullName = trim(preg_replace('/\s+/', ' ', $validated['first_name'].' '.$validated['last_name']) ?? '');
@@ -175,6 +180,7 @@ class UserManagementController extends Controller
             'last_name' => $validated['last_name'],
             'name' => $fullName,
             'email' => $validated['email'],
+            'hours_tracking_starts_at' => $validated['hours_tracking_starts_at'] ?? null,
         ]);
 
         if (!empty($validated['password'])) {
@@ -198,6 +204,7 @@ class UserManagementController extends Controller
                     'first_name' => $user->first_name,
                     'last_name' => $user->last_name,
                     'email' => $user->email,
+                    'hours_tracking_starts_at' => $user->hours_tracking_starts_at?->toDateString(),
                     'password_changed' => ! empty($validated['password']),
                 ],
             ],
