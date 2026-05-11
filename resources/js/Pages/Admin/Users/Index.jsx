@@ -70,6 +70,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
         password_confirmation: '',
         role: 'utilisateur',
         sector_id: defaultSectorId,
+        hours_tracking_starts_at: '',
     });
 
     const editForm = useForm({
@@ -78,6 +79,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
         email: '',
         password: '',
         password_confirmation: '',
+        hours_tracking_starts_at: '',
     });
 
     useEffect(() => {
@@ -173,6 +175,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
             password_confirmation: '',
             role: 'utilisateur',
             sector_id: defaultSectorId,
+            hours_tracking_starts_at: '',
         });
         createForm.clearErrors();
         setIsCreateModalOpen(true);
@@ -202,6 +205,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
                     password_confirmation: '',
                     role: 'utilisateur',
                     sector_id: defaultSectorId,
+                    hours_tracking_starts_at: '',
                 });
             },
         });
@@ -217,6 +221,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
             email: user.email ?? '',
             password: '',
             password_confirmation: '',
+            hours_tracking_starts_at: user.hours_tracking_starts_at ?? '',
         });
         editForm.clearErrors();
         setEditingUser(user);
@@ -592,6 +597,17 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
                         </div>
 
                         <div>
+                            <label className="mb-1 block text-sm font-medium text-gray-700">Début saisie heures</label>
+                            <TextInput
+                                type="date"
+                                className="w-full"
+                                value={createForm.data.hours_tracking_starts_at}
+                                onChange={(event) => createForm.setData('hours_tracking_starts_at', event.target.value)}
+                            />
+                            <InputError className="mt-2" message={createForm.errors.hours_tracking_starts_at} />
+                        </div>
+
+                        <div>
                             <label className="mb-1 block text-sm font-medium text-gray-700">Confirmer le mot de passe</label>
                             <TextInput
                                 type="password"
@@ -651,6 +667,17 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
                                 required
                             />
                             <InputError className="mt-2" message={editForm.errors.email} />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                            <label className="mb-1 block text-sm font-medium text-gray-700">Début saisie heures</label>
+                            <TextInput
+                                type="date"
+                                className="w-full"
+                                value={editForm.data.hours_tracking_starts_at}
+                                onChange={(event) => editForm.setData('hours_tracking_starts_at', event.target.value)}
+                            />
+                            <InputError className="mt-2" message={editForm.errors.hours_tracking_starts_at} />
                         </div>
 
                         <div>

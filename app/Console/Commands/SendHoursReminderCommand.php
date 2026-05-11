@@ -19,11 +19,16 @@ class SendHoursReminderCommand extends Command
     {
         $today = now(config('app.timezone', 'Europe/Paris'))->toDateString();
 
-        $users = User::query()->select(['id', 'sector_id'])->get();
+        $users = User::query()->select(['id', 'sector_id', 'hours_tracking_starts_at'])->get();
         $sentCount = 0;
 
         foreach ($users as $user) {
             if (! $accessManager->can($user, 'heures.create')) {
+                continue;
+            }
+            $trackingStartDate = $user->hours_tracking_starts_at?->toDateString()
+                ?? (string) config('hours.min_visible_date', '2026-04-27');
+            if ($today < $trackingStartDate) {
                 continue;
             }
 

@@ -42,7 +42,6 @@ const CHECKBOX_FIELDS = [
     { key: 'has_dinner_after_21', label: 'Dîner (Après 21h)' },
     { key: 'has_long_night', label: 'Nuit (Déplacement long)' },
 ];
-const MIN_VISIBLE_DATE = '2026-04-25';
 
 function toMonday(date) {
     const copy = new Date(date);
@@ -164,6 +163,7 @@ function defaultDayState({ isFriday = false } = {}) {
         morning_end: '12:00',
         afternoon_start: '14:00',
         afternoon_end: isFriday ? '17:00' : '18:00',
+        is_not_worked: false,
         has_breakfast_before_5: false,
         has_lunch: false,
         has_dinner_after_21: false,
@@ -171,7 +171,27 @@ function defaultDayState({ isFriday = false } = {}) {
     };
 }
 
-export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, canCreate = false, canExport = false }) {
+function nonWorkedDayState() {
+    return {
+        morning_start: '',
+        morning_end: '',
+        afternoon_start: '',
+        afternoon_end: '',
+        is_not_worked: true,
+        has_breakfast_before_5: false,
+        has_lunch: false,
+        has_dinner_after_21: false,
+        has_long_night: false,
+    };
+}
+
+export default function HoursIndex({
+    hourSheets = [],
+    approvedLeaveDays = {},
+    minVisibleDate = '2026-04-26',
+    canCreate = false,
+    canExport = false,
+}) {
     const { flash = {} } = usePage().props;
     const flashError = flash?.error || null;
     const shouldHideUnauthorizedFlash = !canCreate
@@ -192,7 +212,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
     const weekDays = useMemo(() => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const minDate = new Date(`${MIN_VISIBLE_DATE}T00:00:00`);
+        const minDate = new Date(`${minVisibleDate}T00:00:00`);
         const days = [];
         let cursor = new Date(minDate);
 
@@ -211,10 +231,10 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
         }
 
         return days;
-    }, []);
+    }, [minVisibleDate]);
     const todayIso = useMemo(() => isoDate(new Date()), []);
     const lastWeekendDates = useMemo(() => {
-        const minDate = new Date(`${MIN_VISIBLE_DATE}T00:00:00`);
+        const minDate = new Date(`${minVisibleDate}T00:00:00`);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -246,15 +266,15 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
         const saturdayIso = isoDate(saturday);
         const sundayIso = isoDate(sunday);
 
-        if (saturdayIso >= MIN_VISIBLE_DATE && saturdayIso <= todayIso) {
+        if (saturdayIso >= minVisibleDate && saturdayIso <= todayIso) {
             allowed.add(saturdayIso);
         }
-        if (sundayIso >= MIN_VISIBLE_DATE && sundayIso <= todayIso) {
+        if (sundayIso >= minVisibleDate && sundayIso <= todayIso) {
             allowed.add(sundayIso);
         }
 
         return allowed;
-    }, [todayIso]);
+    }, [todayIso, minVisibleDate]);
 
     const sheetsByDate = useMemo(() => {
         const map = {};
@@ -287,6 +307,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                 morning_end: normalizeTimeForSelect(existing.morning_end),
                 afternoon_start: normalizeTimeForSelect(existing.afternoon_start),
                 afternoon_end: normalizeTimeForSelect(existing.afternoon_end),
+                is_not_worked: Boolean(existing.is_not_worked),
                 has_breakfast_before_5: Boolean(existing.has_breakfast_before_5),
                 has_lunch: Boolean(existing.has_lunch),
                 has_dinner_after_21: Boolean(existing.has_dinner_after_21),
@@ -344,7 +365,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
     };
 
     const visibleWeekDays = weekDays.filter((day) => {
-        if (day.work_date < MIN_VISIBLE_DATE || day.work_date > todayIso) {
+        if (day.work_date < minVisibleDate || day.work_date > todayIso) {
             return false;
         }
 
@@ -400,6 +421,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                 morning_end: normalizeTimeForSelect(existing.morning_end),
                 afternoon_start: normalizeTimeForSelect(existing.afternoon_start),
                 afternoon_end: normalizeTimeForSelect(existing.afternoon_end),
+                is_not_worked: Boolean(existing.is_not_worked),
                 has_breakfast_before_5: Boolean(existing.has_breakfast_before_5),
                 has_lunch: Boolean(existing.has_lunch),
                 has_dinner_after_21: Boolean(existing.has_dinner_after_21),
@@ -450,6 +472,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
 
         router.post(route('hours.store'), {
             work_date: day.work_date,
+            is_not_worked: Boolean(dayState.is_not_worked),
             morning_start: dayState.morning_start || null,
             morning_end: dayState.morning_end || null,
             afternoon_start: dayState.afternoon_start || null,
@@ -458,6 +481,41 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
             has_lunch: Boolean(dayState.has_lunch),
             has_dinner_after_21: Boolean(dayState.has_dinner_after_21),
             has_long_night: Boolean(dayState.has_long_night),
+        }, {
+            preserveScroll: true,
+            onFinish: () => {
+                setSavingDates((prev) => {
+                    const next = new Set(prev);
+                    next.delete(day.work_date);
+                    return next;
+                });
+            },
+        });
+    };
+
+    const markDayAsNotWorked = (day) => {
+        setFormState((prev) => ({
+            ...prev,
+            [day.id]: nonWorkedDayState(),
+        }));
+
+        setSavingDates((prev) => {
+            const next = new Set(prev);
+            next.add(day.work_date);
+            return next;
+        });
+
+        router.post(route('hours.store'), {
+            work_date: day.work_date,
+            is_not_worked: true,
+            morning_start: null,
+            morning_end: null,
+            afternoon_start: null,
+            afternoon_end: null,
+            has_breakfast_before_5: false,
+            has_lunch: false,
+            has_dinner_after_21: false,
+            has_long_night: false,
         }, {
             preserveScroll: true,
             onFinish: () => {
@@ -491,6 +549,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
 
         router.post(route('hours.store'), {
             work_date: workDate,
+            is_not_worked: Boolean(dayState.is_not_worked),
             morning_start: dayState.morning_start || null,
             morning_end: dayState.morning_end || null,
             afternoon_start: dayState.afternoon_start || null,
@@ -606,10 +665,11 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                 }
 
                                 const dayState = formState[day.id];
+                                const isNotWorked = Boolean(dayState.is_not_worked);
                                 const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
                                 const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
                                 const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
-                                const errorMessages = [morningRange.error, eveningRange.error].filter(Boolean);
+                                const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
                                 const isSaving = savingDates.has(day.work_date);
 
                                 return (
@@ -619,6 +679,12 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                     >
                                         <h2 className="text-center text-lg font-semibold uppercase">{day.label}</h2>
 
+                                        {isNotWorked && (
+                                            <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                Journée marquée comme non travaillée
+                                            </p>
+                                        )}
+
                                         <div className="mt-4 grid gap-3">
                                             {TIME_FIELDS.map((field) => (
                                                 <label key={field.key} className="grid gap-1 text-sm">
@@ -626,6 +692,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                                     <select
                                                         value={dayState[field.key]}
                                                         onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
+                                                        disabled={isNotWorked}
                                                         className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
                                                     >
                                                         <option value="">--:--</option>
@@ -663,6 +730,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                                         key={field.key}
                                                         type="button"
                                                         onClick={() => onToggleCheck(day.id, field.key)}
+                                                        disabled={isNotWorked}
                                                         className="flex items-center gap-3 text-left"
                                                     >
                                                         <span
@@ -677,7 +745,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                             })}
                                         </div>
 
-                                        <div className="mt-4">
+                                        <div className="mt-4 space-y-2">
                                             <button
                                                 type="button"
                                                 onClick={() => saveDay(day)}
@@ -685,6 +753,14 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                                 className="w-full rounded-xl bg-[#F1BF0C] px-4 py-3 text-sm font-semibold text-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
                                                 {isSaving ? 'Enregistrement...' : 'Enregistrer'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => markDayAsNotWorked(day)}
+                                                disabled={isSaving}
+                                                className="w-full rounded-xl border border-[var(--app-border)] bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                Non travaillé
                                             </button>
                                         </div>
                                     </section>
@@ -718,15 +794,37 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                             </div>
                                         ) : (canCreate && inlineEditingByDate[sheet.work_date] ? (() => {
                                             const dayState = inlineEditingByDate[sheet.work_date];
+                                            const isNotWorked = Boolean(dayState.is_not_worked);
                                             const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
                                             const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
                                             const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
-                                            const errorMessages = [morningRange.error, eveningRange.error].filter(Boolean);
+                                            const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
                                             const isSaving = savingDates.has(sheet.work_date);
 
                                                     return (
                                                 <div>
                                                     <p className="text-center font-semibold uppercase">{formatHistoryDate(sheet.work_date)}</p>
+
+                                                    <div className="mt-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setInlineEditingByDate((prev) => ({
+                                                                ...prev,
+                                                                [sheet.work_date]: prev[sheet.work_date]?.is_not_worked
+                                                                    ? defaultDayState()
+                                                                    : nonWorkedDayState(),
+                                                            }))}
+                                                            className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-semibold"
+                                                        >
+                                                            {isNotWorked ? 'Revenir en mode normal' : 'Non travaillé'}
+                                                        </button>
+                                                    </div>
+
+                                                    {isNotWorked && (
+                                                        <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                            Journée marquée comme non travaillée
+                                                        </p>
+                                                    )}
 
                                                     <div className="mt-4 grid gap-3">
                                                         {TIME_FIELDS.map((field) => (
@@ -735,6 +833,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                                                 <select
                                                                     value={dayState[field.key]}
                                                                     onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
+                                                                    disabled={isNotWorked}
                                                                     className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
                                                                 >
                                                                     <option value="">--:--</option>
@@ -772,6 +871,7 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                                                     key={field.key}
                                                                     type="button"
                                                                     onClick={() => onInlineToggleCheck(sheet.work_date, field.key)}
+                                                                    disabled={isNotWorked}
                                                                     className="flex items-center gap-3 text-left"
                                                                 >
                                                                     <span
@@ -809,6 +909,10 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                         })() : (
                                             <div>
                                                 <p className="font-semibold">Date : {formatHistoryDate(sheet.work_date)}</p>
+                                                {sheet.is_not_worked ? (
+                                                    <p>Statut : Non travaillé</p>
+                                                ) : (
+                                                    <>
                                                 <p>
                                                     Heures : {formatHistoryTime(sheet.morning_start)} - {formatHistoryTime(sheet.morning_end)}
                                                     {' / '}
@@ -825,6 +929,8 @@ export default function HoursIndex({ hourSheets = [], approvedLeaveDays = {}, ca
                                                         sheet.has_long_night ? 'Nuit' : null,
                                                     ].filter(Boolean).join(', ') || 'Aucune'}
                                                 </p>
+                                                    </>
+                                                )}
                                                 {canCreate && (
                                                     <button
                                                         type="button"

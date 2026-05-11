@@ -27,10 +27,13 @@ class HourSheetController extends Controller
 
     public function index(Request $request): Response
     {
-        $userId = (int) $request->user()->id;
+        $user = $request->user();
+        $userId = (int) $user->id;
+        $effectiveStartDate = $this->resolveHoursTrackingStartDate($user);
 
         $hourSheets = HourSheet::query()
             ->where('user_id', $userId)
+            ->whereDate('work_date', '>=', $effectiveStartDate)
             ->orderByDesc('work_date')
             ->get()
             ->map(fn (HourSheet $hourSheet): array => [
@@ -41,6 +44,7 @@ class HourSheetController extends Controller
                 'afternoon_start' => $hourSheet->afternoon_start,
                 'afternoon_end' => $hourSheet->afternoon_end,
                 'total_minutes' => (int) $hourSheet->total_minutes,
+                'is_not_worked' => (bool) $hourSheet->is_not_worked,
                 'has_breakfast_before_5' => (bool) $hourSheet->has_breakfast_before_5,
                 'has_lunch' => (bool) $hourSheet->has_lunch,
                 'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
@@ -53,7 +57,7 @@ class HourSheetController extends Controller
         $canExport = app(AccessManager::class)->can($request->user(), 'heures.export');
         $approvedLeaveDays = $this->approvedLeaveDayService->approvedLeaveMapForUser(
             $userId,
-            config('hours.min_visible_date', '2026-04-27'),
+            $effectiveStartDate,
             now(config('app.timezone', 'Europe/Paris'))->toDateString()
         );
 
@@ -62,6 +66,7 @@ class HourSheetController extends Controller
             'canCreate' => $canCreate,
             'canExport' => $canExport,
             'approvedLeaveDays' => $approvedLeaveDays,
+            'minVisibleDate' => $effectiveStartDate,
         ]);
     }
 
@@ -73,20 +78,34 @@ class HourSheetController extends Controller
             'morning_end' => ['nullable', 'date_format:H:i'],
             'afternoon_start' => ['nullable', 'date_format:H:i'],
             'afternoon_end' => ['nullable', 'date_format:H:i'],
+            'is_not_worked' => ['nullable', 'boolean'],
             'has_breakfast_before_5' => ['nullable', 'boolean'],
             'has_lunch' => ['nullable', 'boolean'],
             'has_dinner_after_21' => ['nullable', 'boolean'],
             'has_long_night' => ['nullable', 'boolean'],
         ]);
+        $effectiveStartDate = $this->resolveHoursTrackingStartDate($request->user());
+        if ($validated['work_date'] < $effectiveStartDate) {
+            throw ValidationException::withMessages([
+                'work_date' => 'Cette journée est antérieure à votre date de début de saisie des heures.',
+            ]);
+        }
 
-        $morningMinutes = $this->computeRangeMinutes(
-            $validated['morning_start'] ?? null,
-            $validated['morning_end'] ?? null,
+        $isNotWorked = (bool) ($validated['is_not_worked'] ?? false);
+
+        $morningStart = $isNotWorked ? null : ($validated['morning_start'] ?? null);
+        $morningEnd = $isNotWorked ? null : ($validated['morning_end'] ?? null);
+        $afternoonStart = $isNotWorked ? null : ($validated['afternoon_start'] ?? null);
+        $afternoonEnd = $isNotWorked ? null : ($validated['afternoon_end'] ?? null);
+
+        $morningMinutes = $isNotWorked ? 0 : $this->computeRangeMinutes(
+            $morningStart,
+            $morningEnd,
             'matin'
         );
-        $afternoonMinutes = $this->computeRangeMinutes(
-            $validated['afternoon_start'] ?? null,
-            $validated['afternoon_end'] ?? null,
+        $afternoonMinutes = $isNotWorked ? 0 : $this->computeRangeMinutes(
+            $afternoonStart,
+            $afternoonEnd,
             'soir'
         );
 
@@ -96,15 +115,16 @@ class HourSheetController extends Controller
                 'work_date' => $validated['work_date'],
             ],
             [
-                'morning_start' => $validated['morning_start'] ?? null,
-                'morning_end' => $validated['morning_end'] ?? null,
-                'afternoon_start' => $validated['afternoon_start'] ?? null,
-                'afternoon_end' => $validated['afternoon_end'] ?? null,
+                'morning_start' => $morningStart,
+                'morning_end' => $morningEnd,
+                'afternoon_start' => $afternoonStart,
+                'afternoon_end' => $afternoonEnd,
                 'total_minutes' => $morningMinutes + $afternoonMinutes,
-                'has_breakfast_before_5' => (bool) ($validated['has_breakfast_before_5'] ?? false),
-                'has_lunch' => (bool) ($validated['has_lunch'] ?? false),
-                'has_dinner_after_21' => (bool) ($validated['has_dinner_after_21'] ?? false),
-                'has_long_night' => (bool) ($validated['has_long_night'] ?? false),
+                'is_not_worked' => $isNotWorked,
+                'has_breakfast_before_5' => $isNotWorked ? false : (bool) ($validated['has_breakfast_before_5'] ?? false),
+                'has_lunch' => $isNotWorked ? false : (bool) ($validated['has_lunch'] ?? false),
+                'has_dinner_after_21' => $isNotWorked ? false : (bool) ($validated['has_dinner_after_21'] ?? false),
+                'has_long_night' => $isNotWorked ? false : (bool) ($validated['has_long_night'] ?? false),
             ]
         );
 
@@ -226,6 +246,23 @@ class HourSheetController extends Controller
                 if (isset($rowsByDate[$dateKey])) {
                     $sheet = $rowsByDate[$dateKey];
                     $date = $sheet->work_date;
+                    if ((bool) $sheet->is_not_worked) {
+                        $writer->addRow(Row::fromValues([
+                            $date?->format('d/m/Y'),
+                            $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
+                            'Non travaillé',
+                            '',
+                            '',
+                            '',
+                            '',
+                            '',
+                            '',
+                            '',
+                            '',
+                        ]));
+                        continue;
+                    }
+
                     $writer->addRow(Row::fromValues([
                         $date?->format('d/m/Y'),
                         $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
@@ -372,5 +409,14 @@ class HourSheetController extends Controller
         }
 
         return rtrim(mb_substr($clean, 0, 31));
+    }
+
+    private function resolveHoursTrackingStartDate(User $user): string
+    {
+        if ($user->hours_tracking_starts_at) {
+            return $user->hours_tracking_starts_at->toDateString();
+        }
+
+        return (string) config('hours.min_visible_date', '2026-04-27');
     }
 }

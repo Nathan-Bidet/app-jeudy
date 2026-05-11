@@ -80,6 +80,13 @@ class HandleInertiaRequests extends Middleware
 
                 $today = now(config('app.timezone', 'Europe/Paris'))->toDateString();
                 $yesterday = now(config('app.timezone', 'Europe/Paris'))->subDay()->toDateString();
+                $trackingStartDate = $user->hours_tracking_starts_at?->toDateString()
+                    ?? (string) config('hours.min_visible_date', '2026-04-27');
+                if ($yesterday < $trackingStartDate) {
+                    return [
+                        'show' => false,
+                    ];
+                }
 
                 $approvedLeaveDayService = app(ApprovedLeaveDayService::class);
                 if ($approvedLeaveDayService->isUserOnApprovedLeaveForDate((int) $user->id, $yesterday)) {
