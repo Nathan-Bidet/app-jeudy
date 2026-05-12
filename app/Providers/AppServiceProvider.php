@@ -164,5 +164,47 @@ class AppServiceProvider extends ServiceProvider
                 ($request->user()?->id ?? 'guest').'|'.$request->ip()
             );
         });
+
+        RateLimiter::for('hours-export', function (Request $request) {
+            return Limit::perMinute(10)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
+        RateLimiter::for('calendar-export', function (Request $request) {
+            return Limit::perMinute(10)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
+        RateLimiter::for('leave-actions', function (Request $request) {
+            return Limit::perMinute(30)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
+        RateLimiter::for('hours-actions', function (Request $request) {
+            return Limit::perMinute(30)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
+        RateLimiter::for('calendar-actions', function (Request $request) {
+            return Limit::perMinute(30)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
+        RateLimiter::for('file-uploads', function (Request $request) {
+            return Limit::perMinute(20)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
+        RateLimiter::for('admin-sensitive', function (Request $request) {
+            return Limit::perMinute(20)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
     }
 }

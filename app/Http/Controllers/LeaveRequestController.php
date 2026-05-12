@@ -14,6 +14,7 @@ use App\Notifications\LeaveRequestModificationProposedNotification;
 use App\Notifications\LeaveRequestModificationRefusedNotification;
 use App\Notifications\LeaveRequestRefusedNotification;
 use App\Notifications\LeaveRequestSubmittedNotification;
+use App\Services\AuditLogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -24,6 +25,11 @@ use Inertia\Response;
 
 class LeaveRequestController extends Controller
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {
+    }
+
     public function index(Request $request): Response
     {
         $user = $request->user();
@@ -327,6 +333,22 @@ class LeaveRequestController extends Controller
             if ($validator) {
                 $validator->notify(new LeaveRequestSubmittedNotification($leaveRequest, $requesterLabel));
             }
+
+            $this->auditLogService->log([
+                'action' => 'create_leave_request',
+                'module' => 'leaves',
+                'description' => sprintf(
+                    '%s a demandé un congé du %s au %s',
+                    $this->userLabel($requester),
+                    $leaveRequest->start_at?->toDateString() ?? '',
+                    $leaveRequest->end_at?->toDateString() ?? ''
+                ),
+                'payload' => [
+                    'leave_request_id' => (int) $leaveRequest->id,
+                    'before' => null,
+                    'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
+                ],
+            ]);
         }
 
         return back()->with('success', count($normalizedPeriods) > 1
@@ -366,6 +388,7 @@ class LeaveRequestController extends Controller
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         abort_unless($this->canValidateLeaveRequest($request, $leaveRequest), 403);
+        $before = $this->leaveRequestAuditSnapshot($leaveRequest);
         $leaveRequest->status = LeaveRequest::STATUS_APPROVED;
         $leaveRequest->save();
 
@@ -373,6 +396,21 @@ class LeaveRequestController extends Controller
         if ($requester) {
             $requester->notify(new LeaveRequestApprovedNotification($leaveRequest));
         }
+
+        $this->auditLogService->log([
+            'action' => 'approve_leave_request',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a accepté le congé de %s',
+                $this->userLabel($request->user()),
+                $this->userLabel($leaveRequest->target)
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
+            ],
+        ]);
 
         return back()->with('success', 'Demande de congé approuvée.');
     }
@@ -388,6 +426,7 @@ class LeaveRequestController extends Controller
         );
 
         abort_unless($canPropose, 403);
+        $before = $this->leaveRequestAuditSnapshot($leaveRequest);
 
         $validated = $request->validate([
             'proposed_start_at' => ['required', 'date'],
@@ -415,6 +454,21 @@ class LeaveRequestController extends Controller
             $requester->notify(new LeaveRequestModificationProposedNotification($leaveRequest));
         }
 
+        $this->auditLogService->log([
+            'action' => 'propose_leave_modification',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a proposé une modification du congé de %s',
+                $this->userLabel($user),
+                $this->userLabel($leaveRequest->target)
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
+            ],
+        ]);
+
         return back()->with('success', 'Contre-proposition de congé enregistrée.');
     }
 
@@ -422,6 +476,7 @@ class LeaveRequestController extends Controller
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         $user = $request->user();
+        $before = $this->leaveRequestAuditSnapshot($leaveRequest);
 
         abort_unless((int) $leaveRequest->requester_user_id === (int) $user?->id, 403);
         abort_unless($leaveRequest->status === LeaveRequest::STATUS_PENDING_USER_CONFIRMATION, 422);
@@ -457,6 +512,36 @@ class LeaveRequestController extends Controller
             $validator->notify(new LeaveRequestModificationAcceptedNotification($leaveRequest, $acceptedStartAt, $acceptedEndAt));
         }
 
+        $after = $this->leaveRequestAuditSnapshot($leaveRequest);
+        $this->auditLogService->log([
+            'action' => 'update_leave_request',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a modifié sa demande de congé du %s au %s',
+                $this->userLabel($user),
+                $leaveRequest->start_at?->toDateString() ?? '',
+                $leaveRequest->end_at?->toDateString() ?? ''
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => $after,
+            ],
+        ]);
+        $this->auditLogService->log([
+            'action' => 'accept_leave_modification',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a accepté la modification proposée pour son congé',
+                $this->userLabel($user)
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => $after,
+            ],
+        ]);
+
         return back()->with('success', 'Modification de période acceptée.');
     }
 
@@ -464,6 +549,7 @@ class LeaveRequestController extends Controller
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         $user = $request->user();
+        $before = $this->leaveRequestAuditSnapshot($leaveRequest);
 
         abort_unless((int) $leaveRequest->requester_user_id === (int) $user?->id, 403);
         abort_unless($leaveRequest->status === LeaveRequest::STATUS_PENDING_USER_CONFIRMATION, 422);
@@ -486,6 +572,20 @@ class LeaveRequestController extends Controller
             $validator->notify(new LeaveRequestModificationRefusedNotification($leaveRequest, $proposedStartAt, $proposedEndAt));
         }
 
+        $this->auditLogService->log([
+            'action' => 'refuse_leave_modification',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a refusé la modification proposée pour son congé',
+                $this->userLabel($user)
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
+            ],
+        ]);
+
         return back()->with('success', 'Modification de période refusée.');
     }
 
@@ -493,6 +593,7 @@ class LeaveRequestController extends Controller
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         abort_unless($this->canValidateLeaveRequest($request, $leaveRequest), 403);
+        $before = $this->leaveRequestAuditSnapshot($leaveRequest);
         $leaveRequest->status = LeaveRequest::STATUS_REFUSED;
         $leaveRequest->save();
 
@@ -500,6 +601,21 @@ class LeaveRequestController extends Controller
         if ($requester) {
             $requester->notify(new LeaveRequestRefusedNotification($leaveRequest));
         }
+
+        $this->auditLogService->log([
+            'action' => 'refuse_leave_request',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a refusé le congé de %s',
+                $this->userLabel($request->user()),
+                $this->userLabel($leaveRequest->target)
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
+            ],
+        ]);
 
         return back()->with('success', 'Demande de congé refusée.');
     }
@@ -509,7 +625,23 @@ class LeaveRequestController extends Controller
         abort_unless((bool) $request->user()?->hasRole('admin'), 403);
 
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
+        $before = $this->leaveRequestAuditSnapshot($leaveRequest);
         $leaveRequest->delete();
+
+        $this->auditLogService->log([
+            'action' => 'cancel_leave_request',
+            'module' => 'leaves',
+            'description' => sprintf(
+                '%s a annulé la demande de congé de %s',
+                $this->userLabel($request->user()),
+                $this->userLabel($leaveRequest->target)
+            ),
+            'payload' => [
+                'leave_request_id' => (int) $leaveRequest->id,
+                'before' => $before,
+                'after' => null,
+            ],
+        ]);
 
         return back()->with('success', 'Demande de congé supprimée.');
     }
@@ -524,5 +656,61 @@ class LeaveRequestController extends Controller
 
         return (bool) $user->hasRole('admin')
             || (int) $leaveRequest->validator_user_id === (int) $user->id;
+    }
+
+    private function userLabel(?User $user): string
+    {
+        if (! $user) {
+            return 'Utilisateur';
+        }
+
+        $fullName = trim((string) (($user->first_name ?? '').' '.($user->last_name ?? '')));
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        return (string) ($user->name ?: $user->email ?: 'Utilisateur');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function leaveRequestAuditSnapshot(LeaveRequest $leaveRequest): array
+    {
+        $leaveType = $leaveRequest->leave_type_id
+            ? LeaveType::query()->find((int) $leaveRequest->leave_type_id)
+            : null;
+
+        return [
+            'leave_request_id' => (int) $leaveRequest->id,
+            'requester_user_id' => (int) $leaveRequest->requester_user_id,
+            'requester_label' => $this->userLabel($leaveRequest->requester),
+            'target_user_id' => (int) $leaveRequest->target_user_id,
+            'target_user_label' => $this->userLabel($leaveRequest->target),
+            'validator_user_id' => $leaveRequest->validator_user_id ? (int) $leaveRequest->validator_user_id : null,
+            'validator_label' => $this->userLabel($leaveRequest->validator),
+            'leave_type_id' => $leaveRequest->leave_type_id ? (int) $leaveRequest->leave_type_id : null,
+            'leave_type_label' => $leaveType?->name,
+            'period' => [
+                'start_at' => $leaveRequest->start_at?->toDateString(),
+                'end_at' => $leaveRequest->end_at?->toDateString(),
+                'start_portion' => $leaveRequest->start_portion,
+                'end_portion' => $leaveRequest->end_portion,
+                'custom_start_time' => $leaveRequest->custom_start_time,
+                'custom_end_time' => $leaveRequest->custom_end_time,
+                'is_all_day' => (bool) $leaveRequest->is_all_day,
+            ],
+            'proposed_period' => [
+                'start_at' => $leaveRequest->proposed_start_at?->toDateString(),
+                'end_at' => $leaveRequest->proposed_end_at?->toDateString(),
+                'start_portion' => $leaveRequest->proposed_start_portion,
+                'end_portion' => $leaveRequest->proposed_end_portion,
+                'custom_start_time' => $leaveRequest->proposed_custom_start_time,
+                'custom_end_time' => $leaveRequest->proposed_custom_end_time,
+            ],
+            'status' => $leaveRequest->status,
+            'message' => $leaveRequest->message,
+            'proposed_message' => $leaveRequest->proposed_message,
+        ];
     }
 }

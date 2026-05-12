@@ -11,6 +11,7 @@ use App\Models\LeaveAllowedCreatorPair;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\User;
+use App\Services\AuditLogService;
 use App\Services\Calendar\CalendarFeedImportService;
 use App\Support\Access\AccessManager;
 use Carbon\CarbonInterface;
@@ -25,7 +26,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class CalendarController extends Controller
 {
     public function __construct(
-        private readonly CalendarFeedImportService $calendarFeedImportService
+        private readonly CalendarFeedImportService $calendarFeedImportService,
+        private readonly AuditLogService $auditLogService,
     ) {
     }
 
@@ -414,6 +416,20 @@ class CalendarController extends Controller
 
         $fileName = sprintf('conges_%s.csv', $anchorDate->format('Y-m'));
 
+        $actorLabel = $this->actorLabel($request->user());
+        $this->auditLogService->log([
+            'action' => 'export_leaves',
+            'module' => 'leaves',
+            'description' => sprintf('%s a exporté les congés du mois %s', $actorLabel, $anchorDate->format('Y-m')),
+            'payload' => [
+                'format' => 'csv',
+                'file_name' => $fileName,
+                'month' => $anchorDate->format('Y-m'),
+                'date_filter' => (string) $validated['date'],
+                'rows_count' => count($rows),
+            ],
+        ]);
+
         return response()->streamDownload(function () use ($rows): void {
             $handle = fopen('php://output', 'wb');
             if ($handle === false) {
@@ -433,7 +449,10 @@ class CalendarController extends Controller
             ], ';');
 
             foreach ($rows as $row) {
-                fputcsv($handle, $row, ';');
+                fputcsv($handle, array_map(
+                    fn ($value): string => $this->sanitizeCsvCell((string) $value),
+                    $row
+                ), ';');
             }
 
             fclose($handle);
@@ -479,5 +498,35 @@ class CalendarController extends Controller
             'start' => $start->toDateTimeString(),
             'end' => $end->toDateTimeString(),
         ];
+    }
+
+    private function sanitizeCsvCell(string $value): string
+    {
+        $trimmed = ltrim($value);
+        if ($trimmed === '') {
+            return $value;
+        }
+
+        $firstChar = mb_substr($trimmed, 0, 1);
+        if (in_array($firstChar, ['=', '+', '-', '@'], true)) {
+            return "'".$value;
+        }
+
+        return $value;
+    }
+
+    private function actorLabel(?User $user): string
+    {
+        $firstName = trim((string) ($user?->first_name ?? ''));
+        $lastName = trim((string) ($user?->last_name ?? ''));
+        $fullName = trim($firstName.' '.$lastName);
+
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        $fallback = trim((string) ($user?->name ?? ''));
+
+        return $fallback !== '' ? $fallback : 'Utilisateur';
     }
 }

@@ -25,6 +25,7 @@ class UserFileController extends Controller
                 'file',
                 'max:20480',
                 'mimes:pdf,jpg,jpeg,png,gif,webp,doc,docx,xls,xlsx,csv',
+                'mimetypes:application/pdf,image/jpeg,image/png,image/gif,image/webp,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain',
             ],
         ]);
 
@@ -64,17 +65,23 @@ class UserFileController extends Controller
 
         abort_unless(Storage::disk($userFile->disk)->exists($userFile->path), HttpResponse::HTTP_NOT_FOUND);
 
-        $headers = [];
+        $headers = [
+            'X-Content-Type-Options' => 'nosniff',
+        ];
 
         if ($userFile->mime_type) {
             $headers['Content-Type'] = $userFile->mime_type;
         }
 
+        $disposition = $this->isInlinePreviewAllowed($userFile->mime_type, $userFile->extension)
+            ? 'inline'
+            : 'attachment';
+
         return Storage::disk($userFile->disk)->response(
             $userFile->path,
-            $userFile->display_name ?: $userFile->original_name,
+            $this->safeDownloadName($userFile->display_name ?: $userFile->original_name),
             $headers,
-            'inline'
+            $disposition
         );
     }
 
@@ -85,7 +92,8 @@ class UserFileController extends Controller
 
         return Storage::disk($userFile->disk)->download(
             $userFile->path,
-            $userFile->display_name ?: $userFile->original_name
+            $this->safeDownloadName($userFile->display_name ?: $userFile->original_name),
+            ['X-Content-Type-Options' => 'nosniff']
         );
     }
 
@@ -146,6 +154,39 @@ class UserFileController extends Controller
         $trimmed = trim((string) $value);
 
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function isInlinePreviewAllowed(?string $mimeType, ?string $extension): bool
+    {
+        $safeMimes = [
+            'application/pdf',
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'image/gif',
+        ];
+
+        $safeExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif'];
+
+        $normalizedMime = strtolower(trim((string) ($mimeType ?? '')));
+        $normalizedExt = strtolower(trim((string) ($extension ?? '')));
+
+        return in_array($normalizedMime, $safeMimes, true)
+            && in_array($normalizedExt, $safeExtensions, true);
+    }
+
+    private function safeDownloadName(?string $name): string
+    {
+        $candidate = trim((string) ($name ?? ''));
+        if ($candidate === '') {
+            return 'fichier';
+        }
+
+        $candidate = str_replace(["\r", "\n"], ' ', $candidate);
+        $candidate = preg_replace('/[^\pL\pN\.\-\_\(\) ]/u', '_', $candidate) ?? 'fichier';
+        $candidate = trim(preg_replace('/\s+/u', ' ', $candidate) ?? 'fichier');
+
+        return $candidate !== '' ? $candidate : 'fichier';
     }
 
     private function writeAudit(Request $request, string $action, array $metadata = []): void

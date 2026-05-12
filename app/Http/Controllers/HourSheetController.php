@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\HourSheet;
 use App\Models\LeaveRequest;
 use App\Models\User;
+use App\Services\AuditLogService;
 use App\Services\Hours\ApprovedLeaveDayService;
 use App\Support\Access\AccessManager;
 use Carbon\CarbonImmutable;
@@ -21,7 +22,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class HourSheetController extends Controller
 {
     public function __construct(
-        private readonly ApprovedLeaveDayService $approvedLeaveDayService
+        private readonly ApprovedLeaveDayService $approvedLeaveDayService,
+        private readonly AuditLogService $auditLogService,
     ) {
     }
 
@@ -91,6 +93,15 @@ class HourSheetController extends Controller
             ]);
         }
 
+        $targetUserId = (int) $request->user()->id;
+        $actorLabel = trim((string) (($request->user()->first_name ?? '').' '.($request->user()->last_name ?? '')))
+            ?: ((string) ($request->user()->name ?? 'Utilisateur'));
+        $existingHourSheet = HourSheet::query()
+            ->where('user_id', $targetUserId)
+            ->whereDate('work_date', $validated['work_date'])
+            ->first();
+        $beforeSnapshot = $existingHourSheet ? $this->hourSheetAuditSnapshot($existingHourSheet) : null;
+
         $isNotWorked = (bool) ($validated['is_not_worked'] ?? false);
 
         $morningStart = $isNotWorked ? null : ($validated['morning_start'] ?? null);
@@ -109,9 +120,9 @@ class HourSheetController extends Controller
             'soir'
         );
 
-        HourSheet::query()->updateOrCreate(
+        $savedHourSheet = HourSheet::query()->updateOrCreate(
             [
-                'user_id' => (int) $request->user()->id,
+                'user_id' => $targetUserId,
                 'work_date' => $validated['work_date'],
             ],
             [
@@ -127,6 +138,27 @@ class HourSheetController extends Controller
                 'has_long_night' => $isNotWorked ? false : (bool) ($validated['has_long_night'] ?? false),
             ]
         );
+
+        $action = $isNotWorked
+            ? 'mark_not_worked_day'
+            : ($existingHourSheet ? 'update_hours_day' : 'create_hours_day');
+
+        $this->auditLogService->log([
+            'action' => $action,
+            'module' => 'heures',
+            'description' => $isNotWorked
+                ? sprintf('%s a marqué le %s comme non travaillé', $actorLabel, (string) $validated['work_date'])
+                : ($existingHourSheet
+                    ? sprintf('%s a modifié ses heures du %s', $actorLabel, (string) $validated['work_date'])
+                    : sprintf('%s a créé des heures pour le %s', $actorLabel, (string) $validated['work_date'])),
+            'payload' => [
+                'work_date' => (string) $validated['work_date'],
+                'target_user_id' => $targetUserId,
+                'is_not_worked' => $isNotWorked,
+                'before' => $beforeSnapshot,
+                'after' => $this->hourSheetAuditSnapshot($savedHourSheet),
+            ],
+        ]);
 
         return redirect()->route('hours.index')->with('success', 'Journée enregistrée avec succès.');
     }
@@ -318,6 +350,26 @@ class HourSheetController extends Controller
         }
 
         $writer->close();
+        $actorLabel = trim((string) (($request->user()?->first_name ?? '').' '.($request->user()?->last_name ?? '')))
+            ?: ((string) ($request->user()?->name ?? 'Utilisateur'));
+
+        $this->auditLogService->log([
+            'action' => 'export_hours',
+            'module' => 'heures',
+            'description' => sprintf(
+                '%s a exporté les heures du %s au %s',
+                $actorLabel,
+                (string) $validated['start_date'],
+                (string) $validated['end_date']
+            ),
+            'payload' => [
+                'format' => 'xlsx',
+                'start_date' => (string) $validated['start_date'],
+                'end_date' => (string) $validated['end_date'],
+                'target_user_scope' => 'all_users_with_data_or_approved_leave_in_period',
+                'target_user_ids' => $exportUserIds,
+            ],
+        ]);
 
         return response()->download($filePath, $downloadName)->deleteFileAfterSend(true);
     }
@@ -418,5 +470,27 @@ class HourSheetController extends Controller
         }
 
         return (string) config('hours.min_visible_date', '2026-04-27');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function hourSheetAuditSnapshot(HourSheet $hourSheet): array
+    {
+        return [
+            'id' => (int) $hourSheet->id,
+            'user_id' => (int) $hourSheet->user_id,
+            'work_date' => $hourSheet->work_date?->toDateString(),
+            'morning_start' => $hourSheet->morning_start,
+            'morning_end' => $hourSheet->morning_end,
+            'afternoon_start' => $hourSheet->afternoon_start,
+            'afternoon_end' => $hourSheet->afternoon_end,
+            'total_minutes' => (int) $hourSheet->total_minutes,
+            'is_not_worked' => (bool) $hourSheet->is_not_worked,
+            'has_breakfast_before_5' => (bool) $hourSheet->has_breakfast_before_5,
+            'has_lunch' => (bool) $hourSheet->has_lunch,
+            'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
+            'has_long_night' => (bool) $hourSheet->has_long_night,
+        ];
     }
 }
