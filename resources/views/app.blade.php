@@ -8,7 +8,7 @@
         <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('Logo_APP.PNG') }}?v=20260303b">
         <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('Logo_APP.PNG') }}?v=20260303b">
         <link rel="icon" sizes="any" href="{{ asset('favicon.ico') }}?v=20260303b">
-        <link rel="apple-touch-icon" href="{{ asset('Logo_APP.PNG') }}?v=20260303b">
+        <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('pwa-192.png') }}?v=20260512a">
         <link rel="shortcut icon" href="{{ asset('favicon.ico') }}?v=20260303b">
         <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
         <meta name="theme-color" content="#F1BF0C">

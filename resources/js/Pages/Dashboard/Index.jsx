@@ -9,10 +9,12 @@ export default function DashboardIndex({ dashboard, viewer }) {
         <AppLayout title="Dashboard">
             <Head title="Dashboard" />
 
-            <div className="space-y-6">
-                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="w-full min-w-0 max-w-full space-y-6">
+                <section className="grid w-full min-w-0 max-w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {widgets.map((widget) => (
-                        <WidgetCard key={widget.key} widget={widget} />
+                        <div key={widget.key} className="w-full min-w-0 max-w-full overflow-hidden box-border">
+                            <WidgetCard widget={widget} />
+                        </div>
                     ))}
                 </section>
             </div>

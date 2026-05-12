@@ -1,12 +1,14 @@
-const SW_VERSION = 'jeudy-pwa-v1';
+const SW_VERSION = 'jeudy-pwa-v2';
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 const STATIC_CACHE = `${SW_VERSION}-static`;
+const PAGES_CACHE = `${SW_VERSION}-pages`;
 const OFFLINE_URL = '/offline.html';
 const SHELL_FILES = [
   OFFLINE_URL,
   '/manifest.webmanifest',
   '/pwa-192.png',
   '/pwa-512.png',
+  '/pwa-maskable-512.png',
   '/favicon.ico'
 ];
 
@@ -22,7 +24,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => ![SHELL_CACHE, STATIC_CACHE].includes(key))
+          .filter((key) => ![SHELL_CACHE, STATIC_CACHE, PAGES_CACHE].includes(key))
           .map((key) => caches.delete(key))
       )
     )
@@ -32,6 +34,8 @@ self.addEventListener('activate', (event) => {
 
 function isSensitivePath(pathname) {
   return pathname.startsWith('/notifications')
+    || pathname.startsWith('/api')
+    || pathname.startsWith('/broadcasting')
     || pathname.startsWith('/activities/hours/export')
     || pathname.startsWith('/calendar/leaves/export')
     || pathname.startsWith('/two-factor')
@@ -59,10 +63,24 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(async () => {
-        const cache = await caches.open(SHELL_CACHE);
-        return cache.match(OFFLINE_URL);
-      })
+      (async () => {
+        try {
+          const response = await fetch(request);
+          if (response && response.ok) {
+            const pagesCache = await caches.open(PAGES_CACHE);
+            pagesCache.put(request, response.clone());
+          }
+          return response;
+        } catch (error) {
+          const pagesCache = await caches.open(PAGES_CACHE);
+          const cachedPage = await pagesCache.match(request);
+          if (cachedPage) {
+            return cachedPage;
+          }
+          const shellCache = await caches.open(SHELL_CACHE);
+          return shellCache.match(OFFLINE_URL);
+        }
+      })()
     );
     return;
   }

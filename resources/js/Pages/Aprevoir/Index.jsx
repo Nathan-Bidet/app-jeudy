@@ -1476,7 +1476,7 @@ export default function AprevoirIndex({
         <AppLayout title="À Prévoir" header={pageHeader}>
             <Head title="À Prévoir" />
 
-            <div className="space-y-4 -mx-2.5 px-0.5 sm:mx-0 sm:px-0 sm:space-y-5">
+            <div className="w-full max-w-full space-y-4 px-0 sm:space-y-5">
                 <DesktopTable
                     groups={localGroups}
                     depotPlaceMap={reference?.depot_place_map || {}}

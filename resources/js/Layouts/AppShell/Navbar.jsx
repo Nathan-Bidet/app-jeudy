@@ -1157,7 +1157,7 @@ function MobileBottomModules({ modules, openKey, onToggleKey, onClose }) {
                 </Transition>
             ) : null}
 
-            <div className="app-mobile-bottom-nav fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.4rem)] z-40 md:hidden">
+            <div className="app-mobile-bottom-nav fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+18px)] z-40 md:hidden">
                 <div className="mx-auto flex max-w-[640px] items-center justify-between rounded-[22px] border border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-dark)]/70 px-2 py-1 shadow-lg shadow-[var(--brand-yellow-dark)]/20 backdrop-blur">
                     {modules.slice(0, 2).map((module) => {
                         const Icon = module.icon;

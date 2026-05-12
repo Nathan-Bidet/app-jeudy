@@ -80,7 +80,7 @@ export default function AppLayout({ title, header, children }) {
     };
 
     return (
-        <div className="app-shell min-h-screen bg-[var(--app-bg)] text-[var(--app-text)]">
+        <div className="app-shell min-h-screen overflow-x-clip bg-[var(--app-bg)] text-[var(--app-text)]">
             <Navbar
                 user={user}
                 isAdmin={isAdmin}
@@ -96,9 +96,9 @@ export default function AppLayout({ title, header, children }) {
                     <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
                 ) : null}
 
-                <main className="flex-1 pb-24 md:pb-0">
+                <main className="min-w-0 flex-1 pb-24 md:pb-0">
                     <div
-                        className={`mx-auto w-full ${
+                        className={`mx-auto w-full min-w-0 ${
                             isTaskDataSection
                                 ? 'max-w-none px-0 py-3 sm:px-1 sm:py-5 lg:px-2'
                                 : isCalendarSection
@@ -159,4 +159,3 @@ export default function AppLayout({ title, header, children }) {
         </div>
     );
 }
-

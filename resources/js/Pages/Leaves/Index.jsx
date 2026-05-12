@@ -247,17 +247,17 @@ export default function LeavesIndex({
                                                     <span className="font-semibold">{proposedMessageLabel(request)} :</span> {request.proposed_message}
                                                 </p>
                                             ) : null}
-                                            <div className="mt-3 flex gap-2">
+                                            <div className="mt-3 flex flex-wrap gap-2">
                                                 <button
                                                     type="button"
-                                                    className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                     onClick={() => postAcceptModification(request.id)}
                                                 >
                                                     Accepter la modification
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                     onClick={() => postRefuseModification(request.id)}
                                                 >
                                                     Refuser la modification
@@ -326,24 +326,24 @@ export default function LeavesIndex({
                                                 ) : null}
                                             </div>
                                         ) : null}
-                                        <div className="mt-3 flex gap-2">
+                                        <div className="mt-3 flex flex-wrap gap-2">
                                             <button
                                                 type="button"
-                                                className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                                className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                 onClick={() => postApprove(request.id)}
                                             >
                                                 Approuver
                                             </button>
                                             <button
                                                 type="button"
-                                                className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                                className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                 onClick={() => postRefuse(request.id)}
                                             >
                                                 Refuser
                                             </button>
                                             <button
                                                 type="button"
-                                                className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                                className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                 onClick={() => toggleModificationForm(request)}
                                             >
                                                 Modifier la période
@@ -351,7 +351,7 @@ export default function LeavesIndex({
                                             {canDeleteLeaveRequests ? (
                                                 <button
                                                     type="button"
-                                                    className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                     onClick={() => deleteRequest(request.id)}
                                                 >
                                                     Supprimer

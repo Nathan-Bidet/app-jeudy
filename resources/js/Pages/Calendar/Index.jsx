@@ -2012,7 +2012,7 @@ export default function CalendarIndex({
         <AppLayout title="Calendrier" header={header}>
             <Head title="Calendrier" />
 
-            <section className="relative overflow-visible rounded-2xl bg-[var(--app-surface)] shadow-sm [clip-path:inset(0_round_1rem)]">
+            <section className="relative w-full max-w-full overflow-x-clip overflow-y-visible rounded-2xl bg-[var(--app-surface)] shadow-sm [clip-path:inset(0_round_1rem)]">
                 <div className="pointer-events-none absolute inset-0 z-30 rounded-2xl border-2 border-[var(--app-border)]" />
                 <div
                     ref={weekToolbarRef}
@@ -2159,7 +2159,7 @@ export default function CalendarIndex({
             {eventDetailPopover.open ? (
                 <div
                     ref={eventDetailPopoverRef}
-                    className="fixed z-[60] overflow-visible rounded-2xl border border-[color:rgba(196,182,164,0.75)] bg-[color:rgba(255,255,255,0.86)] shadow-[0_24px_56px_-20px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    className="fixed z-[60] max-w-[calc(100vw-1rem)] overflow-visible rounded-2xl border border-[color:rgba(196,182,164,0.75)] bg-[color:rgba(255,255,255,0.86)] shadow-[0_24px_56px_-20px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                     style={{
                         top: eventDetailPopoverLayout.top,
                         left: eventDetailPopoverLayout.left,

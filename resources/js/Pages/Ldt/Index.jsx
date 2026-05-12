@@ -562,7 +562,7 @@ export default function LdtIndex({
         <AppLayout title="Livre Du Travail" header={pageHeader}>
             <Head title="Livre du Travail" />
 
-            <div className="ldt-page relative left-1/2 w-screen -translate-x-1/2 space-y-4 px-0 pb-20 pt-2 sm:static sm:left-auto sm:w-full sm:translate-x-0 sm:pt-3 lg:mx-auto lg:max-w-[1460px] lg:pb-8">
+            <div className="ldt-page w-full max-w-full space-y-4 px-0 pb-20 pt-2 sm:pt-3 lg:mx-auto lg:max-w-[1460px] lg:pb-8">
                 {groups.length === 0 ? (
                     <section className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
                         Aucune entrée LDT pour les filtres sélectionnés.
