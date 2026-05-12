@@ -118,13 +118,39 @@ class UserManagementController extends Controller
 
         $user->syncRoles([$validated['role']]);
 
+        $actorLabel = $this->actorLabel($request);
+        $targetLabel = $this->userLabel($user);
+        $this->auditLogService->log([
+            'action' => 'create_user',
+            'module' => 'admin',
+            'description' => sprintf('%s a créé l’utilisateur %s', $actorLabel, $targetLabel),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_email' => (string) $user->email,
+                'target_user_name' => $targetLabel,
+                'role' => (string) $validated['role'],
+                'sector_id' => (int) $validated['sector_id'],
+            ],
+        ]);
+        $this->auditLogService->log([
+            'action' => 'assign_role',
+            'module' => 'admin',
+            'description' => sprintf('%s a attribué le rôle %s à %s', $actorLabel, (string) $validated['role'], $targetLabel),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $targetLabel,
+                'role' => (string) $validated['role'],
+            ],
+        ]);
+
         return back()->with('status', 'User created.');
     }
 
     public function update(Request $request, User $user): RedirectResponse
     {
+        $beforeRole = $user->roles->pluck('name')->first();
         $before = [
-            'role' => $user->roles->pluck('name')->first(),
+            'role' => $beforeRole,
             'sector_id' => $user->sector_id,
         ];
 
@@ -138,13 +164,20 @@ class UserManagementController extends Controller
         ])->save();
 
         $user->syncRoles([$validated['role']]);
+        $afterRole = (string) $validated['role'];
 
         $this->auditLogService->log([
             'action' => 'update_user',
             'module' => 'admin',
-            'description' => 'Mise a jour role/secteur utilisateur',
+            'description' => sprintf(
+                '%s a modifié le rôle/secteur de %s',
+                $this->actorLabel($request),
+                $this->userLabel($user)
+            ),
             'payload' => [
                 'user_id' => $user->id,
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->userLabel($user),
                 'before' => $before,
                 'after' => [
                     'role' => $validated['role'],
@@ -152,6 +185,42 @@ class UserManagementController extends Controller
                 ],
             ],
         ]);
+
+        if ($beforeRole !== $afterRole) {
+            if (filled($beforeRole)) {
+                $this->auditLogService->log([
+                    'action' => 'revoke_role',
+                    'module' => 'admin',
+                    'description' => sprintf(
+                        '%s a retiré le rôle %s à %s',
+                        $this->actorLabel($request),
+                        (string) $beforeRole,
+                        $this->userLabel($user)
+                    ),
+                    'payload' => [
+                        'target_user_id' => (int) $user->id,
+                        'target_user_name' => $this->userLabel($user),
+                        'role' => (string) $beforeRole,
+                    ],
+                ]);
+            }
+
+            $this->auditLogService->log([
+                'action' => 'assign_role',
+                'module' => 'admin',
+                'description' => sprintf(
+                    '%s a attribué le rôle %s à %s',
+                    $this->actorLabel($request),
+                    $afterRole,
+                    $this->userLabel($user)
+                ),
+                'payload' => [
+                    'target_user_id' => (int) $user->id,
+                    'target_user_name' => $this->userLabel($user),
+                    'role' => $afterRole,
+                ],
+            ]);
+        }
 
         return back()->with('status', 'User access scope updated.');
     }
@@ -196,9 +265,15 @@ class UserManagementController extends Controller
         $this->auditLogService->log([
             'action' => 'update_user',
             'module' => 'admin',
-            'description' => 'Mise a jour compte utilisateur',
+            'description' => sprintf(
+                '%s a modifié le compte de %s',
+                $this->actorLabel($request),
+                $this->userLabel($user)
+            ),
             'payload' => [
                 'user_id' => $user->id,
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->userLabel($user),
                 'before' => $before,
                 'after' => [
                     'first_name' => $user->first_name,
@@ -209,6 +284,23 @@ class UserManagementController extends Controller
                 ],
             ],
         ]);
+
+        if (! empty($validated['password'])) {
+            $this->auditLogService->log([
+                'action' => 'reset_user_password_admin',
+                'module' => 'admin',
+                'description' => sprintf(
+                    '%s a réinitialisé le mot de passe de %s',
+                    $this->actorLabel($request),
+                    $this->userLabel($user)
+                ),
+                'payload' => [
+                    'target_user_id' => (int) $user->id,
+                    'target_user_name' => $this->userLabel($user),
+                    'password_changed' => true,
+                ],
+            ]);
+        }
 
         return back()->with('status', 'User account updated.');
     }
@@ -221,8 +313,41 @@ class UserManagementController extends Controller
             ]);
         }
 
+        $targetLabel = $this->userLabel($user);
+        $rolesBeforeDelete = $user->roles()->pluck('name')->values()->all();
+
         $user->syncRoles([]);
         $user->delete();
+
+        foreach ($rolesBeforeDelete as $roleName) {
+            $this->auditLogService->log([
+                'action' => 'revoke_role',
+                'module' => 'admin',
+                'description' => sprintf(
+                    '%s a retiré le rôle %s à %s',
+                    $this->actorLabel($request),
+                    (string) $roleName,
+                    $targetLabel
+                ),
+                'payload' => [
+                    'target_user_id' => (int) $user->id,
+                    'target_user_name' => $targetLabel,
+                    'role' => (string) $roleName,
+                ],
+            ]);
+        }
+
+        $this->auditLogService->log([
+            'action' => 'delete_user',
+            'module' => 'admin',
+            'description' => sprintf('%s a supprimé l’utilisateur %s', $this->actorLabel($request), $targetLabel),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $targetLabel,
+                'target_user_email' => (string) $user->email,
+                'roles_before_delete' => $rolesBeforeDelete,
+            ],
+        ]);
 
         return back()->with('status', 'User deleted.');
     }
@@ -264,9 +389,15 @@ class UserManagementController extends Controller
         $this->auditLogService->log([
             'action' => 'permission_change',
             'module' => 'admin',
-            'description' => 'Mise a jour des exceptions utilisateur',
+            'description' => sprintf(
+                '%s a modifié les exceptions d’accès de %s',
+                $this->actorLabel($request),
+                $this->userLabel($user)
+            ),
             'payload' => [
                 'user_id' => $user->id,
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->userLabel($user),
                 'before' => $before,
                 'after' => [
                     'allow_abilities' => $allow,
@@ -320,5 +451,29 @@ class UserManagementController extends Controller
         if ($created) {
             app(PermissionRegistrar::class)->forgetCachedPermissions();
         }
+    }
+
+    private function actorLabel(Request $request): string
+    {
+        $firstName = trim((string) ($request->user()?->first_name ?? ''));
+        $lastName = trim((string) ($request->user()?->last_name ?? ''));
+        $fullName = trim($firstName.' '.$lastName);
+
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        $fallback = trim((string) ($request->user()?->name ?? ''));
+        return $fallback !== '' ? $fallback : 'Utilisateur';
+    }
+
+    private function userLabel(User $user): string
+    {
+        $fullName = trim((string) $user->first_name.' '.(string) $user->last_name);
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        return trim((string) $user->name) !== '' ? (string) $user->name : (string) $user->email;
     }
 }

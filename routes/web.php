@@ -80,23 +80,32 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->name('hours.index');
     Route::get('/activities/hours/export', [HourSheetController::class, 'export'])
         ->middleware('sector.access:heures.export')
+        ->middleware('throttle:hours-export')
         ->name('hours.export');
     Route::post('/activities/hours', [HourSheetController::class, 'store'])
         ->middleware('sector.access:heures.create')
+        ->middleware('throttle:hours-actions')
         ->name('hours.store');
     Route::post('/activities/leaves', [LeaveRequestController::class, 'store'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.store');
     Route::post('/leaves/{id}/approve', [LeaveRequestController::class, 'approve'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.approve');
     Route::post('/leaves/{id}/refuse', [LeaveRequestController::class, 'refuse'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.refuse');
     Route::post('/leaves/{id}/propose-modification', [LeaveRequestController::class, 'proposeModification'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.propose_modification');
     Route::post('/leaves/{id}/accept-modification', [LeaveRequestController::class, 'acceptProposedModification'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.accept_modification');
     Route::post('/leaves/{id}/refuse-modification', [LeaveRequestController::class, 'refuseProposedModification'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.refuse_modification');
     Route::delete('/leaves/{id}', [LeaveRequestController::class, 'destroy'])
+        ->middleware('throttle:leave-actions')
         ->name('leaves.destroy');
     Route::post('/notifications/{notificationId}/read', [NotificationController::class, 'markAsRead'])
         ->name('notifications.read');
@@ -135,33 +144,43 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->name('calendar.index');
     Route::get('/calendar/leaves/export', [CalendarController::class, 'exportLeavesCsv'])
         ->middleware('sector.access:calendar.view')
+        ->middleware('throttle:calendar-export')
         ->name('calendar.leaves.export');
     Route::post('/calendar/events', [CalendarEventController::class, 'store'])
         ->middleware('sector.access:calendar.event.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.events.store');
     Route::put('/calendar/events/{calendarEvent}', [CalendarEventController::class, 'update'])
         ->middleware('sector.access:calendar.event.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.events.update');
     Route::delete('/calendar/events/{calendarEvent}', [CalendarEventController::class, 'destroy'])
         ->middleware('sector.access:calendar.event.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.events.destroy');
     Route::post('/calendar/categories', [CalendarCategoryController::class, 'store'])
         ->middleware('sector.access:calendar.category.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.categories.store');
     Route::put('/calendar/categories/{calendarCategory}', [CalendarCategoryController::class, 'update'])
         ->middleware('sector.access:calendar.category.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.categories.update');
     Route::delete('/calendar/categories/{calendarCategory}', [CalendarCategoryController::class, 'destroy'])
         ->middleware('sector.access:calendar.category.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.categories.destroy');
     Route::post('/calendar/feeds', [CalendarFeedController::class, 'store'])
         ->middleware('sector.access:calendar.feed.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.feeds.store');
     Route::put('/calendar/feeds/{calendarFeed}', [CalendarFeedController::class, 'update'])
         ->middleware('sector.access:calendar.feed.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.feeds.update');
     Route::delete('/calendar/feeds/{calendarFeed}', [CalendarFeedController::class, 'destroy'])
         ->middleware('sector.access:calendar.feed.manage')
+        ->middleware('throttle:calendar-actions')
         ->name('calendar.feeds.destroy');
     Route::post('/tasks/archive/{archivedTask}/restore', [ArchiveController::class, 'restore'])
         ->middleware('sector.access:task.archive.manage')
@@ -203,7 +222,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/annuaire/{user}/vcard', [DirectoryController::class, 'vcard'])->name('directory.vcard');
     Route::get('/annuaire/{user}/edit', [DirectoryController::class, 'edit'])->name('directory.edit');
     Route::put('/annuaire/{user}', [DirectoryController::class, 'update'])->name('directory.update');
-    Route::post('/annuaire/{user}/files', [UserFileController::class, 'store'])->name('directory.files.store');
+    Route::post('/annuaire/{user}/files', [UserFileController::class, 'store'])
+        ->middleware('throttle:file-uploads')
+        ->name('directory.files.store');
     Route::get('/annuaire/{user}/files/{userFile}/preview', [UserFileController::class, 'preview'])->name('directory.files.preview');
     Route::get('/annuaire/{user}/files/{userFile}/download', [UserFileController::class, 'download'])->name('directory.files.download');
     Route::put('/annuaire/{user}/files/{userFile}/rename', [UserFileController::class, 'rename'])->name('directory.files.rename');

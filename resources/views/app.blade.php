@@ -10,6 +10,11 @@
         <link rel="icon" sizes="any" href="{{ asset('favicon.ico') }}?v=20260303b">
         <link rel="apple-touch-icon" href="{{ asset('Logo_APP.PNG') }}?v=20260303b">
         <link rel="shortcut icon" href="{{ asset('favicon.ico') }}?v=20260303b">
+        <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
+        <meta name="theme-color" content="#F1BF0C">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="default">
+        <meta name="apple-mobile-web-app-title" content="Jeudy">
 
         <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">

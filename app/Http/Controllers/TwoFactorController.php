@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\SecurityAuditLog;
 use App\Models\User;
+use App\Services\AuditLogService;
 use App\Services\TotpService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,10 @@ use JsonException;
 
 class TwoFactorController extends Controller
 {
-    public function __construct(private readonly TotpService $totp)
+    public function __construct(
+        private readonly TotpService $totp,
+        private readonly AuditLogService $auditLogService,
+    )
     {
     }
 
@@ -80,7 +84,7 @@ class TwoFactorController extends Controller
         }
 
         if (! $this->totp->verifyCode($pendingSecret, $validated['code'])) {
-            $this->registerFailedAttempt($user);
+            $this->registerFailedAttempt($user, 'enable');
 
             throw ValidationException::withMessages([
                 'code' => __('Invalid authenticator code.'),
@@ -105,6 +109,16 @@ class TwoFactorController extends Controller
 
         $this->writeAudit($request, $user, $isResetFlow ? '2fa_reset_completed' : '2fa_enabled', [
             'recovery_codes_count' => count($recoveryCodes),
+        ]);
+        $this->auditLogService->log([
+            'action' => 'enable_2fa',
+            'module' => 'security',
+            'description' => sprintf('%s a activé la double authentification', $this->actorLabel($user)),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->actorLabel($user),
+                'recovery_codes_count' => count($recoveryCodes),
+            ],
         ]);
 
         return redirect()
@@ -132,7 +146,7 @@ class TwoFactorController extends Controller
         $secret = $this->decryptSecret($user);
 
         if ($secret === null || ! $this->totp->verifyCode($secret, $validated['code'])) {
-            $this->registerFailedAttempt($user);
+            $this->registerFailedAttempt($user, 'reset_start');
 
             throw ValidationException::withMessages([
                 'code' => __('Invalid authenticator code.'),
@@ -202,7 +216,7 @@ class TwoFactorController extends Controller
         }
 
         if (! $isValid) {
-            $this->registerFailedAttempt($user);
+            $this->registerFailedAttempt($user, 'verify');
 
             throw ValidationException::withMessages([
                 'code' => __('Invalid authentication code.'),
@@ -216,6 +230,16 @@ class TwoFactorController extends Controller
         if ($usedRecoveryCode) {
             $this->writeAudit($request, $user, '2fa_recovery_code_used');
         }
+        $this->auditLogService->log([
+            'action' => 'successful_2fa_verification',
+            'module' => 'security',
+            'description' => sprintf('%s a validé la double authentification', $this->actorLabel($user)),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->actorLabel($user),
+                'used_recovery_code' => $usedRecoveryCode,
+            ],
+        ]);
 
         return redirect()->intended(route('dashboard', absolute: false));
     }
@@ -251,6 +275,16 @@ class TwoFactorController extends Controller
         $this->writeAudit($request, $user, '2fa_recovery_codes_regenerated', [
             'recovery_codes_count' => count($codes),
         ]);
+        $this->auditLogService->log([
+            'action' => 'backup_codes_regenerated',
+            'module' => 'security',
+            'description' => sprintf('%s a régénéré ses codes de secours 2FA', $this->actorLabel($user)),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->actorLabel($user),
+                'recovery_codes_count' => count($codes),
+            ],
+        ]);
 
         return redirect()
             ->route('two-factor.recovery-codes')
@@ -277,7 +311,7 @@ class TwoFactorController extends Controller
         $secret = $this->decryptSecret($user);
 
         if ($secret === null || ! $this->totp->verifyCode($secret, $validated['code'])) {
-            $this->registerFailedAttempt($user);
+            $this->registerFailedAttempt($user, 'disable');
 
             throw ValidationException::withMessages([
                 'code' => __('Invalid authenticator code.'),
@@ -302,6 +336,15 @@ class TwoFactorController extends Controller
         ]);
 
         $this->writeAudit($request, $user, '2fa_disabled');
+        $this->auditLogService->log([
+            'action' => 'disable_2fa',
+            'module' => 'security',
+            'description' => sprintf('%s a désactivé la double authentification', $this->actorLabel($user)),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->actorLabel($user),
+            ],
+        ]);
 
         return redirect()
             ->route('two-factor.setup')
@@ -445,7 +488,7 @@ class TwoFactorController extends Controller
         ]);
     }
 
-    private function registerFailedAttempt(User $user): void
+    private function registerFailedAttempt(User $user, string $context): void
     {
         $attempts = ((int) $user->totp_attempts) + 1;
 
@@ -455,12 +498,38 @@ class TwoFactorController extends Controller
                 'totp_locked_until' => now()->addMinutes(5),
             ])->save();
 
+            $this->auditLogService->log([
+                'action' => 'failed_2fa_verification',
+                'module' => 'security',
+                'description' => sprintf('%s a échoué la vérification 2FA', $this->actorLabel($user)),
+                'payload' => [
+                    'target_user_id' => (int) $user->id,
+                    'target_user_name' => $this->actorLabel($user),
+                    'context' => $context,
+                    'attempts_before_lock' => $attempts,
+                    'locked' => true,
+                ],
+            ]);
+
             return;
         }
 
         $user->forceFill([
             'totp_attempts' => $attempts,
         ])->save();
+
+        $this->auditLogService->log([
+            'action' => 'failed_2fa_verification',
+            'module' => 'security',
+            'description' => sprintf('%s a échoué la vérification 2FA', $this->actorLabel($user)),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->actorLabel($user),
+                'context' => $context,
+                'attempts' => $attempts,
+                'locked' => false,
+            ],
+        ]);
     }
 
     private function resetFailedAttempts(User $user): void
@@ -503,5 +572,15 @@ class TwoFactorController extends Controller
         }
 
         return $user->totp_locked_until->toIso8601String();
+    }
+
+    private function actorLabel(User $user): string
+    {
+        $fullName = trim((string) $user->first_name.' '.(string) $user->last_name);
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        return trim((string) $user->name) !== '' ? (string) $user->name : (string) $user->email;
     }
 }

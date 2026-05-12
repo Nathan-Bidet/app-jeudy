@@ -31,7 +31,12 @@ export default function Login({ status, canResetPassword }) {
                 </div>
             )}
 
-            <form onSubmit={submit}>
+            <form
+                method="POST"
+                action={route('login')}
+                autoComplete="on"
+                onSubmit={submit}
+            >
                 <div>
                     <InputLabel htmlFor="email" value="Email" />
 
@@ -39,9 +44,13 @@ export default function Login({ status, canResetPassword }) {
                         id="email"
                         type="email"
                         name="email"
+                        inputMode="email"
                         value={data.email}
                         className="mt-1 block w-full"
-                        autoComplete="username"
+                        autoComplete="email"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
                         isFocused={true}
                         onChange={(e) => setData('email', e.target.value)}
                     />
@@ -59,6 +68,9 @@ export default function Login({ status, canResetPassword }) {
                         value={data.password}
                         className="mt-1 block w-full"
                         autoComplete="current-password"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
                         onChange={(e) => setData('password', e.target.value)}
                     />
 
@@ -68,6 +80,7 @@ export default function Login({ status, canResetPassword }) {
                 <div className="mt-4 block">
                     <label className="flex items-center">
                         <Checkbox
+                            id="remember"
                             name="remember"
                             checked={data.remember}
                             onChange={(e) =>
@@ -81,15 +94,6 @@ export default function Login({ status, canResetPassword }) {
                 </div>
 
                 <div className="mt-4 flex items-center justify-end">
-                    {canResetPassword && (
-                        <Link
-                            href={route('password.request')}
-                            className="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
-                            Forgot your password?
-                        </Link>
-                    )}
-
                     <PrimaryButton className="ms-4" disabled={processing}>
                         Log in
                     </PrimaryButton>
