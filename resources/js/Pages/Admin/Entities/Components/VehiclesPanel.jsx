@@ -166,10 +166,31 @@ function VehicleModal({
     const scopedSectorId = selectedDriver?.sector_id ?? null;
 
     const baseChauffeurUsers = useMemo(() => {
-        const allowed = new Set(['chauffeur', 'chauffeur carb']);
-        const filtered = users.filter((u) => allowed.has(String(u.sector_name || '').toLowerCase()));
-        return filtered.length > 0 ? filtered : users;
-    }, [users]);
+        const allowedSectorNames = new Set(['chauffeur', 'chauffeur carb', 'commercial']);
+        const filtered = users.filter((u) => {
+            const sectorName = String(u.sector_name || '').toLowerCase();
+            const sectorSlug = String(u.sector_slug || '').toLowerCase();
+            return allowedSectorNames.has(sectorName) || sectorSlug === 'commercial';
+        });
+
+        const selectedIds = new Set([
+            Number(form.data.driver_user_id || 0),
+            Number(form.data.driver_carb_user_id || 0),
+        ]);
+
+        const ensured = [...filtered];
+        users.forEach((u) => {
+            if (!selectedIds.has(Number(u.id))) {
+                return;
+            }
+
+            if (!ensured.some((existing) => Number(existing.id) === Number(u.id))) {
+                ensured.push(u);
+            }
+        });
+
+        return ensured.length > 0 ? ensured : users;
+    }, [users, form.data.driver_user_id, form.data.driver_carb_user_id]);
 
     const scopedUsers = useMemo(() => {
         if (!scopedSectorId) return baseChauffeurUsers;

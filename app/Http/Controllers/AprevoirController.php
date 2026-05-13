@@ -353,6 +353,7 @@ class AprevoirController extends Controller
 
         $users = User::query()
             ->with('sector:id,name')
+            ->where('is_active', true)
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->orderBy('name')

@@ -515,7 +515,7 @@ export default function LeaveRequestForm({
                                         </button>
                                     </div>
                                 ) : null}
-                                <div className="grid gap-4 md:grid-cols-2">
+                                <div className="hidden gap-4 md:grid md:grid-cols-2">
                                     <label className="space-y-1.5">
                                         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">À partir du</span>
                                         <input
@@ -568,7 +568,19 @@ export default function LeaveRequestForm({
                                     </div>
                                 ) : (
                                     <div className="grid gap-4 md:grid-cols-2">
-                                        <div className="grid gap-3 sm:grid-cols-2">
+                                        <label className="space-y-1.5 md:hidden">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">À partir du</span>
+                                            <input
+                                                type="date"
+                                                value={period.start_date}
+                                                onChange={(event) => updatePeriod(index, { start_date: event.target.value })}
+                                                min={periodStartMin}
+                                                max={periodStartMax}
+                                                className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
+                                            />
+                                        </label>
+
+                                        <div className="grid gap-3 sm:grid-cols-2 md:col-start-1">
                                             {MULTI_DAY_OPTIONS.map((option) => {
                                                 const isSelected = period.start_portion === option.value;
                                                 return (
@@ -592,7 +604,20 @@ export default function LeaveRequestForm({
                                                 );
                                             })}
                                         </div>
-                                        <div className="grid gap-3 sm:grid-cols-2">
+
+                                        <label className="space-y-1.5 md:hidden">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Jusqu&apos;au</span>
+                                            <input
+                                                type="date"
+                                                value={period.end_date}
+                                                onChange={(event) => updatePeriod(index, { end_date: event.target.value })}
+                                                min={periodEndMin}
+                                                max={periodEndMax}
+                                                className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
+                                            />
+                                        </label>
+
+                                        <div className="grid gap-3 sm:grid-cols-2 md:col-start-2 md:row-start-1">
                                             {MULTI_DAY_OPTIONS.map((option) => {
                                                 const isSelected = period.end_portion === option.value;
                                                 return (
@@ -639,7 +664,7 @@ export default function LeaveRequestForm({
                     <button
                         type="button"
                         onClick={addPeriod}
-                        className="inline-flex items-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-4 py-2 text-sm font-semibold text-[var(--app-text)]"
+                        className="flex w-full items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-4 py-2 text-sm font-semibold text-[var(--app-text)] sm:inline-flex sm:w-auto"
                     >
                         Ajouter une période
                     </button>
@@ -661,7 +686,11 @@ export default function LeaveRequestForm({
                     ) : null}
                 </label>
 
-                <label className="space-y-1.5">
+                <label
+                    className={`space-y-1.5 ${
+                        !allowMultiplePeriods && !isSingleDayRequest ? 'hidden md:block' : ''
+                    }`}
+                >
                     <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Jusqu'au</span>
                     <input
                         type="date"
@@ -733,6 +762,21 @@ export default function LeaveRequestForm({
                             );
                         })}
                     </div>
+
+                    <label className="space-y-1.5 md:hidden">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Jusqu'au</span>
+                        <input
+                            type="date"
+                            value={form.data.end_date}
+                            onChange={(event) => form.setData('end_date', event.target.value)}
+                            min={endDateMin}
+                            max={endDateMax}
+                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm text-[var(--app-text)]"
+                        />
+                        {form.errors.end_at ? (
+                            <p className="text-xs text-red-600">{form.errors.end_at}</p>
+                        ) : null}
+                    </label>
 
                     <div className="grid gap-3 sm:grid-cols-2">
                         {MULTI_DAY_OPTIONS.map((option) => {

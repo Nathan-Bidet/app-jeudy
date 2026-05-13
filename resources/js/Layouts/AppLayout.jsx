@@ -1,4 +1,5 @@
 import Modal from '@/Components/Modal';
+import PwaInstallBanner from '@/Components/PwaInstallBanner';
 import Navbar from '@/Layouts/AppShell/Navbar';
 import Sidebar from '@/Layouts/AppShell/Sidebar';
 import ToastHost from '@/Layouts/AppShell/ToastHost';
@@ -155,6 +156,7 @@ export default function AppLayout({ title, header, children }) {
                 </div>
             </Modal>
 
+            <PwaInstallBanner />
             <ToastHost />
         </div>
     );

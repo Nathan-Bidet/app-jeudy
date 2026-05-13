@@ -25,6 +25,7 @@ class LeaveSettingsController extends Controller
 
         $users = User::query()
             ->with('sector:id,name')
+            ->where('is_active', true)
             ->orderByRaw('COALESCE(last_name, name) asc')
             ->orderByRaw('COALESCE(first_name, name) asc')
             ->get(['id', 'name', 'first_name', 'last_name', 'email'])

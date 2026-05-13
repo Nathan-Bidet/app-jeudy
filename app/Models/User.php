@@ -50,6 +50,7 @@ class User extends Authenticatable
         'password',
         'sector_id',
         'hours_tracking_starts_at',
+        'is_active',
     ];
 
     /**
@@ -91,6 +92,7 @@ class User extends Authenticatable
             'occupational_health_valid_until' => 'date',
             'sst_valid_until' => 'date',
             'hours_tracking_starts_at' => 'date',
+            'is_active' => 'boolean',
         ];
     }
 

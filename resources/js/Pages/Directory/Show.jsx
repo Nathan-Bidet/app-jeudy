@@ -303,14 +303,6 @@ export default function DirectoryShow({ profile, files, permissions, routes }) {
                                 <p className="mt-1 text-sm text-[var(--app-muted)]">
                                     {profile?.sector?.name || 'Secteur non défini'}
                                 </p>
-                                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                    <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1 text-[var(--app-text)]">
-                                        Poste: {profile?.job_title || 'Placeholder'}
-                                    </span>
-                                    <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1 text-[var(--app-text)]">
-                                        Responsable secteur: {profile?.sector_manager || 'Placeholder'}
-                                    </span>
-                                </div>
                             </div>
                         </div>
 
@@ -398,7 +390,23 @@ export default function DirectoryShow({ profile, files, permissions, routes }) {
                                         <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
                                             {item.label}
                                         </p>
-                                        <p className="mt-1 text-sm text-[var(--app-text)]">{item.value}</p>
+                                        <div className="mt-1 space-y-1">
+                                            {String(item.value || '')
+                                                .split(' • ')
+                                                .filter((entry) => entry.trim() !== '')
+                                                .map((entry, index) => (
+                                                    <p
+                                                        key={`${item.label}-${index}`}
+                                                        className={`text-sm ${
+                                                            entry.startsWith('Aucun') || entry.startsWith('Aucune')
+                                                                ? 'text-[var(--app-muted)]'
+                                                                : 'text-[var(--app-text)]'
+                                                        }`}
+                                                    >
+                                                        {entry}
+                                                    </p>
+                                                ))}
+                                        </div>
                                     </div>
                                 ))}
                             </div>

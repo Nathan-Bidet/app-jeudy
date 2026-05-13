@@ -209,6 +209,7 @@ export default function LeavesIndex({
                         leaveTypes={leaveTypes}
                         defaultTargetUserId={defaultTargetUserId}
                         canRequestForOthers={canRequestForOthers}
+                        allowMultiplePeriods
                     />
                 </div>
 

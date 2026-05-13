@@ -79,6 +79,7 @@ class UserManagementController extends Controller
                     'sector_id' => $user->sector_id,
                     'sector_name' => $user->sector?->name,
                     'role' => $user->roles->pluck('name')->first(),
+                    'is_active' => (bool) $user->is_active,
                     'allow_overrides' => $allow,
                     'deny_overrides' => $deny,
                 ];
@@ -152,15 +153,41 @@ class UserManagementController extends Controller
         $before = [
             'role' => $beforeRole,
             'sector_id' => $user->sector_id,
+            'is_active' => (bool) $user->is_active,
         ];
 
         $validated = $request->validate([
             'role' => ['required', Rule::in(['admin', 'utilisateur'])],
             'sector_id' => ['required', 'integer', 'exists:sectors,id'],
+            'is_active' => ['sometimes', 'boolean'],
         ]);
+
+        $nextIsActive = array_key_exists('is_active', $validated)
+            ? (bool) $validated['is_active']
+            : (bool) $user->is_active;
+
+        if (! $nextIsActive && (int) $request->user()?->id === (int) $user->id) {
+            return back()->withErrors([
+                'is_active' => 'Vous ne pouvez pas désactiver votre propre compte.',
+            ]);
+        }
+
+        if (! $nextIsActive && $beforeRole === 'admin') {
+            $activeAdminsCount = User::query()
+                ->where('is_active', true)
+                ->role('admin')
+                ->count();
+
+            if ($activeAdminsCount <= 1) {
+                return back()->withErrors([
+                    'is_active' => 'Impossible de désactiver le dernier administrateur actif.',
+                ]);
+            }
+        }
 
         $user->forceFill([
             'sector_id' => (int) $validated['sector_id'],
+            'is_active' => $nextIsActive,
         ])->save();
 
         $user->syncRoles([$validated['role']]);
@@ -182,9 +209,34 @@ class UserManagementController extends Controller
                 'after' => [
                     'role' => $validated['role'],
                     'sector_id' => (int) $validated['sector_id'],
+                    'is_active' => (bool) $user->is_active,
                 ],
             ],
         ]);
+
+        if ((bool) $before['is_active'] !== (bool) $user->is_active) {
+            $isNowActive = (bool) $user->is_active;
+            $action = $isNowActive ? 'enable_user' : 'disable_user';
+            $description = $isNowActive
+                ? sprintf('%s a réactivé le compte de %s', $this->actorLabel($request), $this->userLabel($user))
+                : sprintf('%s a désactivé le compte de %s', $this->actorLabel($request), $this->userLabel($user));
+
+            $this->auditLogService->log([
+                'action' => $action,
+                'module' => 'admin',
+                'description' => $description,
+                'payload' => [
+                    'target_user_id' => (int) $user->id,
+                    'target_user_name' => $this->userLabel($user),
+                    'before' => [
+                        'is_active' => (bool) $before['is_active'],
+                    ],
+                    'after' => [
+                        'is_active' => (bool) $user->is_active,
+                    ],
+                ],
+            ]);
+        }
 
         if ($beforeRole !== $afterRole) {
             if (filled($beforeRole)) {

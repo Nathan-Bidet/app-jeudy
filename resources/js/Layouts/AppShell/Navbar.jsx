@@ -1391,7 +1391,6 @@ export default function Navbar({
                         </div>
 
                         <div className="flex items-center gap-1.5 sm:gap-2">
-                            <ThemeSwitch isDark={isDark} onToggleTheme={onToggleTheme} />
                             <GlobalSearchVisual />
                             <NotificationsMenu />
                             <UserMenu

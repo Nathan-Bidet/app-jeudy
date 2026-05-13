@@ -51,7 +51,8 @@ class DirectoryController extends Controller
                 'internal_number',
                 'photo_path',
                 'sector_id',
-            ]);
+            ])
+            ->where('is_active', true);
 
         if ($isAdmin && ! empty($validated['sector_id'])) {
             $query->where('sector_id', (int) $validated['sector_id']);
@@ -519,7 +520,8 @@ class DirectoryController extends Controller
         $assignedVehicles = Vehicle::query()
             ->with([
                 'type:id,label,code',
-                'bennes:id,name,registration',
+                'bennes:id,name,registration,vehicle_type_id',
+                'bennes.type:id,label,code',
             ])
             ->where(function ($query) use ($user): void {
                 $query
@@ -536,14 +538,16 @@ class DirectoryController extends Controller
         foreach ($assignedVehicles as $vehicle) {
             $label = $this->vehicleLabel($vehicle);
 
-            if ($vehicle->type?->code === 'benne') {
+            if ($this->isBenneType($vehicle)) {
                 $bennes[$vehicle->id] = $label;
-            } else {
+            } elseif ($this->isVehicleType($vehicle)) {
                 $vehicles[$vehicle->id] = $label;
             }
 
             foreach ($vehicle->bennes as $benne) {
-                $bennes[$benne->id] = $this->vehicleLabel($benne);
+                if ($this->isBenneType($benne)) {
+                    $bennes[$benne->id] = $this->vehicleLabel($benne);
+                }
             }
         }
 
@@ -575,6 +579,33 @@ class DirectoryController extends Controller
         }
 
         return $base;
+    }
+
+    private function isVehicleType(Vehicle $vehicle): bool
+    {
+        $code = $this->normalizeVehicleType((string) ($vehicle->type?->code ?? ''));
+        $label = $this->normalizeVehicleType((string) ($vehicle->type?->label ?? ''));
+
+        return in_array($code, ['porteur', 'tracteur', 'vl'], true)
+            || in_array($label, ['porteur', 'tracteur', 'vl'], true);
+    }
+
+    private function isBenneType(Vehicle $vehicle): bool
+    {
+        $code = $this->normalizeVehicleType((string) ($vehicle->type?->code ?? ''));
+        $label = $this->normalizeVehicleType((string) ($vehicle->type?->label ?? ''));
+
+        return in_array($code, ['remorque', 'remorques', 'semi-remorque', 'semi-remorques', 'semiremorque', 'semiremorques'], true)
+            || in_array($label, ['remorque', 'remorques', 'semi-remorque', 'semi-remorques', 'semiremorque', 'semiremorques'], true);
+    }
+
+    private function normalizeVehicleType(string $value): string
+    {
+        $normalized = trim(mb_strtolower($value));
+        $normalized = str_replace(['é', 'è', 'ê', 'ë'], 'e', $normalized);
+        $normalized = preg_replace('/\s+/', '-', $normalized) ?? $normalized;
+
+        return $normalized;
     }
 
     /**

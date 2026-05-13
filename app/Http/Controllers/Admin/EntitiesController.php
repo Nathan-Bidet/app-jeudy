@@ -159,7 +159,8 @@ class EntitiesController extends Controller
                 'garages' => Garage::query()->orderBy('name')->get(['id', 'name', 'is_active']),
                 'sectors' => Sector::query()->orderBy('name')->get(['id', 'name']),
                 'users' => User::query()
-                    ->with('sector:id,name')
+                    ->with('sector:id,name,slug')
+                    ->where('is_active', true)
                     ->orderBy('first_name')
                     ->orderBy('last_name')
                     ->orderBy('name')
@@ -189,6 +190,7 @@ class EntitiesController extends Controller
                         'photo_path' => $user->photo_path,
                         'sector_id' => $user->sector_id,
                         'sector_name' => $user->sector?->name,
+                        'sector_slug' => $user->sector?->slug,
                     ])
                     ->values(),
             ],

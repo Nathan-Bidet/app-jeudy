@@ -6,8 +6,8 @@ export default function DashboardIndex({ dashboard, viewer }) {
     const widgets = dashboard?.widgets ?? [];
 
     return (
-        <AppLayout title="Dashboard">
-            <Head title="Dashboard" />
+        <AppLayout title="Accueil">
+            <Head title="Accueil" />
 
             <div className="w-full min-w-0 max-w-full space-y-6">
                 <section className="grid w-full min-w-0 max-w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

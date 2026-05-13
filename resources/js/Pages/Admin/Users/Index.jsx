@@ -55,6 +55,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
     const roleForm = useForm({
         role: selectedUser?.role ?? 'utilisateur',
         sector_id: selectedUser?.sector_id ?? '',
+        is_active: selectedUser?.is_active ?? true,
     });
 
     const exceptionForm = useForm({
@@ -86,6 +87,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
         roleForm.setData({
             role: selectedUser?.role ?? 'utilisateur',
             sector_id: selectedUser?.sector_id ?? '',
+            is_active: selectedUser?.is_active ?? true,
         });
 
         exceptionForm.setData({
@@ -117,6 +119,25 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
 
         roleForm.put(route('admin.users.update', selectedUser.id), {
             preserveScroll: true,
+        });
+    };
+
+    const toggleUserActiveState = (user) => {
+        const nextActive = !Boolean(user?.is_active);
+
+        const payload = {
+            role: user?.role ?? selectedUser?.role ?? 'utilisateur',
+            sector_id: user?.sector_id ?? selectedUser?.sector_id ?? '',
+            is_active: nextActive,
+        };
+
+        roleForm.transform(() => payload);
+
+        roleForm.put(route('admin.users.update', user.id), {
+            preserveScroll: true,
+            onFinish: () => {
+                roleForm.transform((data) => data);
+            },
         });
     };
 
@@ -339,6 +360,21 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
                                         <InputError className="mt-2" message={roleForm.errors.sector_id} />
                                     </div>
 
+                                    <div className="sm:col-span-2 flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                                        <span className="text-sm font-medium text-gray-700">État du compte</span>
+                                        <span
+                                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                                                roleForm.data.is_active
+                                                    ? 'border-green-300 bg-green-50 text-green-700'
+                                                    : 'border-orange-300 bg-orange-50 text-orange-700'
+                                            }`}
+                                        >
+                                            {roleForm.data.is_active ? 'Actif' : 'Désactivé'}
+                                        </span>
+                                    </div>
+
+                                    <InputError className="sm:col-span-2" message={roleForm.errors.is_active} />
+
                                     <div className="sm:col-span-2">
                                         <PrimaryButton disabled={roleForm.processing}>
                                             <span className="inline-flex items-center gap-1.5">
@@ -503,6 +539,29 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
                                             <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
                                         </DangerButton>
                                     </div>
+                                </div>
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                    <span
+                                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] ${
+                                            user.is_active
+                                                ? 'border-green-300 bg-green-50 text-green-700'
+                                                : 'border-orange-300 bg-orange-50 text-orange-700'
+                                        }`}
+                                    >
+                                        {user.is_active ? 'Actif' : 'Désactivé'}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleUserActiveState(user)}
+                                        disabled={roleForm.processing}
+                                        className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                            user.is_active
+                                                ? 'bg-orange-500 text-white hover:bg-orange-600'
+                                                : 'bg-green-600 text-white hover:bg-green-700'
+                                        }`}
+                                    >
+                                        {user.is_active ? 'Désactiver' : 'Réactiver'}
+                                    </button>
                                 </div>
                             </div>
                         ))}

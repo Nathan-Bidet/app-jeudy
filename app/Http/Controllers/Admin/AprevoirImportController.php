@@ -36,6 +36,7 @@ class AprevoirImportController extends Controller
         ];
 
         $internalUsers = User::query()
+            ->where('is_active', true)
             ->orderByRaw('COALESCE(last_name, name) asc')
             ->orderByRaw('COALESCE(first_name, name) asc')
             ->get(['id', 'name', 'first_name', 'last_name', 'email']);

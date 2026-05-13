@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureTwoFactorIsVerified;
 use App\Http\Middleware\EnsureSectorPermission;
+use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\LogUserActivity;
 use App\Http\Middleware\SecureHeaders;
 use App\Services\AuditLogService;
@@ -39,6 +40,7 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
             EnsureTwoFactorIsVerified::class,
+            EnsureUserIsActive::class,
             LogUserActivity::class,
             SecureHeaders::class,
         ]);
