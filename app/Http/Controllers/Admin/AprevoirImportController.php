@@ -12,6 +12,7 @@ use App\Models\ImportVehicleMapping;
 use App\Models\Transporter;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\Ldt\LdtProjectionService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,6 +26,11 @@ use Throwable;
 
 class AprevoirImportController extends Controller
 {
+    public function __construct(
+        private readonly LdtProjectionService $ldtProjectionService,
+    ) {
+    }
+
     public function index(Request $request): Response
     {
         abort_unless((bool) $request->user()?->hasRole('admin'), 403);
@@ -467,6 +473,7 @@ class AprevoirImportController extends Controller
             'error_count' => 0,
             'errors' => [],
         ];
+        $groupsToRebuild = [];
 
         foreach ($rows as $row) {
             [$payload, $errors] = $this->buildAprevoirPayload($row, $context, $actorId);
@@ -505,6 +512,19 @@ class AprevoirImportController extends Controller
                 $task->forceFill($payload);
                 $task->save();
 
+                $groupKey = implode('|', [
+                    (string) ($task->date?->toDateString() ?? ''),
+                    (string) ($task->assignee_type ?? 'none'),
+                    (string) ($task->assignee_id ?? 0),
+                    (string) ($task->assignee_label_free ?? ''),
+                ]);
+                $groupsToRebuild[$groupKey] = [
+                    'date' => (string) ($task->date?->toDateString() ?? ''),
+                    'assignee_type' => $task->assignee_type,
+                    'assignee_id' => $task->assignee_id !== null ? (int) $task->assignee_id : null,
+                    'assignee_label_free' => $task->assignee_label_free,
+                ];
+
                 $row->forceFill([
                     'imported_at' => now(),
                     'import_batch_id' => $batchId,
@@ -528,6 +548,22 @@ class AprevoirImportController extends Controller
                     'import_batch_id' => $batchId,
                     'import_error' => $message,
                 ])->save();
+            }
+        }
+
+        if (! $dryRun && $report['imported_count'] > 0) {
+            foreach ($groupsToRebuild as $group) {
+                $date = (string) ($group['date'] ?? '');
+                if ($date === '') {
+                    continue;
+                }
+
+                $this->ldtProjectionService->rebuildEntryForGroup(
+                    $date,
+                    $group['assignee_type'] ?? null,
+                    isset($group['assignee_id']) ? (int) $group['assignee_id'] : null,
+                    $group['assignee_label_free'] ?? null,
+                );
             }
         }
 
@@ -836,6 +872,10 @@ class AprevoirImportController extends Controller
             }
         }
 
+        $isPointed = (bool) $row->flag_paper;
+        $pointedAt = $isPointed ? $updatedAt : null;
+        $pointedBy = $isPointed ? ($updatedBy ?? $createdBy ?? ($actorId > 0 ? $actorId : null)) : null;
+
         return [[
             'date' => $date,
             'fin_date' => $finDate,
@@ -861,9 +901,9 @@ class AprevoirImportController extends Controller
                     'driver_free' => $row->driver_free,
                 ],
             ],
-            'pointed' => false,
-            'pointed_at' => null,
-            'pointed_by_user_id' => null,
+            'pointed' => $isPointed,
+            'pointed_at' => $pointedAt,
+            'pointed_by_user_id' => $pointedBy,
             'position' => (int) ($row->sort_order ?? 0),
             'created_by_user_id' => $createdBy,
             'updated_by_user_id' => $updatedBy,

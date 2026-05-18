@@ -13,6 +13,9 @@ function collectIndicatorLabels(value, labels, path = '') {
     if (path.toLowerCase().startsWith('auto_detected')) {
         return;
     }
+    if (path.toLowerCase().startsWith('legacy')) {
+        return;
+    }
 
     if (Array.isArray(value)) {
         value.forEach((item) => collectIndicatorLabels(item, labels, path));
@@ -107,4 +110,3 @@ export function IndicatorsInline({ indicators = [] }) {
         </div>
     );
 }
-
