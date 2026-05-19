@@ -65,6 +65,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::patch('/a-prevoir/tasks/{task}/position', [AprevoirController::class, 'updatePosition'])
         ->middleware('sector.access:a_prevoir.update')
         ->name('a_prevoir.tasks.position');
+    Route::get('/a-prevoir/tasks-data', [AprevoirController::class, 'tasksData'])
+        ->middleware('sector.access:a_prevoir.view')
+        ->name('a_prevoir.tasks.data');
 
     Route::get('/ldt', [LdtController::class, 'index'])
         ->middleware('sector.access:ldt.view')

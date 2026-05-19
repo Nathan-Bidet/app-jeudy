@@ -115,6 +115,47 @@ function formatDateLabel(value) {
     }).format(date);
 }
 
+function toNullableInt(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+function assigneeBucket(assignee = {}) {
+    const type = String(assignee?.type || '');
+    if (type === 'none' || type === '') return 3;
+    if (type === 'user' || type === 'transporter' || type === 'free') {
+        return toNullableInt(assignee?.display_order) === null ? 1 : 0;
+    }
+    return 2;
+}
+
+function compareGroupsForDisplay(left, right) {
+    const leftDate = String(left?.date || '');
+    const rightDate = String(right?.date || '');
+    if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+
+    const leftAssignee = left?.assignee || {};
+    const rightAssignee = right?.assignee || {};
+
+    const leftBucket = assigneeBucket(leftAssignee);
+    const rightBucket = assigneeBucket(rightAssignee);
+    if (leftBucket !== rightBucket) return leftBucket - rightBucket;
+
+    if (leftBucket === 0) {
+        const leftOrder = toNullableInt(leftAssignee?.display_order);
+        const rightOrder = toNullableInt(rightAssignee?.display_order);
+        if (leftOrder !== rightOrder) return (leftOrder ?? 0) - (rightOrder ?? 0);
+    }
+
+    const leftName = String(leftAssignee?.name || '').trim().toLocaleLowerCase('fr');
+    const rightName = String(rightAssignee?.name || '').trim().toLocaleLowerCase('fr');
+    const nameCmp = leftName.localeCompare(rightName, 'fr');
+    if (nameCmp !== 0) return nameCmp;
+
+    return Number(leftAssignee?.id || 0) - Number(rightAssignee?.id || 0);
+}
+
 function normalizeTaskFormPayload(data) {
     const hasFreeLabel = Boolean((data.assignee_label_free || '').trim());
     const hasAssignee = Boolean(data.assignee_type) && Boolean(data.assignee_id);
@@ -670,6 +711,12 @@ export default function AprevoirIndex({
     permissions = {},
     focus_task_id = null,
 }) {
+    const [unpointedGroups, setUnpointedGroups] = useState(groups);
+    const [pointedGroups, setPointedGroups] = useState(null);
+    const [pointedGroupsLoaded, setPointedGroupsLoaded] = useState(false);
+    const [pointedGroupsLoading, setPointedGroupsLoading] = useState(false);
+    const [pointedGroupsError, setPointedGroupsError] = useState(false);
+    const [pointedRefreshTick, setPointedRefreshTick] = useState(0);
     const [localGroups, setLocalGroups] = useState(groups);
     const [modalOpen, setModalOpen] = useState(false);
     const [taskModalMode, setTaskModalMode] = useState('create');
@@ -701,7 +748,7 @@ export default function AprevoirIndex({
     const deleteForm = useForm({});
 
     useEffect(() => {
-        setLocalGroups(groups);
+        setUnpointedGroups(groups);
     }, [groups]);
 
     useEffect(() => {
@@ -766,6 +813,113 @@ export default function AprevoirIndex({
         };
     }, [filterState.search]);
 
+    const prefetchBaseFilters = useMemo(() => ({
+        date_from: filterState.date_from || undefined,
+        date_to: filterState.date_to || undefined,
+        search: filterState.search || undefined,
+        assignee_type: filterState.assignee_type || undefined,
+        assignee_id: filterState.assignee_id || undefined,
+        vehicle_id: filterState.vehicle_id || undefined,
+        only_boursagri: filterState.only_boursagri ? 1 : undefined,
+        boursagri_contract_number: filterState.boursagri_contract_number || undefined,
+        color_filter: filterState.color_filter !== 'all' ? filterState.color_filter : undefined,
+    }), [
+        filterState.date_from,
+        filterState.date_to,
+        filterState.search,
+        filterState.assignee_type,
+        filterState.assignee_id,
+        filterState.vehicle_id,
+        filterState.only_boursagri,
+        filterState.boursagri_contract_number,
+        filterState.color_filter,
+    ]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setPointedGroupsLoaded(false);
+        setPointedGroupsLoading(true);
+        setPointedGroupsError(false);
+        setPointedGroups(null);
+
+        window.axios.get(route('a_prevoir.tasks.data'), {
+            params: {
+                ...prefetchBaseFilters,
+                pointed_filter: 'pointed',
+            },
+        }).then((response) => {
+            if (cancelled) return;
+            setPointedGroups(Array.isArray(response?.data?.groups) ? response.data.groups : []);
+            setPointedGroupsLoaded(true);
+            setPointedGroupsLoading(false);
+            setPointedGroupsError(false);
+        }).catch(() => {
+            if (cancelled) return;
+            setPointedGroupsError(true);
+            setPointedGroupsLoading(false);
+            setPointedGroupsLoaded(false);
+        }).finally(() => {
+            if (cancelled) return;
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [prefetchBaseFilters, pointedRefreshTick]);
+
+    const mergedAllGroups = useMemo(() => {
+        const map = new Map();
+        const pushGroups = (source) => {
+            (source || []).forEach((group) => {
+                const key = String(group?.key || '');
+                if (!key) return;
+                if (!map.has(key)) {
+                    map.set(key, {
+                        ...group,
+                        tasks: [...(group.tasks || [])],
+                    });
+                    return;
+                }
+                const existing = map.get(key);
+                const tasks = [...(existing.tasks || []), ...(group.tasks || [])];
+                const dedup = new Map();
+                tasks.forEach((task) => {
+                    dedup.set(Number(task.id), task);
+                });
+                existing.tasks = Array.from(dedup.values());
+            });
+        };
+        pushGroups(unpointedGroups);
+        if (pointedGroupsLoaded) {
+            pushGroups(pointedGroups || []);
+        }
+
+        return Array.from(map.values())
+            .map((group) => ({
+                ...group,
+                tasks: [...(group.tasks || [])].sort((a, b) => {
+                    const pa = Number(a?.position || 0);
+                    const pb = Number(b?.position || 0);
+                    if (pa !== pb) return pa - pb;
+                    return Number(a?.id || 0) - Number(b?.id || 0);
+                }),
+            }))
+            .sort(compareGroupsForDisplay);
+    }, [unpointedGroups, pointedGroups, pointedGroupsLoaded]);
+
+    useEffect(() => {
+        const mode = filterState.pointed_filter || 'unpointed';
+        if (mode === 'pointed') {
+            setLocalGroups(pointedGroupsLoaded ? (pointedGroups || []) : []);
+            return;
+        }
+        if (mode === 'all') {
+            setLocalGroups(mergedAllGroups);
+            return;
+        }
+        setLocalGroups(unpointedGroups);
+    }, [filterState.pointed_filter, unpointedGroups, pointedGroups, pointedGroupsLoaded, mergedAllGroups]);
+
     useEffect(() => {
         const targetId = Number(focus_task_id || 0);
         if (!targetId || Number(lastHandledFocusId || 0) === targetId) return;
@@ -817,6 +971,7 @@ export default function AprevoirIndex({
                 preserveScroll: true,
                 preserveState: true,
             });
+            setPointedRefreshTick((prev) => prev + 1);
         };
 
         channel.listen('.aprevoir.task.updated', onTaskUpdated);
@@ -862,7 +1017,7 @@ export default function AprevoirIndex({
                 vehicle_id: data.vehicle_id || undefined,
                 only_boursagri: data.only_boursagri ? 1 : undefined,
                 boursagri_contract_number: data.boursagri_contract_number || undefined,
-                pointed_filter: data.pointed_filter !== 'all' ? data.pointed_filter : undefined,
+                pointed_filter: 'unpointed',
                 color_filter: data.color_filter !== 'all' ? data.color_filter : undefined,
             },
             { preserveState: true, preserveScroll: true, replace: true },
@@ -902,6 +1057,16 @@ export default function AprevoirIndex({
             const next = { ...prev, date_from: '', date_to: '' };
             submitFilters(next);
             return next;
+        });
+    };
+
+    const applyPointedFilterFromDesktop = (nextPointedFilter) => {
+        const normalized = ['all', 'pointed', 'unpointed'].includes(String(nextPointedFilter))
+            ? String(nextPointedFilter)
+            : 'unpointed';
+
+        setFilterState((prev) => {
+            return { ...prev, pointed_filter: normalized };
         });
     };
 
@@ -1479,12 +1644,17 @@ export default function AprevoirIndex({
             <div className="w-full max-w-full space-y-4 px-0 sm:space-y-5">
                 <DesktopTable
                     groups={localGroups}
+                    pointedGroups={pointedGroups}
+                    pointedGroupsLoaded={pointedGroupsLoaded}
+                    pointedGroupsLoading={pointedGroupsLoading}
+                    pointedGroupsError={pointedGroupsError}
                     depotPlaceMap={reference?.depot_place_map || {}}
                     highlightedTaskId={highlightedTaskId}
                     focusTaskId={focus_task_id}
                     savingTaskIds={savingTaskIds}
                     dateFrom={filterState.date_from}
                     dateTo={filterState.date_to}
+                    pointedFilter={filterState.pointed_filter}
                     canUpdate={Boolean(permissions?.can_update)}
                     canDelete={Boolean(permissions?.can_delete)}
                     canPoint={Boolean(permissions?.can_point)}
@@ -1500,6 +1670,7 @@ export default function AprevoirIndex({
                     onDateFiltersChange={onDesktopDateFiltersChange}
                     onApplyDateFilters={applyDesktopDateFilters}
                     onResetDateFilters={resetDesktopDateFilters}
+                    onPointedFilterChange={applyPointedFilterFromDesktop}
                 />
 
                 {localGroups.length === 0 ? (

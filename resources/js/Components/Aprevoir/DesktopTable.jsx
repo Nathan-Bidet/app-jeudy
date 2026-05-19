@@ -430,6 +430,10 @@ function TaskDataRow({
 
 export default function DesktopTable({
     groups = [],
+    pointedGroups = null,
+    pointedGroupsLoaded = false,
+    pointedGroupsLoading = false,
+    pointedGroupsError = false,
     depotPlaceMap = {},
     highlightedTaskId = null,
     focusTaskId = null,
@@ -437,6 +441,7 @@ export default function DesktopTable({
     dropPreview = null,
     dateFrom = '',
     dateTo = '',
+    pointedFilter = 'unpointed',
     canUpdate = false,
     canDelete = false,
     canPoint = false,
@@ -451,6 +456,7 @@ export default function DesktopTable({
     onDateFiltersChange,
     onApplyDateFilters,
     onResetDateFilters,
+    onPointedFilterChange,
 }) {
     const wrapperRef = useRef(null);
     const dateFilterButtonRef = useRef(null);
@@ -505,6 +511,19 @@ export default function DesktopTable({
         setLocalDateFrom(dateFrom || '');
         setLocalDateTo(dateTo || '');
     }, [dateFrom, dateTo]);
+
+    useEffect(() => {
+        const normalized = String(pointedFilter || 'unpointed');
+        if (normalized === 'pointed') {
+            setXFilterMode('yes');
+            return;
+        }
+        if (normalized === 'all') {
+            setXFilterMode('all');
+            return;
+        }
+        setXFilterMode('no');
+    }, [pointedFilter]);
 
     useEffect(() => {
         const focusId = Number(focusTaskId || 0);
@@ -759,6 +778,12 @@ export default function DesktopTable({
         });
     }, [filteredGroups, bFilterMode, bContractSort]);
 
+    const awaitingPointedDataForPointed = (pointedFilter === 'pointed') && !pointedGroupsLoaded;
+    const awaitingPointedDataForAll = (pointedFilter === 'all') && !pointedGroupsLoaded;
+    const prefetchMessage = pointedGroupsLoading
+        ? 'Chargement des tâches pointées...'
+        : 'Préchargement des tâches pointées...';
+
     useLayoutEffect(() => {
         const wrapper = wrapperRef.current;
         if (!wrapper) return;
@@ -972,8 +997,25 @@ export default function DesktopTable({
         setShowXdbFilter(true);
     };
 
+    const applyPointedFilterFromXMode = (nextMode) => {
+        const nextPointedFilter = nextMode === 'yes'
+            ? 'pointed'
+            : (nextMode === 'no' ? 'unpointed' : 'all');
+        onPointedFilterChange?.(nextPointedFilter);
+    };
+
     return (
         <div ref={wrapperRef} className="relative hidden w-full max-w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-2 shadow-sm lg:block">
+            {awaitingPointedDataForAll ? (
+                <div className="mb-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-semibold text-[var(--app-muted)]">
+                    {prefetchMessage}
+                </div>
+            ) : null}
+            {pointedGroupsError && pointedFilter !== 'unpointed' ? (
+                <div className="mb-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                    Impossible de charger les tâches pointées.
+                </div>
+            ) : null}
             <div className="overflow-visible rounded-xl border border-[var(--app-border)]">
                 <table className="min-w-[1180px] w-full border-collapse text-sm">
                     <thead className="sticky top-[var(--app-navbar-height,72px)] z-20">
@@ -1117,7 +1159,9 @@ export default function DesktopTable({
                                     colSpan={12}
                                     className="px-4 py-6 text-center text-sm text-[var(--app-muted)]"
                                 >
-                                    Aucune tâche pour les filtres sélectionnés.
+                                    {awaitingPointedDataForPointed
+                                        ? prefetchMessage
+                                        : 'Aucune tâche pour les filtres sélectionnés.'}
                                 </td>
                             </tr>
                         ) : (
@@ -1598,6 +1642,9 @@ export default function DesktopTable({
                                                 type="button"
                                                 onClick={() => {
                                                     setMode(value);
+                                                    if (code === 'X') {
+                                                        applyPointedFilterFromXMode(value);
+                                                    }
                                                     if (code === 'B' && value !== 'yes') {
                                                         setBContractTextFilter('');
                                                         setBContractSort('asc');
@@ -1676,6 +1723,7 @@ export default function DesktopTable({
                                 type="button"
                                 onClick={() => {
                                     setXFilterMode('all');
+                                    applyPointedFilterFromXMode('all');
                                     setDFilterMode('all');
                                     setBFilterMode('all');
                                     setBContractTextFilter('');

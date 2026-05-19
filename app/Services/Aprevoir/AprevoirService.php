@@ -422,7 +422,7 @@ class AprevoirService
         $updatedName = $this->personName($task->updatedBy);
         $pointedName = $this->personName($task->pointedBy);
 
-        $indicators = is_array($task->indicators) ? $task->indicators : [];
+        $indicators = $this->publicIndicators($task->indicators);
         $isProjectedToLdt = true;
 
         return [
@@ -497,5 +497,16 @@ class AprevoirService
         $initials = mb_strtoupper(trim($first.$last));
 
         return $initials !== '' ? $initials : 'U';
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function publicIndicators(mixed $rawIndicators): array
+    {
+        $indicators = is_array($rawIndicators) ? $rawIndicators : [];
+        unset($indicators['legacy']);
+
+        return $indicators;
     }
 }

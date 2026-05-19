@@ -12,6 +12,7 @@ use App\Models\Vehicle;
 use App\Services\Aprevoir\AprevoirService;
 use App\Services\AuditLogService;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -49,12 +50,14 @@ class AprevoirController extends Controller
             ...$validated,
             'user' => $request->user(),
             'only_boursagri' => filter_var($validated['only_boursagri'] ?? false, FILTER_VALIDATE_BOOL),
-            'pointed_filter' => $validated['pointed_filter'] ?? 'all',
+            'pointed_filter' => array_key_exists('pointed_filter', $validated)
+                ? ($validated['pointed_filter'] ?? 'all')
+                : 'unpointed',
         ];
 
         $result = $this->service->getGroupedTasks($payload);
 
-        return Inertia::render('Aprevoir/Index', [
+        $props = [
             'groups' => $result['groups'],
             'meta' => $result['meta'],
             'filters' => [
@@ -66,7 +69,7 @@ class AprevoirController extends Controller
                 'vehicle_id' => $validated['vehicle_id'] ?? '',
                 'only_boursagri' => (bool) ($payload['only_boursagri'] ?? false),
                 'boursagri_contract_number' => $validated['boursagri_contract_number'] ?? '',
-                'pointed_filter' => $validated['pointed_filter'] ?? 'all',
+                'pointed_filter' => $payload['pointed_filter'],
                 'color_filter' => $validated['color_filter'] ?? 'all',
             ],
             'reference' => $this->referenceData(),
@@ -81,6 +84,39 @@ class AprevoirController extends Controller
                 'index' => route('a_prevoir.index'),
                 'store' => route('a_prevoir.tasks.store'),
             ],
+        ];
+
+        return Inertia::render('Aprevoir/Index', $props);
+    }
+
+    public function tasksData(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date'],
+            'search' => ['nullable', 'string', 'max:255'],
+            'assignee_type' => ['nullable', Rule::in(['user', 'transporter', 'depot', 'free'])],
+            'assignee_id' => ['nullable', 'integer'],
+            'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
+            'only_boursagri' => ['nullable', 'boolean'],
+            'boursagri_contract_number' => ['nullable', 'string', 'max:100'],
+            'pointed_filter' => ['nullable', Rule::in(['all', 'pointed', 'unpointed'])],
+            'color_filter' => ['nullable', Rule::in(['all', 'colored', 'unstyled'])],
+        ]);
+
+        $payload = [
+            ...$validated,
+            'user' => $request->user(),
+            'only_boursagri' => filter_var($validated['only_boursagri'] ?? false, FILTER_VALIDATE_BOOL),
+            'pointed_filter' => $validated['pointed_filter'] ?? 'unpointed',
+        ];
+
+        $result = $this->service->getGroupedTasks($payload);
+
+        return response()->json([
+            'groups' => $result['groups'],
+            'meta' => $result['meta'],
+            'pointed_filter' => $payload['pointed_filter'],
         ]);
     }
 
