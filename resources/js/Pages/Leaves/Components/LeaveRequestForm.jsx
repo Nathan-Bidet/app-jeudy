@@ -62,6 +62,21 @@ function addDaysToIsoDate(isoDate, daysToAdd) {
     return `${nextYear}-${nextMonth}-${nextDay}`;
 }
 
+function SelectionIndicator({ selected }) {
+    return (
+        <span
+            className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
+                selected
+                    ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
+                    : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
+            }`}
+            aria-hidden="true"
+        >
+            ✓
+        </span>
+    );
+}
+
 export default function LeaveRequestForm({
     users = [],
     leaveTypes = [],
@@ -70,6 +85,9 @@ export default function LeaveRequestForm({
     allowMultiplePeriods = false,
     onSuccess,
 }) {
+    const defaultLeaveTypeId = leaveTypes[0]?.id ? String(leaveTypes[0].id) : '';
+    const hasLeaveTypes = leaveTypes.length > 0;
+
     const buildEmptyPeriod = () => ({
         start_date: '',
         end_date: '',
@@ -82,7 +100,7 @@ export default function LeaveRequestForm({
 
     const form = useForm({
         target_user_id: defaultTargetUserId || users[0]?.id || '',
-        leave_type_id: '',
+        leave_type_id: defaultLeaveTypeId,
         start_date: '',
         end_date: '',
         start_portion: 'full_day',
@@ -163,13 +181,6 @@ export default function LeaveRequestForm({
             ...buildEmptyPeriod(),
             ...(periodInput || {}),
         };
-
-        if (period.start_date && !period.end_date && selectedMaxDays === 1) {
-            period.end_date = period.start_date;
-        }
-        if (period.end_date && !period.start_date && selectedMaxDays === 1) {
-            period.start_date = period.end_date;
-        }
 
         if (period.start_date && period.end_date && period.end_date < period.start_date) {
             period.end_date = period.start_date;
@@ -260,6 +271,23 @@ export default function LeaveRequestForm({
     }, [users, form.data.target_user_id]);
 
     useEffect(() => {
+        if (!hasLeaveTypes) {
+            if (form.data.leave_type_id !== '') {
+                form.setData('leave_type_id', '');
+            }
+            return;
+        }
+
+        const selectedExists = leaveTypes.some(
+            (typeOption) => String(typeOption.id) === String(form.data.leave_type_id),
+        );
+
+        if (!selectedExists) {
+            form.setData('leave_type_id', defaultLeaveTypeId);
+        }
+    }, [hasLeaveTypes, leaveTypes, defaultLeaveTypeId, form.data.leave_type_id, form]);
+
+    useEffect(() => {
         if (canRequestForOthers) {
             return;
         }
@@ -279,9 +307,6 @@ export default function LeaveRequestForm({
         }
 
         if (!endDate) {
-            if (selectedMaxDays === 1) {
-                form.setData('end_date', startDate);
-            }
             return;
         }
 
@@ -304,9 +329,6 @@ export default function LeaveRequestForm({
         }
 
         if (!startDate) {
-            if (selectedMaxDays === 1) {
-                form.setData('start_date', endDate);
-            }
             return;
         }
 
@@ -357,10 +379,14 @@ export default function LeaveRequestForm({
     const submit = (event) => {
         event.preventDefault();
 
+        if (!hasLeaveTypes) {
+            return;
+        }
+
         if (allowMultiplePeriods) {
             form.transform((data) => ({
                 target_user_id: data.target_user_id,
-                leave_type_id: data.leave_type_id || null,
+                leave_type_id: data.leave_type_id,
                 message: data.message || null,
                 periods: (Array.isArray(data.periods) ? data.periods : []).map((period) => {
                     const normalizedPeriod = normalizePeriod(period);
@@ -385,7 +411,7 @@ export default function LeaveRequestForm({
                 onSuccess: () => {
                     form.reset('periods', 'message');
                     form.setData('target_user_id', defaultTargetUserId || users[0]?.id || '');
-                    form.setData('leave_type_id', '');
+                    form.setData('leave_type_id', defaultLeaveTypeId);
                     form.setData('message', '');
                     form.setData('periods', [buildEmptyPeriod()]);
                     if (typeof onSuccess === 'function') {
@@ -405,7 +431,7 @@ export default function LeaveRequestForm({
 
         form.transform((data) => ({
             target_user_id: data.target_user_id,
-            leave_type_id: data.leave_type_id || null,
+            leave_type_id: data.leave_type_id,
             start_at: toDateTime(data.start_date, startTime),
             end_at: toDateTime(data.end_date || data.start_date, endTime),
             start_portion: data.start_portion,
@@ -421,7 +447,7 @@ export default function LeaveRequestForm({
             onSuccess: () => {
                 form.reset('start_date', 'end_date', 'start_portion', 'end_portion', 'custom_start_time', 'custom_end_time', 'message');
                 form.setData('target_user_id', defaultTargetUserId || users[0]?.id || '');
-                form.setData('leave_type_id', '');
+                form.setData('leave_type_id', defaultLeaveTypeId);
                 form.setData('start_portion', 'full_day');
                 form.setData('end_portion', 'full_day');
                 form.setData('custom_start_time', '08:00');
@@ -465,9 +491,9 @@ export default function LeaveRequestForm({
                     <select
                         value={form.data.leave_type_id}
                         onChange={(event) => form.setData('leave_type_id', event.target.value)}
+                        disabled={!hasLeaveTypes}
                         className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm text-[var(--app-text)]"
                     >
-                        <option value="">Sélectionner</option>
                         {leaveTypes.map((typeOption) => (
                             <option key={typeOption.id} value={typeOption.id}>
                                 {(() => {
@@ -479,6 +505,11 @@ export default function LeaveRequestForm({
                             </option>
                         ))}
                     </select>
+                    {!hasLeaveTypes ? (
+                        <p className="text-xs text-[var(--app-muted)]">
+                            Aucun type de congé disponible. Contactez un administrateur.
+                        </p>
+                    ) : null}
                     {form.errors.leave_type_id ? (
                         <p className="text-xs text-red-600">{form.errors.leave_type_id}</p>
                     ) : null}
@@ -541,8 +572,91 @@ export default function LeaveRequestForm({
                                     </label>
                                 </div>
 
+                                <div className="space-y-4 md:hidden">
+                                    <label className="space-y-1.5">
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">À partir du</span>
+                                        <input
+                                            type="date"
+                                            value={period.start_date}
+                                            onChange={(event) => updatePeriod(index, { start_date: event.target.value })}
+                                            min={periodStartMin}
+                                            max={periodStartMax}
+                                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
+                                        />
+                                    </label>
+
+                                    {!isSingleDayPeriod ? (
+                                        <div className="grid gap-3 sm:grid-cols-2">
+                                            {MULTI_DAY_OPTIONS.map((option) => {
+                                                const isSelected = period.start_portion === option.value;
+                                                return (
+                                                    <button
+                                                        key={`mobile-period-start-${index}-${option.value}`}
+                                                        type="button"
+                                                        onClick={() => updatePeriod(index, { start_portion: option.value })}
+                                                        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-center"
+                                                    >
+                                                        <SelectionIndicator selected={isSelected} />
+                                                        <span className="text-sm text-[var(--app-text)]">{option.label}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : null}
+
+                                    <label className="space-y-1.5">
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Jusqu&apos;au</span>
+                                        <input
+                                            type="date"
+                                            value={period.end_date}
+                                            onChange={(event) => updatePeriod(index, { end_date: event.target.value })}
+                                            min={periodEndMin}
+                                            max={periodEndMax}
+                                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
+                                        />
+                                    </label>
+
+                                    {isSingleDayPeriod ? (
+                                        <div className="grid gap-3 sm:grid-cols-3">
+                                            {SINGLE_DAY_OPTIONS.map((option) => {
+                                                const isSelected = period.start_portion === option.value && period.end_portion === option.value;
+                                                return (
+                                                    <button
+                                                        key={`mobile-single-period-${index}-${option.value}`}
+                                                        type="button"
+                                                        onClick={() => updatePeriod(index, { start_portion: option.value, end_portion: option.value })}
+                                                        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-center"
+                                                    >
+                                                        <SelectionIndicator selected={isSelected} />
+                                                    <span className="text-sm text-[var(--app-text)]">{option.label}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                        <>
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                {MULTI_DAY_OPTIONS.map((option) => {
+                                                    const isSelected = period.end_portion === option.value;
+                                                    return (
+                                                        <button
+                                                            key={`mobile-period-end-${index}-${option.value}`}
+                                                            type="button"
+                                                            onClick={() => updatePeriod(index, { end_portion: option.value })}
+                                                            className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-center"
+                                                        >
+                                                            <SelectionIndicator selected={isSelected} />
+                                                            <span className="text-sm text-[var(--app-text)]">{option.label}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
                                 {isSingleDayPeriod ? (
-                                    <div className="grid gap-3 sm:grid-cols-3">
+                                    <div className="hidden gap-3 sm:grid-cols-3 md:grid">
                                         {SINGLE_DAY_OPTIONS.map((option) => {
                                             const isSelected = period.start_portion === option.value && period.end_portion === option.value;
                                             return (
@@ -552,34 +666,14 @@ export default function LeaveRequestForm({
                                                     onClick={() => updatePeriod(index, { start_portion: option.value, end_portion: option.value })}
                                                     className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-center"
                                                 >
-                                                    <span
-                                                        className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
-                                                            isSelected
-                                                                ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
-                                                                : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
-                                                        }`}
-                                                    >
-                                                        {isSelected ? '✔' : ''}
-                                                    </span>
+                                                    <SelectionIndicator selected={isSelected} />
                                                     <span className="text-sm text-[var(--app-text)]">{option.label}</span>
                                                 </button>
                                             );
                                         })}
                                     </div>
                                 ) : (
-                                    <div className="grid gap-4 md:grid-cols-2">
-                                        <label className="space-y-1.5 md:hidden">
-                                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">À partir du</span>
-                                            <input
-                                                type="date"
-                                                value={period.start_date}
-                                                onChange={(event) => updatePeriod(index, { start_date: event.target.value })}
-                                                min={periodStartMin}
-                                                max={periodStartMax}
-                                                className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
-                                            />
-                                        </label>
-
+                                    <div className="hidden gap-4 md:grid md:grid-cols-2">
                                         <div className="grid gap-3 sm:grid-cols-2 md:col-start-1">
                                             {MULTI_DAY_OPTIONS.map((option) => {
                                                 const isSelected = period.start_portion === option.value;
@@ -590,32 +684,12 @@ export default function LeaveRequestForm({
                                                         onClick={() => updatePeriod(index, { start_portion: option.value })}
                                                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-center"
                                                     >
-                                                        <span
-                                                            className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
-                                                                isSelected
-                                                                    ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
-                                                                    : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
-                                                            }`}
-                                                        >
-                                                            {isSelected ? '✔' : ''}
-                                                        </span>
+                                                        <SelectionIndicator selected={isSelected} />
                                                         <span className="text-sm text-[var(--app-text)]">{option.label}</span>
                                                     </button>
                                                 );
                                             })}
                                         </div>
-
-                                        <label className="space-y-1.5 md:hidden">
-                                            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Jusqu&apos;au</span>
-                                            <input
-                                                type="date"
-                                                value={period.end_date}
-                                                onChange={(event) => updatePeriod(index, { end_date: event.target.value })}
-                                                min={periodEndMin}
-                                                max={periodEndMax}
-                                                className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
-                                            />
-                                        </label>
 
                                         <div className="grid gap-3 sm:grid-cols-2 md:col-start-2 md:row-start-1">
                                             {MULTI_DAY_OPTIONS.map((option) => {
@@ -627,15 +701,7 @@ export default function LeaveRequestForm({
                                                         onClick={() => updatePeriod(index, { end_portion: option.value })}
                                                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-center"
                                                     >
-                                                        <span
-                                                            className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
-                                                                isSelected
-                                                                    ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
-                                                                    : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
-                                                            }`}
-                                                        >
-                                                            {isSelected ? '✔' : ''}
-                                                        </span>
+                                                        <SelectionIndicator selected={isSelected} />
                                                         <span className="text-sm text-[var(--app-text)]">{option.label}</span>
                                                     </button>
                                                 );
@@ -687,9 +753,7 @@ export default function LeaveRequestForm({
                 </label>
 
                 <label
-                    className={`space-y-1.5 ${
-                        !allowMultiplePeriods && !isSingleDayRequest ? 'hidden md:block' : ''
-                    }`}
+                    className="hidden space-y-1.5 md:block"
                 >
                     <span className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Jusqu'au</span>
                     <input
@@ -715,22 +779,14 @@ export default function LeaveRequestForm({
                             <button
                                 key={`single-day-${option.value}`}
                                 type="button"
-                                onClick={() => form.setData({
-                                    ...form.data,
-                                    start_portion: option.value,
-                                    end_portion: option.value,
-                                })}
-                                className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-3 text-center"
-                            >
-                                <span
-                                    className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
-                                        isSelected
-                                            ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
-                                            : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
-                                    }`}
-                                >
-                                    {isSelected ? '✔' : ''}
-                                </span>
+                            onClick={() => form.setData({
+                                ...form.data,
+                                start_portion: option.value,
+                                end_portion: option.value,
+                            })}
+                            className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-3 text-center"
+                        >
+                                <SelectionIndicator selected={isSelected} />
                                 <span className="text-sm text-[var(--app-text)]">{option.label}</span>
                             </button>
                         );
@@ -743,20 +799,12 @@ export default function LeaveRequestForm({
                             const isSelected = multiDayStartSelection === option.value;
                             return (
                                 <button
-                                    key={`multi-day-start-${option.value}`}
-                                    type="button"
-                                    onClick={() => form.setData('start_portion', option.value)}
-                                    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-3 text-center"
-                                >
-                                    <span
-                                        className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
-                                            isSelected
-                                                ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
-                                                : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
-                                        }`}
-                                    >
-                                        {isSelected ? '✔' : ''}
-                                    </span>
+                                key={`multi-day-start-${option.value}`}
+                                type="button"
+                                onClick={() => form.setData('start_portion', option.value)}
+                                className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-3 text-center"
+                            >
+                                    <SelectionIndicator selected={isSelected} />
                                     <span className="text-sm text-[var(--app-text)]">{option.label}</span>
                                 </button>
                             );
@@ -783,20 +831,12 @@ export default function LeaveRequestForm({
                             const isSelected = multiDayEndSelection === option.value;
                             return (
                                 <button
-                                    key={`multi-day-end-${option.value}`}
-                                    type="button"
-                                    onClick={() => form.setData('end_portion', option.value)}
-                                    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-3 text-center"
-                                >
-                                    <span
-                                        className={`flex h-5 w-5 items-center justify-center rounded-[4px] border text-[12px] leading-none transition-all duration-200 ${
-                                            isSelected
-                                                ? 'border-[var(--brand-brown)] bg-[var(--app-surface)] text-[var(--app-text)]'
-                                                : 'border-[var(--app-border)] bg-[var(--app-surface)] text-transparent'
-                                        }`}
-                                    >
-                                        {isSelected ? '✔' : ''}
-                                    </span>
+                                key={`multi-day-end-${option.value}`}
+                                type="button"
+                                onClick={() => form.setData('end_portion', option.value)}
+                                className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-3 text-center"
+                            >
+                                    <SelectionIndicator selected={isSelected} />
                                     <span className="text-sm text-[var(--app-text)]">{option.label}</span>
                                 </button>
                             );
@@ -824,7 +864,7 @@ export default function LeaveRequestForm({
             <div className="flex justify-end">
                 <button
                     type="submit"
-                    disabled={form.processing}
+                    disabled={form.processing || !hasLeaveTypes}
                     className="inline-flex items-center rounded-xl border border-[var(--app-border)] bg-[var(--app-accent)] px-4 py-2 text-sm font-semibold text-[var(--app-accent-contrast)] disabled:opacity-60"
                 >
                     {form.processing ? 'Envoi…' : 'Envoyer la demande'}

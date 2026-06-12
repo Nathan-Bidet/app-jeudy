@@ -15,6 +15,7 @@ export default function LeavesIndex({
 }) {
     const [modificationForms, setModificationForms] = useState({});
     const [showValidationHistory, setShowValidationHistory] = useState(false);
+    const [showAllMyLeaveRequests, setShowAllMyLeaveRequests] = useState(false);
 
     const formatDateFr = (isoDate) => {
         if (!isoDate || typeof isoDate !== 'string') {
@@ -190,6 +191,29 @@ export default function LeavesIndex({
     };
 
     const defaultValidationStatuses = ['pending', 'pending_user_confirmation'];
+    const sortedMyLeaveRequests = useMemo(() => {
+        const requestTimestamp = (request) => {
+            const createdAt = Date.parse(request?.created_at || '');
+            if (!Number.isNaN(createdAt)) return createdAt;
+
+            const startAt = Date.parse(request?.start_at || '');
+            return Number.isNaN(startAt) ? 0 : startAt;
+        };
+
+        return [...myLeaveRequests].sort((left, right) => {
+            const leftDate = requestTimestamp(left);
+            const rightDate = requestTimestamp(right);
+
+            if (leftDate !== rightDate) {
+                return rightDate - leftDate;
+            }
+
+            return Number(right?.id || 0) - Number(left?.id || 0);
+        });
+    }, [myLeaveRequests]);
+    const visibleMyLeaveRequests = showAllMyLeaveRequests
+        ? sortedMyLeaveRequests
+        : sortedMyLeaveRequests.slice(0, 3);
     const pendingLeaveRequestsToValidate = useMemo(
         () => leaveRequestsToValidate.filter((request) => (
             defaultValidationStatuses.includes(String(request.status || '').toLowerCase())
@@ -216,14 +240,19 @@ export default function LeavesIndex({
                 <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-5 sm:px-6 sm:py-6">
                     <h2 className="text-lg font-bold text-[var(--app-text)]">Mes demandes</h2>
                     <div className="mt-3 space-y-3">
-                        {myLeaveRequests.length === 0 ? (
+                        {sortedMyLeaveRequests.length === 0 ? (
                             <p className="text-sm text-[var(--app-muted)]">Aucune demande.</p>
                         ) : (
-                            myLeaveRequests.map((request) => (
+                            visibleMyLeaveRequests.map((request) => (
                                 <div key={request.id} className="rounded-xl border p-3" style={getLeaveCardStyle(request.status)}>
                                     <p className="text-sm text-[var(--app-text)]">
                                         <span className="font-semibold">Utilisateur :</span> {request.target_label}
                                     </p>
+                                    {request.leave_type_label ? (
+                                        <p className="text-sm text-[var(--app-text)]">
+                                            <span className="font-semibold">Type de congé :</span> {request.leave_type_label}
+                                        </p>
+                                    ) : null}
                                     <p className="text-sm text-[var(--app-text)]">
                                         <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
                                     </p>
@@ -281,6 +310,17 @@ export default function LeavesIndex({
                             ))
                         )}
                     </div>
+                    {sortedMyLeaveRequests.length > 3 ? (
+                        <div className="mt-4 flex justify-center">
+                            <button
+                                type="button"
+                                className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
+                                onClick={() => setShowAllMyLeaveRequests((prev) => !prev)}
+                            >
+                                {showAllMyLeaveRequests ? 'Afficher moins' : 'Afficher plus'}
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
 
                 {canValidateRequests ? (
@@ -304,6 +344,11 @@ export default function LeavesIndex({
                                         <p className="text-sm text-[var(--app-text)]">
                                             <span className="font-semibold">Utilisateur :</span> {request.target_label}
                                         </p>
+                                        {request.leave_type_label ? (
+                                            <p className="text-sm text-[var(--app-text)]">
+                                                <span className="font-semibold">Type de congé :</span> {request.leave_type_label}
+                                            </p>
+                                        ) : null}
                                         <p className="text-sm text-[var(--app-text)]">
                                             <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
                                         </p>

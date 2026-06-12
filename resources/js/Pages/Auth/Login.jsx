@@ -88,14 +88,14 @@ export default function Login({ status, canResetPassword }) {
                             }
                         />
                         <span className="ms-2 text-sm text-gray-600">
-                            Remember me
+                            Se souvenir de moi
                         </span>
                     </label>
                 </div>
 
                 <div className="mt-4 flex items-center justify-end">
                     <PrimaryButton className="ms-4" disabled={processing}>
-                        Log in
+                        SE CONNECTER
                     </PrimaryButton>
                 </div>
             </form>

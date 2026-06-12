@@ -89,7 +89,7 @@ function SearchableSelect({
                     const selectedLabel = selectedOption?.label || '';
                     if (trimmed !== '' && (!hasSelection || trimmed !== selectedLabel)) {
                         onFreeSelect?.(trimmed);
-                    } else if (!hasSelection && trimmed === '') {
+                    } else if (trimmed === '') {
                         onChange('');
                     }
                 }
@@ -111,6 +111,9 @@ function SearchableSelect({
     const handleSelect = (nextValue) => {
         selectingRef.current = true;
         onChange(nextValue);
+        if (!nextValue) {
+            setQuery('');
+        }
         setOpen(false);
         setActiveIndex(-1);
         // Allow blur to happen without triggering free-text overwrite.
@@ -126,7 +129,11 @@ function SearchableSelect({
                 type="text"
                 value={open ? query : (selectedOption?.label || freeLabel || '')}
                 onChange={(e) => {
-                    setQuery(e.target.value);
+                    const nextQuery = e.target.value;
+                    setQuery(nextQuery);
+                    if (allowFree && nextQuery.trim() === '') {
+                        onChange('');
+                    }
                     if (!open) setOpen(true);
                     setActiveIndex(-1);
                 }}
@@ -153,7 +160,7 @@ function SearchableSelect({
                             const selectedLabel = selectedOption?.label || '';
                             if (trimmed !== '' && (!hasSelection || trimmed !== selectedLabel)) {
                                 onFreeSelect?.(trimmed);
-                            } else if (!hasSelection && trimmed === '') {
+                            } else if (trimmed === '') {
                                 onChange('');
                             }
                         }
@@ -212,7 +219,12 @@ function SearchableSelect({
                 <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-lg">
                     <button
                         type="button"
-                        onClick={() => handleSelect('')}
+                        onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            selectingRef.current = true;
+                            handleSelect('');
+                        }}
                         className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-[var(--app-surface-soft)]"
                     >
                         <span>{emptyLabel}</span>
@@ -643,6 +655,10 @@ export default function TaskModal({
         lastAssigneeKeyRef.current = currentAssigneeKey;
 
         if ((form?.data?.assignee_type || '') !== 'user') {
+            return;
+        }
+
+        if (String(form?.data?.vehicle_id || '').trim()) {
             return;
         }
 

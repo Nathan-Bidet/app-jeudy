@@ -156,6 +156,77 @@ function compareGroupsForDisplay(left, right) {
     return Number(leftAssignee?.id || 0) - Number(rightAssignee?.id || 0);
 }
 
+function isPointedValue(value) {
+    return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function findTaskGroup(groups, taskId) {
+    return (groups || []).find((group) =>
+        (group.tasks || []).some((task) => Number(task.id) === Number(taskId)),
+    ) || null;
+}
+
+function removeTaskFromGroups(groups, taskId) {
+    if (!Array.isArray(groups)) return groups;
+
+    return groups
+        .map((group) => ({
+            ...group,
+            tasks: (group.tasks || []).filter((task) => Number(task.id) !== Number(taskId)),
+        }))
+        .filter((group) => group.tasks.length > 0);
+}
+
+function upsertTaskInGroups(groups, sourceGroup, task) {
+    if (!sourceGroup || !task) return Array.isArray(groups) ? groups : [];
+
+    const nextGroups = removeTaskFromGroups(Array.isArray(groups) ? groups : [], task.id);
+    const targetIndex = nextGroups.findIndex((group) => String(group.key) === String(sourceGroup.key));
+
+    if (targetIndex === -1) {
+        return [
+            ...nextGroups,
+            {
+                ...sourceGroup,
+                assignee: sourceGroup.assignee ? { ...sourceGroup.assignee } : sourceGroup.assignee,
+                tasks: [{ ...task }],
+            },
+        ].sort(compareGroupsForDisplay);
+    }
+
+    const targetGroup = nextGroups[targetIndex];
+    const tasks = [...(targetGroup.tasks || []), { ...task }].sort((left, right) => {
+        const positionDiff = Number(left?.position || 0) - Number(right?.position || 0);
+        if (positionDiff !== 0) return positionDiff;
+        return Number(left?.id || 0) - Number(right?.id || 0);
+    });
+
+    nextGroups[targetIndex] = {
+        ...targetGroup,
+        tasks,
+    };
+
+    return nextGroups;
+}
+
+function updateTaskPointedState(task, pointed) {
+    return {
+        ...task,
+        pointed: Boolean(pointed),
+        pointed_at: pointed ? task?.pointed_at ?? null : null,
+        pointed_at_label: pointed ? task?.pointed_at_label ?? null : null,
+        pointed_by: pointed ? task?.pointed_by ?? null : null,
+    };
+}
+
+function applyPointOverrideToGroups(groups, sourceGroup, task, pointed, targetPointedState) {
+    const updatedTask = updateTaskPointedState(task, pointed);
+    if (Boolean(pointed) !== Boolean(targetPointedState)) {
+        return removeTaskFromGroups(groups, task.id);
+    }
+    return upsertTaskInGroups(groups, sourceGroup, updatedTask);
+}
+
 function normalizeTaskFormPayload(data) {
     const hasFreeLabel = Boolean((data.assignee_label_free || '').trim());
     const hasAssignee = Boolean(data.assignee_type) && Boolean(data.assignee_id);
@@ -309,10 +380,23 @@ function lookupRemorque(reference, id) {
 }
 
 function taskToForm(task, fallbackGroup) {
-    const normalizedTaskAssigneeType = ['user', 'transporter', 'depot', 'free'].includes(task?.assignee_type) ? task.assignee_type : '';
-    const normalizedFallbackAssigneeType = ['user', 'transporter', 'depot'].includes(fallbackGroup?.assignee?.type)
+    const taskAssigneeType = task?.assignee_type || task?.assignee?.type || '';
+    const normalizedTaskAssigneeType = ['user', 'transporter', 'depot', 'free'].includes(taskAssigneeType)
+        ? taskAssigneeType
+        : '';
+    const normalizedFallbackAssigneeType = ['user', 'transporter', 'depot', 'free'].includes(fallbackGroup?.assignee?.type)
         ? fallbackGroup.assignee.type
         : '';
+    const assigneeType = normalizedTaskAssigneeType || normalizedFallbackAssigneeType;
+    const assigneeId = task?.assignee_id ?? task?.assignee?.id ?? fallbackGroup?.assignee?.id ?? '';
+    const freeAssigneeLabel =
+        task?.assignee_label_free
+        || task?.assignee_label
+        || task?.assignee?.name
+        || fallbackGroup?.assignee?.name
+        || '';
+    const vehicleId = task?.vehicle_id ?? task?.vehicle?.id ?? '';
+    const remorqueId = task?.remorque_id ?? task?.remorque?.id ?? '';
 
     if (!task) {
         return {
@@ -328,11 +412,11 @@ function taskToForm(task, fallbackGroup) {
     return {
         date: task.date || fallbackGroup?.date || '',
         fin_date: toDayMonth(task.fin_date || ''),
-        assignee_type: normalizedTaskAssigneeType || normalizedFallbackAssigneeType,
-        assignee_id: String(task.assignee_id || fallbackGroup?.assignee?.id || ''),
-        assignee_label_free: task.assignee_type === 'free' ? (task.assignee_label_free || task.assignee_label || '') : '',
-        vehicle_id: task.vehicle_id ? String(task.vehicle_id) : '',
-        remorque_id: task.remorque_id ? String(task.remorque_id) : '',
+        assignee_type: assigneeType,
+        assignee_id: assigneeType !== 'free' && assigneeId ? String(assigneeId) : '',
+        assignee_label_free: assigneeType === 'free' ? freeAssigneeLabel : '',
+        vehicle_id: vehicleId ? String(vehicleId) : '',
+        remorque_id: remorqueId ? String(remorqueId) : '',
         task: task.task || '',
         loading_place: task.loading_place || '',
         delivery_place: task.delivery_place || '',
@@ -347,11 +431,13 @@ function taskToForm(task, fallbackGroup) {
 function buildFormTaskFromRow(row, group) {
     return {
         ...row,
+        date: row?.date || group?.date || '',
         fin_date: toDayMonth(row?.fin_date || ''),
         assignee_type: ['user', 'transporter', 'depot', 'free'].includes(group?.assignee?.type) ? group.assignee.type : '',
         assignee_id: group?.assignee?.id,
         assignee_label_free: group?.assignee?.type === 'free' ? group.assignee.name : '',
-        remorque_id: row?.remorque_id || '',
+        vehicle_id: row?.vehicle_id || row?.vehicle?.id || '',
+        remorque_id: row?.remorque_id || row?.remorque?.id || '',
         loading_place: row?.loading_place || '',
         delivery_place: row?.delivery_place || '',
     };
@@ -711,6 +797,7 @@ export default function AprevoirIndex({
     permissions = {},
     focus_task_id = null,
 }) {
+    const tableSectionRef = useRef(null);
     const [unpointedGroups, setUnpointedGroups] = useState(groups);
     const [pointedGroups, setPointedGroups] = useState(null);
     const [pointedGroupsLoaded, setPointedGroupsLoaded] = useState(false);
@@ -735,8 +822,10 @@ export default function AprevoirIndex({
     const quickSearchButtonRef = useRef(null);
     const searchDebounceRef = useRef(null);
     const searchEffectReadyRef = useRef(false);
+    const pendingScrollToTableRef = useRef(false);
     const optimisticBackupRef = useRef(new Map());
     const pendingMovesRef = useRef(new Map());
+    const pointOverridesRef = useRef(new Map());
 
     const [savingTaskIds, setSavingTaskIds] = useState({});
     const pendingMutationIdsRef = useRef(new Set());
@@ -750,6 +839,19 @@ export default function AprevoirIndex({
     useEffect(() => {
         setUnpointedGroups(groups);
     }, [groups]);
+
+    const scrollToTableResults = () => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            tableSectionRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            });
+        });
+    };
 
     useEffect(() => {
         const onScroll = () => {
@@ -834,6 +936,10 @@ export default function AprevoirIndex({
         filterState.boursagri_contract_number,
         filterState.color_filter,
     ]);
+    const prefetchFilterKey = useMemo(
+        () => JSON.stringify(prefetchBaseFilters),
+        [prefetchBaseFilters],
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -849,7 +955,18 @@ export default function AprevoirIndex({
             },
         }).then((response) => {
             if (cancelled) return;
-            setPointedGroups(Array.isArray(response?.data?.groups) ? response.data.groups : []);
+            let nextPointedGroups = Array.isArray(response?.data?.groups) ? response.data.groups : [];
+            pointOverridesRef.current.forEach((override) => {
+                if (override.filterKey !== prefetchFilterKey) return;
+                nextPointedGroups = applyPointOverrideToGroups(
+                    nextPointedGroups,
+                    override.group,
+                    override.task,
+                    override.pointed,
+                    true,
+                );
+            });
+            setPointedGroups(nextPointedGroups);
             setPointedGroupsLoaded(true);
             setPointedGroupsLoading(false);
             setPointedGroupsError(false);
@@ -865,7 +982,7 @@ export default function AprevoirIndex({
         return () => {
             cancelled = true;
         };
-    }, [prefetchBaseFilters, pointedRefreshTick]);
+    }, [prefetchBaseFilters, prefetchFilterKey, pointedRefreshTick]);
 
     const mergedAllGroups = useMemo(() => {
         const map = new Map();
@@ -919,6 +1036,15 @@ export default function AprevoirIndex({
         }
         setLocalGroups(unpointedGroups);
     }, [filterState.pointed_filter, unpointedGroups, pointedGroups, pointedGroupsLoaded, mergedAllGroups]);
+
+    useEffect(() => {
+        if (!pendingScrollToTableRef.current) {
+            return;
+        }
+
+        pendingScrollToTableRef.current = false;
+        scrollToTableResults();
+    }, [localGroups]);
 
     useEffect(() => {
         const targetId = Number(focus_task_id || 0);
@@ -1006,6 +1132,7 @@ export default function AprevoirIndex({
 
     const submitFilters = (nextState) => {
         const data = nextState ?? filterState;
+        pendingScrollToTableRef.current = true;
         router.get(
             route('a_prevoir.index'),
             {
@@ -1065,6 +1192,7 @@ export default function AprevoirIndex({
             ? String(nextPointedFilter)
             : 'unpointed';
 
+        pendingScrollToTableRef.current = true;
         setFilterState((prev) => {
             return { ...prev, pointed_filter: normalized };
         });
@@ -1112,9 +1240,15 @@ export default function AprevoirIndex({
     };
 
     const openDuplicate = (task) => {
+        const sourceGroup =
+            findTaskGroup(localGroups, task.id)
+            || findTaskGroup(unpointedGroups, task.id)
+            || findTaskGroup(pointedGroups, task.id);
+        const templateTask = sourceGroup ? buildFormTaskFromRow(task, sourceGroup) : task;
+
         setTaskModalMode('create');
         setEditingTaskId(null);
-        setModalTemplateTask(task);
+        setModalTemplateTask(templateTask);
         setModalFallbackGroup(null);
         setModalOpen(true);
     };
@@ -1462,14 +1596,82 @@ export default function AprevoirIndex({
     };
 
     const togglePoint = (task, pointed) => {
+        const taskId = Number(task?.id || 0);
+        if (!taskId || savingTaskIds[taskId]) return;
+
+        const nextPointed = Boolean(pointed);
+        const previousPointed = isPointedValue(task?.pointed);
+        if (nextPointed === previousPointed) return;
+
+        const sourceGroup =
+            findTaskGroup(localGroups, taskId)
+            || findTaskGroup(unpointedGroups, taskId)
+            || findTaskGroup(pointedGroups, taskId);
+        if (!sourceGroup) return;
+
+        const previousTask = updateTaskPointedState(task, previousPointed);
+        const nextTask = updateTaskPointedState(task, nextPointed);
+        const mutationId =
+            typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+        pointOverridesRef.current.set(taskId, {
+            group: sourceGroup,
+            task: nextTask,
+            pointed: nextPointed,
+            filterKey: prefetchFilterKey,
+            mutationId,
+        });
+        pendingMutationIdsRef.current.add(mutationId);
+        setSavingTaskIds((prev) => ({ ...prev, [taskId]: true }));
+        setUnpointedGroups((prev) =>
+            applyPointOverrideToGroups(prev, sourceGroup, nextTask, nextPointed, false),
+        );
+        setPointedGroups((prev) =>
+            applyPointOverrideToGroups(prev, sourceGroup, nextTask, nextPointed, true),
+        );
+
         router.patch(
-            route('a_prevoir.tasks.point', task.id),
+            route('a_prevoir.tasks.point', taskId),
             {
-                pointed: Boolean(pointed),
+                pointed: nextPointed,
+                client_mutation_id: mutationId,
             },
             {
                 preserveScroll: true,
                 preserveState: true,
+                onError: () => {
+                    pointOverridesRef.current.delete(taskId);
+                    pendingMutationIdsRef.current.delete(mutationId);
+                    setUnpointedGroups((prev) =>
+                        applyPointOverrideToGroups(prev, sourceGroup, previousTask, previousPointed, false),
+                    );
+                    setPointedGroups((prev) =>
+                        applyPointOverrideToGroups(prev, sourceGroup, previousTask, previousPointed, true),
+                    );
+                    window.dispatchEvent(
+                        new CustomEvent('app:toast', {
+                            detail: {
+                                type: 'error',
+                                message: "Échec du pointage. L'état précédent a été restauré.",
+                            },
+                        }),
+                    );
+                },
+                onFinish: () => {
+                    setSavingTaskIds((prev) => {
+                        const next = { ...prev };
+                        delete next[taskId];
+                        return next;
+                    });
+                    window.setTimeout(() => {
+                        pendingMutationIdsRef.current.delete(mutationId);
+                        if (pointOverridesRef.current.get(taskId)?.mutationId === mutationId) {
+                            pointOverridesRef.current.delete(taskId);
+                        }
+                    }, 10000);
+                },
             },
         );
     };
@@ -1641,7 +1843,7 @@ export default function AprevoirIndex({
         <AppLayout title="À Prévoir" header={pageHeader}>
             <Head title="À Prévoir" />
 
-            <div className="w-full max-w-full space-y-4 px-0 sm:space-y-5">
+            <div ref={tableSectionRef} className="w-full max-w-full space-y-4 px-0 sm:space-y-5">
                 <DesktopTable
                     groups={localGroups}
                     pointedGroups={pointedGroups}

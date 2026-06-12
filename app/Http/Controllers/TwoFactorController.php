@@ -51,9 +51,39 @@ class TwoFactorController extends Controller
                 issuer: config('app.name', 'Laravel'),
                 secret: $pendingSecret,
             ),
+            'canSkip' => ! $isResetFlow && ! $this->isTotpEnabled($user),
             'status' => session('status'),
             'lockedUntil' => $this->lockedUntilIso($user),
         ]);
+    }
+
+    public function skipSetup(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+        $isResetFlow = (bool) $request->session()->get('two_factor_reset_flow', false);
+
+        if ($isResetFlow || $this->isTotpEnabled($user)) {
+            return redirect()->route('dashboard');
+        }
+
+        $user->forceFill([
+            'totp_setup_skipped_at' => now(),
+        ])->save();
+
+        $request->session()->forget('two_factor_pending_secret');
+
+        $this->writeAudit($request, $user, 'skip_2fa_setup');
+        $this->auditLogService->log([
+            'action' => 'skip_2fa_setup',
+            'module' => 'security',
+            'description' => sprintf('%s a ignoré la configuration initiale 2FA', $this->actorLabel($user)),
+            'payload' => [
+                'target_user_id' => (int) $user->id,
+                'target_user_name' => $this->actorLabel($user),
+            ],
+        ]);
+
+        return redirect()->intended(route('dashboard', absolute: false));
     }
 
     /**
@@ -98,6 +128,7 @@ class TwoFactorController extends Controller
         $user->forceFill([
             'totp_secret' => Crypt::encryptString($pendingSecret),
             'totp_enabled_at' => now(),
+            'totp_setup_skipped_at' => null,
             'totp_attempts' => 0,
             'totp_locked_until' => null,
             'totp_recovery_codes' => $this->encryptRecoveryCodes($recoveryCodes),
@@ -134,7 +165,7 @@ class TwoFactorController extends Controller
         $user = $request->user();
 
         if (! $this->isTotpEnabled($user)) {
-            return redirect()->route('two-factor.setup');
+            return redirect()->route('dashboard');
         }
 
         $this->ensureNotLocked($user);
@@ -170,7 +201,7 @@ class TwoFactorController extends Controller
         $user = $request->user();
 
         if (! $this->isTotpEnabled($user)) {
-            return redirect()->route('two-factor.setup');
+            return redirect()->route('dashboard');
         }
 
         if ($this->isSessionVerified($request, $user)) {
@@ -192,7 +223,7 @@ class TwoFactorController extends Controller
         $user = $request->user();
 
         if (! $this->isTotpEnabled($user)) {
-            return redirect()->route('two-factor.setup');
+            return redirect()->route('profile.edit');
         }
 
         $this->ensureNotLocked($user);
@@ -249,7 +280,7 @@ class TwoFactorController extends Controller
         $user = $request->user();
 
         if (! $this->isTotpEnabled($user)) {
-            return redirect()->route('two-factor.setup');
+            return redirect()->route('profile.edit');
         }
 
         return Inertia::render('Auth/TwoFactorRecoveryCodes', [
@@ -321,6 +352,7 @@ class TwoFactorController extends Controller
         $user->forceFill([
             'totp_secret' => null,
             'totp_enabled_at' => null,
+            'totp_setup_skipped_at' => now(),
             'totp_attempts' => 0,
             'totp_locked_until' => null,
             'totp_recovery_codes' => null,
@@ -335,7 +367,7 @@ class TwoFactorController extends Controller
             'two_factor_reset_flow',
         ]);
 
-        $this->writeAudit($request, $user, '2fa_disabled');
+        $this->writeAudit($request, $user, 'disable_2fa');
         $this->auditLogService->log([
             'action' => 'disable_2fa',
             'module' => 'security',
@@ -347,8 +379,8 @@ class TwoFactorController extends Controller
         ]);
 
         return redirect()
-            ->route('two-factor.setup')
-            ->with('status', __('Two-factor authentication was disabled. Re-enrollment is required.'));
+            ->route('profile.edit')
+            ->with('status', __('Two-factor authentication was disabled.'));
     }
 
     private function isSessionVerified(Request $request, User $user): bool

@@ -298,6 +298,11 @@ function TaskDataRow({
                     <span>—</span>
                 ) : (
                     <div className="flex flex-col items-center gap-0.5">
+                        {group?.assignee?.type === 'transporter' && group?.assignee?.company_name ? (
+                            <span className="block text-center font-medium">
+                                {group.assignee.company_name}
+                            </span>
+                        ) : null}
                         <button
                             type="button"
                             onClick={(e) => {
@@ -459,6 +464,7 @@ export default function DesktopTable({
     onPointedFilterChange,
 }) {
     const wrapperRef = useRef(null);
+    const pendingScrollAfterFilterRef = useRef({ active: false, closePopover: false });
     const dateFilterButtonRef = useRef(null);
     const finFilterButtonRef = useRef(null);
     const driverFilterButtonRef = useRef(null);
@@ -626,6 +632,13 @@ export default function DesktopTable({
         );
         const top = Math.max(8, buttonRect.bottom - wrapperRect.top + 8);
         setPos({ top, left });
+    };
+
+    const markScrollAfterFilterChange = ({ closePopover = false } = {}) => {
+        pendingScrollAfterFilterRef.current = {
+            active: true,
+            closePopover,
+        };
     };
 
     const groupedRowsBeforeColor = useMemo(() => {
@@ -823,6 +836,30 @@ export default function DesktopTable({
         prevRowPositionsRef.current = nextPositions;
     }, [displayRows]);
 
+    useEffect(() => {
+        if (!pendingScrollAfterFilterRef.current.active) {
+            return;
+        }
+
+        const { closePopover } = pendingScrollAfterFilterRef.current;
+        pendingScrollAfterFilterRef.current = { active: false, closePopover: false };
+
+        if (closePopover) {
+            closeAllColumnFilters();
+        }
+
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            wrapperRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            });
+        });
+    }, [displayRows]);
+
     const driverOptions = useMemo(() => {
         const seen = new Map();
         displayRows.forEach(({ group }) => {
@@ -909,16 +946,19 @@ export default function DesktopTable({
     };
 
     const selectDriverFilter = (value) => {
+        markScrollAfterFilterChange({ closePopover: true });
         setDriverFilter(value);
         setShowDriverFilter(false);
     };
 
     const selectFinFilter = (value) => {
+        markScrollAfterFilterChange({ closePopover: true });
         setFinFilter(value);
         setShowFinFilter(false);
     };
 
     const selectVehicleFilter = (value) => {
+        markScrollAfterFilterChange({ closePopover: true });
         setVehicleFilter(value);
         setShowVehicleFilter(false);
     };
@@ -1001,6 +1041,7 @@ export default function DesktopTable({
         const nextPointedFilter = nextMode === 'yes'
             ? 'pointed'
             : (nextMode === 'no' ? 'unpointed' : 'all');
+        markScrollAfterFilterChange({ closePopover: true });
         onPointedFilterChange?.(nextPointedFilter);
     };
 
@@ -1242,7 +1283,7 @@ export default function DesktopTable({
                                 onClick={clearDates}
                                 className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                             >
-                                Vider
+                                Effacer
                             </button>
                             <button
                                 type="button"
@@ -1454,10 +1495,13 @@ export default function DesktopTable({
                     </label>
                     <div className="relative mt-1">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
-                        <input
-                            type="text"
-                            value={taskTextFilter}
-                            onChange={(e) => setTaskTextFilter(e.target.value)}
+                            <input
+                                type="text"
+                                value={taskTextFilter}
+                                onChange={(e) => {
+                                    markScrollAfterFilterChange();
+                                    setTaskTextFilter(e.target.value);
+                                }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Escape' || e.key === 'Enter') {
                                     e.preventDefault();
@@ -1493,6 +1537,7 @@ export default function DesktopTable({
                                 <button
                                     type="button"
                                     onClick={() => {
+                                        markScrollAfterFilterChange({ closePopover: true });
                                         setTaskColorFilter('');
                                         setShowTaskColorMenu(false);
                                     }}
@@ -1519,6 +1564,7 @@ export default function DesktopTable({
                                                     key={option.key}
                                                     type="button"
                                                     onClick={() => {
+                                                        markScrollAfterFilterChange({ closePopover: true });
                                                         setTaskColorFilter(option.key);
                                                         setShowTaskColorMenu(false);
                                                     }}
@@ -1548,12 +1594,13 @@ export default function DesktopTable({
                         <button
                             type="button"
                             onClick={() => {
+                                markScrollAfterFilterChange();
                                 setTaskTextFilter('');
                                 setTaskColorFilter('');
                             }}
                             className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                         >
-                            Vider
+                            Effacer
                         </button>
                         <button
                             type="button"
@@ -1583,7 +1630,10 @@ export default function DesktopTable({
                         <input
                             type="text"
                             value={commentTextFilter}
-                            onChange={(e) => setCommentTextFilter(e.target.value)}
+                            onChange={(e) => {
+                                markScrollAfterFilterChange();
+                                setCommentTextFilter(e.target.value);
+                            }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Escape' || e.key === 'Enter') {
                                     e.preventDefault();
@@ -1598,10 +1648,13 @@ export default function DesktopTable({
                     <div className="mt-2 flex justify-end gap-2">
                         <button
                             type="button"
-                            onClick={() => setCommentTextFilter('')}
+                            onClick={() => {
+                                markScrollAfterFilterChange();
+                                setCommentTextFilter('');
+                            }}
                             className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                         >
-                            Vider
+                            Effacer
                         </button>
                         <button
                             type="button"
@@ -1641,6 +1694,7 @@ export default function DesktopTable({
                                                 key={`${code}-${value}`}
                                                 type="button"
                                                 onClick={() => {
+                                                    markScrollAfterFilterChange({ closePopover: true });
                                                     setMode(value);
                                                     if (code === 'X') {
                                                         applyPointedFilterFromXMode(value);
@@ -1678,7 +1732,10 @@ export default function DesktopTable({
                                         <input
                                             type="text"
                                             value={bContractTextFilter}
-                                            onChange={(e) => setBContractTextFilter(e.target.value)}
+                                            onChange={(e) => {
+                                                markScrollAfterFilterChange();
+                                                setBContractTextFilter(e.target.value);
+                                            }}
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Escape' || e.key === 'Enter') {
                                                     e.preventDefault();
@@ -1703,7 +1760,10 @@ export default function DesktopTable({
                                             <button
                                                 key={value}
                                                 type="button"
-                                                onClick={() => setBContractSort(value)}
+                                                onClick={() => {
+                                                    markScrollAfterFilterChange({ closePopover: true });
+                                                    setBContractSort(value);
+                                                }}
                                                 className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] leading-none ${
                                                     bContractSort === value
                                                         ? 'border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-dark)] text-[var(--color-black)]'
@@ -1722,6 +1782,7 @@ export default function DesktopTable({
                             <button
                                 type="button"
                                 onClick={() => {
+                                    markScrollAfterFilterChange({ closePopover: true });
                                     setXFilterMode('all');
                                     applyPointedFilterFromXMode('all');
                                     setDFilterMode('all');

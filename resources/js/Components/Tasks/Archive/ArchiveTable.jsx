@@ -462,37 +462,44 @@ export default function ArchiveTable({
                             rows.map((row) => (
                                 <tr
                                     key={row.id}
-                                    className="odd:bg-[var(--app-surface)] even:bg-[var(--app-surface-soft)]"
+                                    onDoubleClick={(event) => {
+                                        const target = event.target instanceof Element ? event.target : null;
+                                        if (target?.closest('button, a, input, textarea, select, [role="button"]')) {
+                                            return;
+                                        }
+                                        onOpenDetail?.(row);
+                                    }}
+                                    className="odd:bg-[var(--app-surface)] even:bg-[var(--app-surface-soft)] lg:cursor-pointer"
                                     style={rowStyle(row)}
                                 >
-                                    <td className="border-b border-[var(--app-border)] px-3 py-2 text-[var(--app-text)]">
+                                    <td className="border-b border-[var(--app-border)] px-3 py-2">
                                         <div className="font-semibold">{row.date_label || '—'}</div>
                                         {row.original_task_id ? (
-                                            <div className="text-xs text-[var(--app-muted)]">
+                                            <div className="text-xs opacity-75">
                                                 Source #{row.original_task_id}
                                             </div>
                                         ) : null}
                                     </td>
-                                    <td className="border-b border-[var(--app-border)] px-3 py-2 text-[var(--app-text)]">
+                                    <td className="border-b border-[var(--app-border)] px-3 py-2">
                                         <div className="font-medium">{row.assignee_label || 'Sans assigné'}</div>
-                                        <div className="text-xs text-[var(--app-muted)]">
+                                        <div className="text-xs opacity-75">
                                             {row.assignee_meta || '—'}
                                         </div>
                                     </td>
-                                    <td className="border-b border-[var(--app-border)] px-3 py-2 text-[var(--app-text)]">
+                                    <td className="border-b border-[var(--app-border)] px-3 py-2">
                                         <FormattedText className="line-clamp-3 font-medium" text={row.task || '—'} multiline />
                                         {row.is_boursagri && row.boursagri_contract_number ? (
-                                            <div className="mt-1 text-xs text-[var(--app-muted)]">
+                                            <div className="mt-1 text-xs opacity-80">
                                                 Contrat: {row.boursagri_contract_number}
                                             </div>
                                         ) : null}
                                         <IndicatorsInline indicators={row?.indicators || []} />
                                     </td>
-                                    <td className="border-b border-[var(--app-border)] px-3 py-2 text-[var(--app-text)]">
+                                    <td className="border-b border-[var(--app-border)] px-3 py-2">
                                         {row.comment ? (
-                                            <FormattedText className="line-clamp-3 text-xs text-[var(--app-muted)]" text={row.comment} multiline />
+                                            <FormattedText className="line-clamp-3 text-xs opacity-90" text={row.comment} multiline />
                                         ) : (
-                                            <span className="text-[var(--app-muted)]">—</span>
+                                            <span className="opacity-75">—</span>
                                         )}
                                     </td>
                                     <td className="border-b border-[var(--app-border)] px-2 py-2 text-center">
@@ -504,9 +511,9 @@ export default function ArchiveTable({
                                     <td className="border-b border-[var(--app-border)] px-2 py-2 text-center">
                                         <BoursagriIndicatorCell isBoursagri={row?.is_boursagri} />
                                     </td>
-                                    <td className="border-b border-[var(--app-border)] px-3 py-2 text-[var(--app-text)]">
+                                    <td className="border-b border-[var(--app-border)] px-3 py-2">
                                         <div>{row.archived_at_label || '—'}</div>
-                                        <div className="text-xs text-[var(--app-muted)]">
+                                        <div className="text-xs opacity-75">
                                             {row.archived_by_system ? 'Automatique' : 'Manuel'}
                                         </div>
                                     </td>
@@ -615,7 +622,7 @@ export default function ArchiveTable({
                                 onClick={clearDateFilters}
                                 className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                             >
-                                Vider
+                                Effacer
                             </button>
                             <button
                                 type="button"
@@ -719,7 +726,7 @@ export default function ArchiveTable({
                             onClick={clearTaskFilter}
                             className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                         >
-                            Vider
+                            Effacer
                         </button>
                         <button
                             type="button"
@@ -761,7 +768,7 @@ export default function ArchiveTable({
                             onClick={clearContractFilter}
                             className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                         >
-                            Vider
+                            Effacer
                         </button>
                         <button
                             type="button"
@@ -838,7 +845,7 @@ export default function ArchiveTable({
                                 onClick={clearBusinessFilters}
                                 className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
                             >
-                                Vider
+                                Effacer
                             </button>
                             <button
                                 type="button"

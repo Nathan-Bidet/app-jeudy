@@ -67,6 +67,11 @@ class LeaveRequest extends Model
         return $this->belongsTo(User::class, 'target_user_id');
     }
 
+    public function leaveType(): BelongsTo
+    {
+        return $this->belongsTo(LeaveType::class, 'leave_type_id');
+    }
+
     public function validator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'validator_user_id');

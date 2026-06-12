@@ -10,6 +10,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/two-factor/setup', [TwoFactorController::class, 'store'])
         ->middleware('throttle:totp-setup')
         ->name('two-factor.setup.store');
+    Route::post('/two-factor/setup/skip', [TwoFactorController::class, 'skipSetup'])
+        ->name('two-factor.setup.skip');
 
     Route::get('/two-factor/verify', [TwoFactorController::class, 'showVerify'])
         ->name('two-factor.verify');

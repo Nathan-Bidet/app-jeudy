@@ -2,18 +2,20 @@ import Checkbox from '@/Components/Checkbox';
 import InputError from '@/Components/InputError';
 import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
+import SecondaryButton from '@/Components/SecondaryButton';
 import TextInput from '@/Components/TextInput';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, useForm } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 
-export default function TwoFactorSetup({ secret, otpauthUri, status, lockedUntil }) {
+export default function TwoFactorSetup({ secret, otpauthUri, status, lockedUntil, canSkip = false }) {
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
     const { data, setData, post, processing, errors } = useForm({
         code: '',
         generate_recovery_codes: true,
     });
+    const skipForm = useForm({});
 
     useEffect(() => {
         let active = true;
@@ -38,6 +40,10 @@ export default function TwoFactorSetup({ secret, otpauthUri, status, lockedUntil
     const submit = (event) => {
         event.preventDefault();
         post(route('two-factor.setup.store'));
+    };
+
+    const skipSetup = () => {
+        skipForm.post(route('two-factor.setup.skip'));
     };
 
     return (
@@ -96,8 +102,17 @@ export default function TwoFactorSetup({ secret, otpauthUri, status, lockedUntil
                     </label>
                 </div>
 
-                <div className="mt-6 flex justify-end">
-                    <PrimaryButton disabled={processing}>Activer le 2FA</PrimaryButton>
+                <div className="mt-6 flex items-center justify-end gap-3">
+                    {canSkip && (
+                        <SecondaryButton
+                            type="button"
+                            onClick={skipSetup}
+                            disabled={processing || skipForm.processing}
+                        >
+                            Configurer plus tard
+                        </SecondaryButton>
+                    )}
+                    <PrimaryButton disabled={processing || skipForm.processing}>Activer le 2FA</PrimaryButton>
                 </div>
             </form>
         </GuestLayout>

@@ -373,7 +373,10 @@ class CalendarController extends Controller
         $monthEnd = $anchorDate->endOfMonth()->endOfDay();
 
         $rows = LeaveRequest::query()
-            ->with(['target:id,first_name,last_name,name'])
+            ->with([
+                'target:id,first_name,last_name,name',
+                'leaveType:id,name',
+            ])
             ->whereIn('status', [
                 LeaveRequest::STATUS_PENDING,
                 LeaveRequest::STATUS_APPROVED,
@@ -400,10 +403,12 @@ class CalendarController extends Controller
             ->get()
             ->map(function (LeaveRequest $leave): array {
                 $target = $leave->target;
+                $leaveType = $leave->leaveType;
 
                 return [
                     (string) ($target?->last_name ?: ''),
                     (string) ($target?->first_name ?: ($target?->name ?: '')),
+                    (string) ($leaveType?->name ?: 'Non renseigné'),
                     $leave->start_at?->format('d-m-Y') ?: '',
                     $this->portionLabelFr($leave->start_portion),
                     $leave->end_at?->format('d-m-Y') ?: '',
@@ -441,6 +446,7 @@ class CalendarController extends Controller
             fputcsv($handle, [
                 'Nom',
                 'Prénom',
+                'Type de congé',
                 'Date du début',
                 'Période du début',
                 'Date de fin',

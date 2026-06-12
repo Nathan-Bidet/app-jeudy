@@ -892,6 +892,31 @@ function NotificationsMenu() {
         );
     });
 
+    const deleteNotification = (notificationId) => new Promise((resolve) => {
+        const deleteUrl = safeHref('notifications.destroy', notificationId);
+        if (!deleteUrl) {
+            resolve(false);
+            return;
+        }
+
+        router.delete(
+            deleteUrl,
+            {
+                preserveScroll: true,
+                preserveState: true,
+                replace: true,
+                onSuccess: () => {
+                    setNotifications((currentNotifications) =>
+                        currentNotifications.filter((notification) => notification.id !== notificationId),
+                    );
+                    resolve(true);
+                },
+                onError: () => resolve(false),
+                onCancel: () => resolve(false),
+            },
+        );
+    });
+
     const handleNotificationClick = async (notification) => {
         if (!notification?.id) {
             return;
@@ -1061,9 +1086,20 @@ function NotificationsMenu() {
                                                 }}
                                                 className="mt-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
                                             >
-                                                Marquer comme lue
+                                                Marquer comme lu
                                             </button>
-                                        ) : null}
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    deleteNotification(notification.id);
+                                                }}
+                                                className="mt-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
+                                            >
+                                                Effacer
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                             </div>

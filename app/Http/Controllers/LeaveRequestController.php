@@ -71,6 +71,7 @@ class LeaveRequestController extends Controller
         $formatLeaveRequest = static function (LeaveRequest $leaveRequest): array {
             $target = $leaveRequest->target;
             $proposedBy = $leaveRequest->proposedBy;
+            $leaveType = $leaveRequest->leaveType;
             $targetLabel = trim(
                 collect([$target?->first_name, $target?->last_name])
                     ->filter()
@@ -80,6 +81,7 @@ class LeaveRequestController extends Controller
             return [
                 'id' => $leaveRequest->id,
                 'target_label' => $targetLabel !== '' ? $targetLabel : ($target?->name ?: $target?->email),
+                'leave_type_label' => $leaveType?->name,
                 'start_at' => $leaveRequest->start_at?->toDateString(),
                 'end_at' => $leaveRequest->end_at?->toDateString(),
                 'status' => $leaveRequest->status,
@@ -102,6 +104,7 @@ class LeaveRequestController extends Controller
         $myLeaveRequests = LeaveRequest::query()
             ->with([
                 'target:id,name,first_name,last_name,email',
+                'leaveType:id,name',
                 'proposedBy:id,name,first_name,last_name,email',
             ])
             ->where('requester_user_id', $user->id)
@@ -114,6 +117,7 @@ class LeaveRequestController extends Controller
         $leaveRequestsToValidateQuery = LeaveRequest::query()
             ->with([
                 'target:id,name,first_name,last_name,email',
+                'leaveType:id,name',
                 'proposedBy:id,name,first_name,last_name,email',
             ]);
 
@@ -160,7 +164,7 @@ class LeaveRequestController extends Controller
     {
         $validated = $request->validate([
             'target_user_id' => ['required', 'integer', 'exists:users,id'],
-            'leave_type_id' => ['nullable', 'integer', 'exists:leave_types,id'],
+            'leave_type_id' => ['required', 'integer', 'exists:leave_types,id'],
             'start_at' => ['required_without:periods', 'date'],
             'end_at' => ['required_without:periods', 'date', 'after_or_equal:start_at'],
             'start_portion' => ['nullable', 'string', Rule::in(['full_day', 'morning', 'afternoon', 'custom'])],
@@ -230,38 +234,36 @@ class LeaveRequestController extends Controller
             ];
         }
 
-        if (! empty($validated['leave_type_id'])) {
-            $leaveType = LeaveType::query()
-                ->where('is_active', true)
-                ->visibleForUser((int) $request->user()->id)
-                ->find((int) $validated['leave_type_id']);
+        $leaveType = LeaveType::query()
+            ->where('is_active', true)
+            ->visibleForUser((int) $request->user()->id)
+            ->find((int) $validated['leave_type_id']);
 
-            if (! $leaveType) {
-                throw ValidationException::withMessages([
-                    'leave_type_id' => 'Ce type de congé n’est pas disponible pour votre profil.',
-                ]);
-            }
+        if (! $leaveType) {
+            throw ValidationException::withMessages([
+                'leave_type_id' => 'Ce type de congé n’est pas disponible pour votre profil.',
+            ]);
+        }
 
-            if ($leaveType->max_days !== null) {
-                foreach ($normalizedPeriods as $periodIndex => $period) {
-                    $startDate = Carbon::parse($period['start_at'])->startOfDay();
-                    $endDate = Carbon::parse($period['end_at'])->startOfDay();
-                    $requestedDays = $startDate->diffInDays($endDate) + 1;
+        if ($leaveType->max_days !== null) {
+            foreach ($normalizedPeriods as $periodIndex => $period) {
+                $startDate = Carbon::parse($period['start_at'])->startOfDay();
+                $endDate = Carbon::parse($period['end_at'])->startOfDay();
+                $requestedDays = $startDate->diffInDays($endDate) + 1;
 
-                    if ($requestedDays > (int) $leaveType->max_days) {
-                        $message = sprintf(
-                            'Ce type de congé est limité à %d jour(s). Durée demandée : %d jour(s).',
-                            (int) $leaveType->max_days,
-                            $requestedDays
-                        );
-                        $errorField = ! empty($validated['periods'])
-                            ? "periods.$periodIndex.end_date"
-                            : 'leave_type_id';
+                if ($requestedDays > (int) $leaveType->max_days) {
+                    $message = sprintf(
+                        'Ce type de congé est limité à %d jour(s). Durée demandée : %d jour(s).',
+                        (int) $leaveType->max_days,
+                        $requestedDays
+                    );
+                    $errorField = ! empty($validated['periods'])
+                        ? "periods.$periodIndex.end_date"
+                        : 'leave_type_id';
 
-                        throw ValidationException::withMessages([
-                            $errorField => $message,
-                        ]);
-                    }
+                    throw ValidationException::withMessages([
+                        $errorField => $message,
+                    ]);
                 }
             }
         }
@@ -317,7 +319,7 @@ class LeaveRequestController extends Controller
         foreach ($normalizedPeriods as $period) {
             $leaveRequest = LeaveRequest::create([
                 'target_user_id' => $targetUserId,
-                'leave_type_id' => $validated['leave_type_id'] ?? null,
+                'leave_type_id' => (int) $validated['leave_type_id'],
                 'start_at' => $period['start_at'],
                 'end_at' => $period['end_at'],
                 'start_portion' => $period['start_portion'],

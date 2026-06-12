@@ -17,6 +17,10 @@ class EnsureTwoFactorIsVerified
         }
 
         if (! $user->totp_secret || ! $user->totp_enabled_at) {
+            if ($user->totp_setup_skipped_at) {
+                return $next($request);
+            }
+
             return redirect()->route('two-factor.setup');
         }
 

@@ -76,6 +76,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'totp_enabled_at' => 'datetime',
+            'totp_setup_skipped_at' => 'datetime',
             'totp_locked_until' => 'datetime',
             'birthday' => 'date',
             'directory_phones' => 'array',

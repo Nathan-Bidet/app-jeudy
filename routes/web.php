@@ -34,8 +34,11 @@ Route::get('/dashboard', DashboardController::class)
 
 Route::middleware(['auth', 'twofactor'])->group(function () {
     Route::get('/profile', function () {
+        $user = request()->user();
+
         return Inertia::render('Security/ProfileEdit', [
-            'mustVerifyEmail' => request()->user() instanceof MustVerifyEmail,
+            'mustVerifyEmail' => $user instanceof MustVerifyEmail,
+            'isTotpEnabled' => ! empty($user?->totp_secret) && ! empty($user?->totp_enabled_at),
             'status' => session('status'),
         ]);
     })->name('profile.edit');
@@ -116,6 +119,8 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->name('notifications.read_all');
     Route::get('/notifications/latest', [NotificationController::class, 'latest'])
         ->name('notifications.latest');
+    Route::delete('/notifications/{notificationId}', [NotificationController::class, 'destroy'])
+        ->name('notifications.destroy');
     Route::get('/global-search', [GlobalSearchController::class, 'index'])
         ->name('global-search');
 

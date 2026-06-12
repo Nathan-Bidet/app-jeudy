@@ -1,4 +1,6 @@
 import Modal from '@/Components/Modal';
+import FormattedText from '@/Components/FormattedText';
+import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { CalendarDays, CheckCircle2, Clock3, Package, UserRound } from 'lucide-react';
 
 function Badge({ children, tone = 'neutral' }) {
@@ -19,8 +21,8 @@ function Badge({ children, tone = 'neutral' }) {
 function MetaRow({ label, value }) {
     return (
         <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-3 text-sm">
-            <dt className="font-semibold text-[var(--app-muted)]">{label}</dt>
-            <dd className="text-[var(--app-text)]">{value || '—'}</dd>
+            <dt className="font-semibold opacity-75">{label}</dt>
+            <dd>{value || '—'}</dd>
         </div>
     );
 }
@@ -29,6 +31,8 @@ export default function ArchiveDetailModal({ show = false, row = null, onClose =
     if (!show || !row) {
         return null;
     }
+
+    const detailStyle = adaptiveTaskStyle(row?.style || {});
 
     return (
         <Modal show={show} onClose={onClose} maxWidth="2xl">
@@ -41,7 +45,7 @@ export default function ArchiveDetailModal({ show = false, row = null, onClose =
                 </div>
             </div>
 
-            <div className="space-y-4 bg-[var(--app-surface)] px-5 py-4">
+            <div className="space-y-4 bg-[var(--app-surface)] px-5 py-4" style={detailStyle}>
                 <div className="flex flex-wrap gap-2">
                     <Badge>
                         <CalendarDays className="mr-1 h-3.5 w-3.5" />
@@ -89,16 +93,22 @@ export default function ArchiveDetailModal({ show = false, row = null, onClose =
 
                 <section className="space-y-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
                     <p className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Tâche</p>
-                    <pre className="whitespace-pre-wrap break-words text-sm font-medium text-[var(--app-text)]">
-                        {row.task || '—'}
-                    </pre>
+                    <FormattedText
+                        as="p"
+                        className="whitespace-pre-wrap break-words text-sm font-medium"
+                        text={row.task || '—'}
+                        multiline
+                    />
                 </section>
 
                 <section className="space-y-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
                     <p className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Commentaire</p>
-                    <pre className="whitespace-pre-wrap break-words text-sm text-[var(--app-text)]">
-                        {row.comment || '—'}
-                    </pre>
+                    <FormattedText
+                        as="p"
+                        className="whitespace-pre-wrap break-words text-sm"
+                        text={row.comment || '—'}
+                        multiline
+                    />
                 </section>
             </div>
 

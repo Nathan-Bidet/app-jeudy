@@ -263,7 +263,12 @@ class AprevoirController extends Controller
             $afterGroup,
             ['pointed' => $pointed],
         );
-        $this->broadcastTaskUpdate('pointed', $task->id, $afterGroup);
+        $this->broadcastTaskUpdate(
+            'pointed',
+            $task->id,
+            $afterGroup,
+            $request->input('client_mutation_id')
+        );
 
         return back()->with('status', 'Aprevoir task pointed updated.');
     }

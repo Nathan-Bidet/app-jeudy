@@ -65,7 +65,7 @@ function MappingAutocomplete({ options = [], targetType = '', targetId = '', onC
                     onClick={() => pick(null)}
                     className="rounded-lg border border-[var(--app-border)] px-3 py-2 text-xs font-semibold text-[var(--app-muted)]"
                 >
-                    Vider
+                    Effacer
                 </button>
             </div>
 

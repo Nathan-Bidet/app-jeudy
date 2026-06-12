@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\AuditLogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -9,6 +10,10 @@ use Illuminate\Support\Facades\Route;
 
 class NotificationController extends Controller
 {
+    public function __construct(private readonly AuditLogService $auditLogService)
+    {
+    }
+
     public function latest(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -51,6 +56,41 @@ class NotificationController extends Controller
         $request->user()
             ->unreadNotifications()
             ->update(['read_at' => now()]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['success' => true]);
+        }
+
+        return back();
+    }
+
+    public function destroy(Request $request, string $notificationId): RedirectResponse|JsonResponse
+    {
+        $notification = $request->user()
+            ->notifications()
+            ->whereKey($notificationId)
+            ->firstOrFail();
+
+        abort_if($notification->read_at === null, 409);
+
+        $notificationTitle = $notification->data['title'] ?? null;
+        $notificationMessage = (string) ($notification->data['message'] ?? 'Notification');
+
+        $this->auditLogService->log([
+            'action' => 'Suppression notification',
+            'module' => 'Notifications',
+            'description' => 'Suppression notification',
+            'payload' => [
+                'notification_id' => (string) $notification->id,
+                'title' => $notificationTitle !== null ? (string) $notificationTitle : null,
+                'message' => $notificationMessage,
+                'state' => $notification->read_at === null ? 'Non lue' : 'Lue',
+                'read_at' => $notification->read_at?->toIso8601String(),
+                'deleted_at' => now()->toIso8601String(),
+            ],
+        ]);
+
+        $notification->delete();
 
         if ($request->expectsJson()) {
             return response()->json(['success' => true]);
