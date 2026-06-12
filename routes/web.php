@@ -16,6 +16,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SecurityProfileController;
 use App\Http\Controllers\DirectoryController;
+use App\Http\Controllers\EngraisController;
 use App\Http\Controllers\TasksDataController;
 use App\Http\Controllers\UserFileController;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -71,6 +72,28 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/a-prevoir/tasks-data', [AprevoirController::class, 'tasksData'])
         ->middleware('sector.access:a_prevoir.view')
         ->name('a_prevoir.tasks.data');
+
+    Route::get('/engrais', [EngraisController::class, 'index'])
+        ->middleware('sector.access:engrais.view')
+        ->name('engrais.index');
+    Route::post('/engrais/tasks', [EngraisController::class, 'store'])
+        ->middleware('sector.access:engrais.create')
+        ->name('engrais.tasks.store');
+    Route::put('/engrais/tasks/{task}', [EngraisController::class, 'update'])
+        ->middleware('sector.access:engrais.update')
+        ->name('engrais.tasks.update');
+    Route::delete('/engrais/tasks/{task}', [EngraisController::class, 'destroy'])
+        ->middleware('sector.access:engrais.delete')
+        ->name('engrais.tasks.destroy');
+    Route::patch('/engrais/tasks/{task}/point', [EngraisController::class, 'point'])
+        ->middleware('sector.access:engrais.point')
+        ->name('engrais.tasks.point');
+    Route::patch('/engrais/tasks/{task}/position', [EngraisController::class, 'updatePosition'])
+        ->middleware('sector.access:engrais.update')
+        ->name('engrais.tasks.position');
+    Route::get('/engrais/tasks-data', [EngraisController::class, 'tasksData'])
+        ->middleware('sector.access:engrais.view')
+        ->name('engrais.tasks.data');
 
     Route::get('/ldt', [LdtController::class, 'index'])
         ->middleware('sector.access:ldt.view')

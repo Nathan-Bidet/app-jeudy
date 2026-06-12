@@ -72,6 +72,7 @@ class LogUserActivity
     private function moduleFromRoute(string $routeName): string
     {
         if (str_starts_with($routeName, 'a_prevoir.')) return 'a_prevoir';
+        if (str_starts_with($routeName, 'engrais.')) return 'engrais';
         if (str_starts_with($routeName, 'ldt.')) return 'ldt';
         if (str_starts_with($routeName, 'admin.')) return 'admin';
         if (str_starts_with($routeName, 'task.formatting.')) return 'formatting';

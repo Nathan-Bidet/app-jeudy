@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\FormattingRuleService;
 use App\Services\Visibility\DateRestrictionScope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 class AprevoirService
 {
@@ -25,7 +26,8 @@ class AprevoirService
         /** @var User|null $viewer */
         $viewer = $filters['user'] ?? null;
 
-        $query = AprevoirTask::query()
+        $taskModelClass = $this->taskModelClass();
+        $query = $taskModelClass::query()
             ->with([
                 'vehicle:id,name,registration,vehicle_type_id',
                 'vehicle.type:id,code',
@@ -39,7 +41,7 @@ class AprevoirService
             ]);
 
         if ($viewer) {
-            DateRestrictionScope::apply($query, $viewer, 'a_prevoir');
+            DateRestrictionScope::apply($query, $viewer, $this->visibilityScopeModule());
         }
 
         $this->applyFilters($query, $filters);
@@ -101,7 +103,7 @@ class AprevoirService
      * @param  array<int, FormattingRule>|null  $rules
      * @return array{matched: bool, rule_id: ?int, rule_pattern: ?string, rule_name: ?string, text_color: ?string, bg_color: ?string}
      */
-    public function applyColorRules(AprevoirTask|array $task, ?array $rules = null): array
+    public function applyColorRules(Model|array $task, ?array $rules = null): array
     {
         $taskText = trim((string) data_get($task, 'task', ''));
         $comment = trim((string) data_get($task, 'comment', ''));
@@ -218,7 +220,7 @@ class AprevoirService
         }
     }
 
-    private function groupKey(AprevoirTask $task): string
+    private function groupKey(Model $task): string
     {
         if ($task->assignee_type === 'free') {
             return implode('|', [
@@ -238,7 +240,7 @@ class AprevoirService
     /**
      * @return array<string,mixed>
      */
-    private function assigneeMeta(AprevoirTask $task): array
+    private function assigneeMeta(Model $task): array
     {
         if ($task->assignee_type === 'free') {
             $label = trim((string) ($task->assignee_label_free ?? ''));
@@ -416,14 +418,14 @@ class AprevoirService
      * @param  array{matched: bool, rule_id: ?int, rule_pattern: ?string, rule_name: ?string, text_color: ?string, bg_color: ?string}  $style
      * @return array<string,mixed>
      */
-    private function mapTask(AprevoirTask $task, array $style): array
+    private function mapTask(Model $task, array $style): array
     {
         $createdName = $this->personName($task->createdBy);
         $updatedName = $this->personName($task->updatedBy);
         $pointedName = $this->personName($task->pointedBy);
 
         $indicators = $this->publicIndicators($task->indicators);
-        $isProjectedToLdt = true;
+        $isProjectedToLdt = $this->projectsToLdt();
 
         return [
             'id' => $task->id,
@@ -466,10 +468,10 @@ class AprevoirService
                 'name' => $updatedName,
                 'initials' => $this->initials($task->updatedBy ?? $task->createdBy),
             ],
-            'book' => [
+            'book' => $isProjectedToLdt ? [
                 'projected' => $isProjectedToLdt,
                 'url' => $isProjectedToLdt ? '/ldt?focus_task_id='.$task->id : null,
-            ],
+            ] : null,
             'style' => $style,
         ];
     }
@@ -508,5 +510,20 @@ class AprevoirService
         unset($indicators['legacy']);
 
         return $indicators;
+    }
+
+    protected function taskModelClass(): string
+    {
+        return AprevoirTask::class;
+    }
+
+    protected function visibilityScopeModule(): string
+    {
+        return 'a_prevoir';
+    }
+
+    protected function projectsToLdt(): bool
+    {
+        return true;
     }
 }

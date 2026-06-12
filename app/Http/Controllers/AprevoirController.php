@@ -6,14 +6,18 @@ use App\Events\AprevoirTaskChanged;
 use App\Events\AprevoirTaskUpdated;
 use App\Models\AprevoirTask;
 use App\Models\Depot;
+use App\Models\EngraisTask;
 use App\Models\Transporter;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Services\Aprevoir\AprevoirService;
 use App\Services\AuditLogService;
+use App\Services\Engrais\EngraisService;
+use App\Support\Access\AccessManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -25,6 +29,7 @@ class AprevoirController extends Controller
 {
     public function __construct(
         private readonly AprevoirService $service,
+        private readonly EngraisService $engraisService,
         private readonly AuditLogService $auditLogService,
     )
     {
@@ -32,6 +37,7 @@ class AprevoirController extends Controller
 
     public function index(Request $request): Response
     {
+        $config = $this->moduleConfig($request);
         $validated = $request->validate([
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date'],
@@ -55,7 +61,7 @@ class AprevoirController extends Controller
                 : 'unpointed',
         ];
 
-        $result = $this->service->getGroupedTasks($payload);
+        $result = $config['service']->getGroupedTasks($payload);
 
         $props = [
             'groups' => $result['groups'],
@@ -72,25 +78,37 @@ class AprevoirController extends Controller
                 'pointed_filter' => $payload['pointed_filter'],
                 'color_filter' => $validated['color_filter'] ?? 'all',
             ],
-            'reference' => $this->referenceData(),
+            'reference' => $this->referenceData($config),
             'permissions' => [
-                'can_create' => $request->user() ? app(\App\Support\Access\AccessManager::class)->can($request->user(), 'a_prevoir.create') : false,
-                'can_update' => $request->user() ? app(\App\Support\Access\AccessManager::class)->can($request->user(), 'a_prevoir.update') : false,
-                'can_delete' => $request->user() ? app(\App\Support\Access\AccessManager::class)->can($request->user(), 'a_prevoir.delete') : false,
-                'can_point' => $request->user() ? app(\App\Support\Access\AccessManager::class)->can($request->user(), 'a_prevoir.point') : false,
+                'can_create' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.create') : false,
+                'can_update' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.update') : false,
+                'can_delete' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.delete') : false,
+                'can_point' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.point') : false,
             ],
             'focus_task_id' => ! empty($validated['focus_task_id']) ? (int) $validated['focus_task_id'] : null,
-            'routes' => [
-                'index' => route('a_prevoir.index'),
-                'store' => route('a_prevoir.tasks.store'),
+            'moduleConfig' => [
+                'key' => $config['key'],
+                'title' => $config['title'],
+                'show_book' => $config['projects_to_ldt'],
+                'realtime_channel' => $config['realtime_channel'],
+                'routes' => [
+                    'index' => route($config['route_prefix'].'.index'),
+                    'store' => route($config['route_prefix'].'.tasks.store'),
+                    'update' => $config['route_prefix'].'.tasks.update',
+                    'destroy' => $config['route_prefix'].'.tasks.destroy',
+                    'point' => $config['route_prefix'].'.tasks.point',
+                    'position' => $config['route_prefix'].'.tasks.position',
+                    'data' => $config['route_prefix'].'.tasks.data',
+                ],
             ],
         ];
 
-        return Inertia::render('Aprevoir/Index', $props);
+        return Inertia::render($config['page'], $props);
     }
 
     public function tasksData(Request $request): JsonResponse
     {
+        $config = $this->moduleConfig($request);
         $validated = $request->validate([
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date'],
@@ -111,7 +129,7 @@ class AprevoirController extends Controller
             'pointed_filter' => $validated['pointed_filter'] ?? 'unpointed',
         ];
 
-        $result = $this->service->getGroupedTasks($payload);
+        $result = $config['service']->getGroupedTasks($payload);
 
         return response()->json([
             'groups' => $result['groups'],
@@ -122,53 +140,51 @@ class AprevoirController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $config = $this->moduleConfig($request);
         $validated = $this->validateTask($request, null);
         $actor = $request->user();
 
-        $task = new AprevoirTask();
-        $this->fillTask($task, $validated, $actor);
+        $taskModelClass = $config['task_model'];
+        $task = new $taskModelClass();
+        $this->fillTask($task, $validated, $actor, $config);
         $task->created_by_user_id = $actor->id;
         $task->save();
         $afterAudit = $this->auditSnapshot($task);
 
         $this->auditLogService->log([
-            'action' => 'create_task',
-            'module' => 'a_prevoir',
-            'description' => sprintf('Création tâche #%d', (int) $task->id),
+            'action' => $config['actions']['create'],
+            'module' => $config['log_module'],
+            'description' => sprintf('Création tâche %s #%d', $config['title'], (int) $task->id),
             'payload' => [
                 'task_id' => $task->id,
                 'after' => $afterAudit,
             ],
         ]);
 
-        AprevoirTaskChanged::dispatch(
-            'created',
-            $task->id,
-            null,
-            AprevoirTaskChanged::snapshotFromTask($task),
-        );
-        $this->broadcastTaskUpdate('created', $task->id, AprevoirTaskChanged::snapshotFromTask($task));
+        $this->dispatchTaskChange($config, 'created', $task, null);
 
-        return back()->with('status', 'Aprevoir task created.');
+        return back()->with('status', $config['title'].' task created.');
     }
 
-    public function update(Request $request, AprevoirTask $task): RedirectResponse
+    public function update(Request $request, mixed $task): RedirectResponse
     {
-        $beforeGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $config = $this->moduleConfig($request);
+        $task = $this->resolveTask($config, $task);
+        $beforeGroup = $this->taskSnapshot($task);
         $beforeAudit = $this->auditSnapshot($task);
         $validated = $this->validateTask($request, $task);
         $actor = $request->user();
 
-        $this->fillTask($task, $validated, $actor);
+        $this->fillTask($task, $validated, $actor, $config);
         $task->updated_by_user_id = $actor->id;
         $task->save();
-        $afterGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $afterGroup = $this->taskSnapshot($task);
         $afterAudit = $this->auditSnapshot($task);
 
         $this->auditLogService->log([
-            'action' => 'update_task',
-            'module' => 'a_prevoir',
-            'description' => sprintf('Mise à jour tâche #%d', (int) $task->id),
+            'action' => $config['actions']['update'],
+            'module' => $config['log_module'],
+            'description' => sprintf('Mise à jour tâche %s #%d', $config['title'], (int) $task->id),
             'payload' => [
                 'task_id' => $task->id,
                 'before' => $beforeAudit,
@@ -176,48 +192,49 @@ class AprevoirController extends Controller
             ],
         ]);
 
-        AprevoirTaskChanged::dispatch(
+        $this->dispatchTaskChange(
+            $config,
             'updated',
-            $task->id,
+            $task,
             $beforeGroup,
-            $afterGroup,
-        );
-        $this->broadcastTaskUpdate(
-            'updated',
-            $task->id,
-            $afterGroup,
-            $request->input('client_mutation_id')
+            $request->input('client_mutation_id'),
         );
 
-        return back()->with('status', 'Aprevoir task updated.');
+        return back()->with('status', $config['title'].' task updated.');
     }
 
-    public function destroy(Request $request, AprevoirTask $task): RedirectResponse
+    public function destroy(Request $request, mixed $task): RedirectResponse
     {
-        $beforeGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $config = $this->moduleConfig($request);
+        $task = $this->resolveTask($config, $task);
+        $beforeGroup = $this->taskSnapshot($task);
         $beforeAudit = $this->auditSnapshot($task);
         $taskId = $task->id;
         $task->delete();
 
         $this->auditLogService->log([
-            'action' => 'delete_task',
-            'module' => 'a_prevoir',
-            'description' => sprintf('Suppression tâche #%d', (int) $taskId),
+            'action' => $config['actions']['delete'],
+            'module' => $config['log_module'],
+            'description' => sprintf('Suppression tâche %s #%d', $config['title'], (int) $taskId),
             'payload' => [
                 'task_id' => $taskId,
                 'before' => $beforeAudit,
             ],
         ]);
 
-        AprevoirTaskChanged::dispatch('deleted', $taskId, $beforeGroup, null);
-        $this->broadcastTaskUpdate('deleted', $taskId, $beforeGroup);
+        if ($config['projects_to_ldt']) {
+            AprevoirTaskChanged::dispatch('deleted', $taskId, $beforeGroup, null);
+            $this->broadcastTaskUpdate('deleted', $taskId, $beforeGroup);
+        }
 
-        return back()->with('status', 'Aprevoir task deleted.');
+        return back()->with('status', $config['title'].' task deleted.');
     }
 
-    public function point(Request $request, AprevoirTask $task): RedirectResponse
+    public function point(Request $request, mixed $task): RedirectResponse
     {
-        $beforeGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $config = $this->moduleConfig($request);
+        $task = $this->resolveTask($config, $task);
+        $beforeGroup = $this->taskSnapshot($task);
         $beforeAudit = $this->auditSnapshot($task);
         $validated = $request->validate([
             'pointed' => ['required', 'boolean'],
@@ -232,14 +249,14 @@ class AprevoirController extends Controller
             'updated_by_user_id' => $request->user()?->id,
         ])->save();
 
-        $afterGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $afterGroup = $this->taskSnapshot($task);
         $afterAudit = $this->auditSnapshot($task);
         $beforePointed = (bool) ($beforeAudit['pointed'] ?? false);
         $afterPointed = (bool) ($afterAudit['pointed'] ?? false);
 
         $this->auditLogService->log([
-            'action' => 'point_task',
-            'module' => 'a_prevoir',
+            'action' => $config['actions']['point'],
+            'module' => $config['log_module'],
             'description' => sprintf(
                 'Pointage tâche #%d (%s → %s)',
                 (int) $task->id,
@@ -256,33 +273,38 @@ class AprevoirController extends Controller
             ],
         ]);
 
-        AprevoirTaskChanged::dispatch(
-            'pointed',
-            $task->id,
-            $beforeGroup,
-            $afterGroup,
-            ['pointed' => $pointed],
-        );
-        $this->broadcastTaskUpdate(
-            'pointed',
-            $task->id,
-            $afterGroup,
-            $request->input('client_mutation_id')
-        );
+        if ($config['projects_to_ldt']) {
+            AprevoirTaskChanged::dispatch(
+                'pointed',
+                $task->id,
+                $beforeGroup,
+                $afterGroup,
+                ['pointed' => $pointed],
+            );
+            $this->broadcastTaskUpdate(
+                'pointed',
+                $task->id,
+                $afterGroup,
+                $request->input('client_mutation_id')
+            );
+        }
 
-        return back()->with('status', 'Aprevoir task pointed updated.');
+        return back()->with('status', $config['title'].' task pointed updated.');
     }
 
-    public function updatePosition(Request $request, AprevoirTask $task): RedirectResponse
+    public function updatePosition(Request $request, mixed $task): RedirectResponse
     {
-        $beforeGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $config = $this->moduleConfig($request);
+        $task = $this->resolveTask($config, $task);
+        $beforeGroup = $this->taskSnapshot($task);
         $beforeAudit = $this->auditSnapshot($task);
         $validated = $request->validate([
             'ordered_ids' => ['required', 'array', 'min:1'],
             'ordered_ids.*' => ['integer', 'distinct'],
         ]);
 
-        $groupTasksQuery = AprevoirTask::query()
+        $taskModelClass = $config['task_model'];
+        $groupTasksQuery = $taskModelClass::query()
             ->whereDate('date', $task->date)
             ->orderBy('position')
             ->orderBy('id');
@@ -312,9 +334,9 @@ class AprevoirController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($orderedIds, $request): void {
+        DB::transaction(function () use ($orderedIds, $request, $taskModelClass): void {
             foreach ($orderedIds as $position => $id) {
-                AprevoirTask::query()
+                $taskModelClass::query()
                     ->whereKey($id)
                     ->update([
                         'position' => $position,
@@ -324,14 +346,14 @@ class AprevoirController extends Controller
             }
         });
 
-        $afterGroup = AprevoirTaskChanged::snapshotFromTask($task);
+        $afterGroup = $this->taskSnapshot($task);
         $task->refresh();
         $afterAudit = $this->auditSnapshot($task);
 
         $this->auditLogService->log([
-            'action' => 'reorder_task',
-            'module' => 'a_prevoir',
-            'description' => 'Reordonnancement des taches A Prevoir',
+            'action' => $config['actions']['reorder'],
+            'module' => $config['log_module'],
+            'description' => 'Réordonnancement des tâches '.$config['title'],
             'payload' => [
                 'task_id' => $task->id,
                 'group' => [
@@ -345,21 +367,23 @@ class AprevoirController extends Controller
             ],
         ]);
 
-        AprevoirTaskChanged::dispatch(
-            'reordered',
-            $task->id,
-            $beforeGroup,
-            $afterGroup,
-        );
-        $this->broadcastTaskUpdate('moved', $task->id, $afterGroup);
+        if ($config['projects_to_ldt']) {
+            AprevoirTaskChanged::dispatch(
+                'reordered',
+                $task->id,
+                $beforeGroup,
+                $afterGroup,
+            );
+            $this->broadcastTaskUpdate('moved', $task->id, $afterGroup);
+        }
 
-        return back()->with('status', 'Aprevoir tasks reordered.');
+        return back()->with('status', $config['title'].' tasks reordered.');
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function referenceData(): array
+    private function referenceData(array $config): array
     {
         $defaultEnsembleByUser = [];
 
@@ -506,7 +530,8 @@ class AprevoirController extends Controller
             ->values()
             ->all();
 
-        $placeSuggestions = AprevoirTask::query()
+        $taskModelClass = $config['task_model'];
+        $placeSuggestions = $taskModelClass::query()
             ->where(function ($query): void {
                 $query->whereNotNull('loading_place')
                     ->orWhereNotNull('delivery_place');
@@ -514,7 +539,7 @@ class AprevoirController extends Controller
             ->orderByDesc('id')
             ->limit(3000)
             ->get(['loading_place', 'delivery_place'])
-            ->flatMap(function (AprevoirTask $task): array {
+            ->flatMap(function (Model $task): array {
                 $values = [];
 
                 foreach ([$task->loading_place, $task->delivery_place] as $field) {
@@ -568,7 +593,7 @@ class AprevoirController extends Controller
     /**
      * @param  array<string, mixed>  $validated
      */
-    private function fillTask(AprevoirTask $task, array $validated, ?User $actor): void
+    private function fillTask(Model $task, array $validated, ?User $actor, array $config): void
     {
         $detected = $this->service->autoDetectFlags(
             (string) ($validated['task'] ?? ''),
@@ -616,6 +641,7 @@ class AprevoirController extends Controller
 
         if (! $task->exists) {
             $task->position = $this->nextPosition(
+                $config,
                 (string) $validated['date'],
                 $validated['assignee_type'] ?? null,
                 isset($validated['assignee_id']) ? (int) $validated['assignee_id'] : null,
@@ -632,7 +658,7 @@ class AprevoirController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function validateTask(Request $request, ?AprevoirTask $task): array
+    private function validateTask(Request $request, ?Model $task): array
     {
         $validated = $request->validate([
             'date' => ['required', 'date'],
@@ -735,7 +761,7 @@ class AprevoirController extends Controller
     /**
      * @return array<string,mixed>
      */
-    private function auditSnapshot(AprevoirTask $task): array
+    private function auditSnapshot(Model $task): array
     {
         return [
             'id' => (int) $task->id,
@@ -758,9 +784,10 @@ class AprevoirController extends Controller
         ];
     }
 
-    private function nextPosition(string $date, ?string $assigneeType, ?int $assigneeId, ?string $assigneeLabelFree): int
+    private function nextPosition(array $config, string $date, ?string $assigneeType, ?int $assigneeId, ?string $assigneeLabelFree): int
     {
-        $query = AprevoirTask::query()->whereDate('date', $date);
+        $taskModelClass = $config['task_model'];
+        $query = $taskModelClass::query()->whereDate('date', $date);
 
         if ($assigneeType === 'free') {
             $query
@@ -773,6 +800,96 @@ class AprevoirController extends Controller
         }
 
         return (int) $query->max('position') + 1;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function moduleConfig(Request $request): array
+    {
+        $isEngrais = str_starts_with((string) $request->route()?->getName(), 'engrais.');
+
+        if ($isEngrais) {
+            return [
+                'key' => 'engrais',
+                'title' => 'Engrais',
+                'page' => 'Engrais/Index',
+                'route_prefix' => 'engrais',
+                'permission_prefix' => 'engrais',
+                'log_module' => 'engrais',
+                'task_model' => EngraisTask::class,
+                'service' => $this->engraisService,
+                'projects_to_ldt' => false,
+                'realtime_channel' => null,
+                'actions' => [
+                    'create' => 'create_engrais_task',
+                    'update' => 'update_engrais_task',
+                    'delete' => 'delete_engrais_task',
+                    'point' => 'point_engrais_task',
+                    'reorder' => 'reorder_engrais_task',
+                ],
+            ];
+        }
+
+        return [
+            'key' => 'a_prevoir',
+            'title' => 'À Prévoir',
+            'page' => 'Aprevoir/Index',
+            'route_prefix' => 'a_prevoir',
+            'permission_prefix' => 'a_prevoir',
+            'log_module' => 'a_prevoir',
+            'task_model' => AprevoirTask::class,
+            'service' => $this->service,
+            'projects_to_ldt' => true,
+            'realtime_channel' => 'aprevoir.global',
+            'actions' => [
+                'create' => 'create_task',
+                'update' => 'update_task',
+                'delete' => 'delete_task',
+                'point' => 'point_task',
+                'reorder' => 'reorder_task',
+            ],
+        ];
+    }
+
+    private function resolveTask(array $config, mixed $task): Model
+    {
+        $taskModelClass = $config['task_model'];
+
+        if ($task instanceof $taskModelClass) {
+            return $task;
+        }
+
+        return $taskModelClass::query()->findOrFail((int) $task);
+    }
+
+    /**
+     * @return array{date:string|null,assignee_type:string|null,assignee_id:int|null,assignee_label_free:string|null}
+     */
+    private function taskSnapshot(Model $task): array
+    {
+        return [
+            'date' => $task->date?->toDateString(),
+            'assignee_type' => $task->assignee_type,
+            'assignee_id' => $task->assignee_id !== null ? (int) $task->assignee_id : null,
+            'assignee_label_free' => $task->assignee_label_free,
+        ];
+    }
+
+    private function dispatchTaskChange(
+        array $config,
+        string $action,
+        Model $task,
+        ?array $beforeGroup,
+        ?string $clientMutationId = null,
+    ): void {
+        if (! $config['projects_to_ldt']) {
+            return;
+        }
+
+        $afterGroup = $this->taskSnapshot($task);
+        AprevoirTaskChanged::dispatch($action, $task->id, $beforeGroup, $afterGroup);
+        $this->broadcastTaskUpdate($action, $task->id, $afterGroup, $clientMutationId);
     }
 
     /**

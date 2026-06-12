@@ -57,6 +57,7 @@ class LogsController extends Controller
                 $after = is_array($payload['after'] ?? null) ? $payload['after'] : null;
                 $changes = $this->extractChanges($before, $after);
                 $taskId = $this->resolveTaskId($payload);
+                $taskRoute = $log->module === 'engrais' ? 'engrais.index' : 'a_prevoir.index';
 
                 return [
                     'id' => $log->id,
@@ -76,7 +77,8 @@ class LogsController extends Controller
                     'payload' => $payload,
                     'changes' => $changes,
                     'task_id' => $taskId,
-                    'task_href' => $taskId ? route('a_prevoir.index', ['focus_task_id' => $taskId]) : null,
+                    'task_module_label' => $log->module === 'engrais' ? 'Engrais' : 'À Prévoir',
+                    'task_href' => $taskId ? route($taskRoute, ['focus_task_id' => $taskId]) : null,
                 ];
             });
 
@@ -326,6 +328,11 @@ class LogsController extends Controller
             'delete_task' => 'Suppression de tâche',
             'point_task' => 'Pointage de tâche',
             'reorder_task' => 'Réordonnancement de tâches',
+            'create_engrais_task' => 'Création de tâche Engrais',
+            'update_engrais_task' => 'Mise à jour de tâche Engrais',
+            'delete_engrais_task' => 'Suppression de tâche Engrais',
+            'point_engrais_task' => 'Pointage de tâche Engrais',
+            'reorder_engrais_task' => 'Réordonnancement de tâches Engrais',
             'generate_ldt' => 'Génération de projection LDT',
             'export_ldt' => 'Export LDT',
             'create_rule' => 'Création de règle',

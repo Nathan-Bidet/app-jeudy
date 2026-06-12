@@ -796,7 +796,19 @@ export default function AprevoirIndex({
     reference = {},
     permissions = {},
     focus_task_id = null,
+    moduleConfig = {},
 }) {
+    const moduleTitle = moduleConfig?.title || 'À Prévoir';
+    const moduleRoutes = {
+        index: moduleConfig?.routes?.index || route('a_prevoir.index'),
+        store: moduleConfig?.routes?.store || route('a_prevoir.tasks.store'),
+        update: moduleConfig?.routes?.update || 'a_prevoir.tasks.update',
+        destroy: moduleConfig?.routes?.destroy || 'a_prevoir.tasks.destroy',
+        point: moduleConfig?.routes?.point || 'a_prevoir.tasks.point',
+        position: moduleConfig?.routes?.position || 'a_prevoir.tasks.position',
+        data: moduleConfig?.routes?.data || 'a_prevoir.tasks.data',
+    };
+    const realtimeChannel = moduleConfig?.realtime_channel || null;
     const tableSectionRef = useRef(null);
     const [unpointedGroups, setUnpointedGroups] = useState(groups);
     const [pointedGroups, setPointedGroups] = useState(null);
@@ -948,7 +960,7 @@ export default function AprevoirIndex({
         setPointedGroupsError(false);
         setPointedGroups(null);
 
-        window.axios.get(route('a_prevoir.tasks.data'), {
+        window.axios.get(route(moduleRoutes.data), {
             params: {
                 ...prefetchBaseFilters,
                 pointed_filter: 'pointed',
@@ -1068,11 +1080,11 @@ export default function AprevoirIndex({
     }, [focus_task_id, localGroups, lastHandledFocusId]);
 
     useEffect(() => {
-        if (typeof window === 'undefined' || !window.Echo) {
+        if (typeof window === 'undefined' || !window.Echo || !realtimeChannel) {
             return undefined;
         }
 
-        const channel = window.Echo.channel('aprevoir.global');
+        const channel = window.Echo.channel(realtimeChannel);
         const onTaskUpdated = (event) => {
             const clientMutationId = event?.client_mutation_id;
             if (clientMutationId && pendingMutationIdsRef.current.has(clientMutationId)) {
@@ -1105,7 +1117,7 @@ export default function AprevoirIndex({
         return () => {
             channel.stopListening('.aprevoir.task.updated');
         };
-    }, [savingTaskIds]);
+    }, [realtimeChannel, savingTaskIds]);
 
     const allTasksById = useMemo(() => {
         const map = new Map();
@@ -1134,7 +1146,7 @@ export default function AprevoirIndex({
         const data = nextState ?? filterState;
         pendingScrollToTableRef.current = true;
         router.get(
-            route('a_prevoir.index'),
+            moduleRoutes.index,
             {
                 date_from: data.date_from || undefined,
                 date_to: data.date_to || undefined,
@@ -1492,7 +1504,7 @@ export default function AprevoirIndex({
         closeTaskModal();
 
         if (mode === 'create') {
-            taskForm.post(route('a_prevoir.tasks.store'), options);
+            taskForm.post(moduleRoutes.store, options);
             return;
         }
 
@@ -1565,7 +1577,7 @@ export default function AprevoirIndex({
             setLocalGroups((prev) => applyOptimisticUpdateInPlace(prev, updateId, optimisticPayload));
         }
 
-        taskForm.put(route('a_prevoir.tasks.update', updateId), {
+        taskForm.put(route(moduleRoutes.update, updateId), {
             ...options,
             onFinish: () => {
                 taskForm.transform((d) => d);
@@ -1589,7 +1601,7 @@ export default function AprevoirIndex({
 
     const confirmDelete = () => {
         if (!deleteTask) return;
-        deleteForm.delete(route('a_prevoir.tasks.destroy', deleteTask.id), {
+        deleteForm.delete(route(moduleRoutes.destroy, deleteTask.id), {
             preserveScroll: true,
             onSuccess: () => setDeleteTask(null),
         });
@@ -1633,7 +1645,7 @@ export default function AprevoirIndex({
         );
 
         router.patch(
-            route('a_prevoir.tasks.point', taskId),
+            route(moduleRoutes.point, taskId),
             {
                 pointed: nextPointed,
                 client_mutation_id: mutationId,
@@ -1784,7 +1796,7 @@ export default function AprevoirIndex({
         if (rows !== currentRows) {
 
             router.patch(
-                route('a_prevoir.tasks.position', dragState.taskId),
+                route(moduleRoutes.position, dragState.taskId),
                 { ordered_ids: rows.map((row) => row.id) },
                 { preserveScroll: true, preserveState: true },
             );
@@ -1797,7 +1809,7 @@ export default function AprevoirIndex({
     const pageHeader = (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <h1 className="text-[22px] leading-none">
-                <span className="block text-[22px] leading-none font-black uppercase tracking-[0.06em]">À Prévoir</span>
+                <span className="block text-[22px] leading-none font-black uppercase tracking-[0.06em]">{moduleTitle}</span>
             </h1>
 
             <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-center">
@@ -1840,8 +1852,8 @@ export default function AprevoirIndex({
     );
 
     return (
-        <AppLayout title="À Prévoir" header={pageHeader}>
-            <Head title="À Prévoir" />
+        <AppLayout title={moduleTitle} header={pageHeader}>
+            <Head title={moduleTitle} />
 
             <div ref={tableSectionRef} className="w-full max-w-full space-y-4 px-0 sm:space-y-5">
                 <DesktopTable

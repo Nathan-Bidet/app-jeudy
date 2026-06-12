@@ -33,6 +33,7 @@ export default function AppLayout({ title, header, children }) {
     const isTaskDataSection = route().current('task.data.*');
     const isCalendarSection = route().current('calendar.*');
     const isWidePlanningSection = route().current('a_prevoir.*')
+        || route().current('engrais.*')
         || route().current('ldt.*')
         || route().current('task.archive.*');
 

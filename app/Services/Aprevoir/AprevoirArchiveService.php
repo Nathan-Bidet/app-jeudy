@@ -6,6 +6,7 @@ use App\Models\AprevoirArchivedTask;
 use App\Models\AprevoirTask;
 use App\Services\AuditLogService;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 class AprevoirArchiveService
@@ -21,7 +22,8 @@ class AprevoirArchiveService
         $cutoff = $cutoffDate->copy()->startOfDay();
 
         $result = DB::transaction(function () use ($cutoff): array {
-            $taskIds = AprevoirTask::query()
+            $taskModelClass = $this->taskModelClass();
+            $taskIds = $taskModelClass::query()
                 ->where('pointed', true)
                 ->whereDate('date', '<=', $cutoff->toDateString())
                 ->orderBy('id')
@@ -52,9 +54,10 @@ class AprevoirArchiveService
         if ($processed > 0) {
             $this->auditLogService->log([
                 'action' => 'archive_old_tasks',
-                'module' => 'a_prevoir',
+                'module' => $this->logModule(),
                 'description' => sprintf(
-                    'Archivage À Prévoir exécuté (cutoff %s, %d lignes traitées)',
+                    'Archivage %s exécuté (cutoff %s, %d lignes traitées)',
+                    $this->moduleLabel(),
                     $cutoff->toDateString(),
                     $processed
                 ),
@@ -70,7 +73,7 @@ class AprevoirArchiveService
         return $processed;
     }
 
-    public function archiveTask(AprevoirTask $task): bool
+    public function archiveTask(Model $task): bool
     {
         $cutoff = now()->subDays(90)->startOfDay();
 
@@ -81,10 +84,11 @@ class AprevoirArchiveService
         return in_array($status, ['archived', 'deduplicated'], true);
     }
 
-    public function restoreArchivedTask(AprevoirArchivedTask $task): ?AprevoirTask
+    public function restoreArchivedTask(Model $task): ?Model
     {
         return DB::transaction(function () use ($task): ?AprevoirTask {
-            $archivedTask = AprevoirArchivedTask::query()
+            $archivedTaskModelClass = $this->archivedTaskModelClass();
+            $archivedTask = $archivedTaskModelClass::query()
                 ->whereKey($task->id)
                 ->lockForUpdate()
                 ->first();
@@ -100,7 +104,7 @@ class AprevoirArchiveService
 
                 $this->auditLogService->log([
                     'action' => 'restore_archive_task_deduplicated',
-                    'module' => 'a_prevoir',
+                    'module' => $this->logModule(),
                     'description' => sprintf(
                         'Restauration archive #%d ignorée (doublon actif #%d)',
                         (int) $task->id,
@@ -126,17 +130,18 @@ class AprevoirArchiveService
                 $archivedTask->assignee_label_free,
             );
 
-            $restoredTask = AprevoirTask::query()->create([
+            $taskModelClass = $this->taskModelClass();
+            $restoredTask = $taskModelClass::query()->create([
                 'date' => $archivedTask->date?->toDateString(),
-                'fin_date' => null,
+                'fin_date' => $archivedTask->fin_date?->toDateString(),
                 'assignee_type' => $archivedTask->assignee_type,
                 'assignee_id' => $archivedTask->assignee_id !== null ? (int) $archivedTask->assignee_id : null,
                 'assignee_label_free' => $archivedTask->assignee_label_free,
                 'vehicle_id' => $archivedTask->vehicle_id !== null ? (int) $archivedTask->vehicle_id : null,
-                'remorque_id' => null,
+                'remorque_id' => $archivedTask->remorque_id !== null ? (int) $archivedTask->remorque_id : null,
                 'task' => (string) $archivedTask->task,
-                'loading_place' => null,
-                'delivery_place' => null,
+                'loading_place' => $archivedTask->loading_place,
+                'delivery_place' => $archivedTask->delivery_place,
                 'comment' => $archivedTask->comment,
                 'is_direct' => (bool) $archivedTask->is_direct,
                 'is_boursagri' => (bool) $archivedTask->is_boursagri,
@@ -154,7 +159,7 @@ class AprevoirArchiveService
 
             $this->auditLogService->log([
                 'action' => 'restore_archive_task',
-                'module' => 'a_prevoir',
+                'module' => $this->logModule(),
                 'description' => sprintf(
                     'Restauration archive #%d vers tâche active #%d',
                     (int) $task->id,
@@ -178,7 +183,8 @@ class AprevoirArchiveService
 
     private function archiveTaskById(int $taskId, Carbon $cutoff, bool $logSingle): string
     {
-        $task = AprevoirTask::query()
+        $taskModelClass = $this->taskModelClass();
+        $task = $taskModelClass::query()
             ->whereKey($taskId)
             ->lockForUpdate()
             ->first();
@@ -191,14 +197,15 @@ class AprevoirArchiveService
             return 'skipped';
         }
 
-        $alreadyArchived = AprevoirArchivedTask::query()
+        $archivedTaskModelClass = $this->archivedTaskModelClass();
+        $alreadyArchived = $archivedTaskModelClass::query()
             ->where('original_task_id', $task->id)
             ->exists();
 
         $status = 'archived';
 
         if (! $alreadyArchived) {
-            AprevoirArchivedTask::query()->create($this->buildArchivePayload($task));
+            $archivedTaskModelClass::query()->create($this->buildArchivePayload($task));
         } else {
             $status = 'deduplicated';
         }
@@ -208,7 +215,7 @@ class AprevoirArchiveService
         if ($logSingle) {
             $this->auditLogService->log([
                 'action' => 'archive_task',
-                'module' => 'a_prevoir',
+                'module' => $this->logModule(),
                 'description' => sprintf('Archivage tâche #%d', (int) $task->id),
                 'payload' => [
                     'task_id' => (int) $task->id,
@@ -225,7 +232,7 @@ class AprevoirArchiveService
         return $status;
     }
 
-    private function isArchivable(AprevoirTask $task, Carbon $cutoff): bool
+    private function isArchivable(Model $task, Carbon $cutoff): bool
     {
         if (! $task->pointed || $task->date === null) {
             return false;
@@ -237,16 +244,20 @@ class AprevoirArchiveService
     /**
      * @return array<string,mixed>
      */
-    private function buildArchivePayload(AprevoirTask $task): array
+    private function buildArchivePayload(Model $task): array
     {
         return [
             'original_task_id' => (int) $task->id,
             'date' => $task->date?->toDateString(),
+            'fin_date' => $task->fin_date?->toDateString(),
             'assignee_type' => $task->assignee_type,
             'assignee_id' => $task->assignee_id !== null ? (int) $task->assignee_id : null,
             'assignee_label_free' => $task->assignee_label_free,
             'vehicle_id' => $task->vehicle_id !== null ? (int) $task->vehicle_id : null,
+            'remorque_id' => $task->remorque_id !== null ? (int) $task->remorque_id : null,
             'task' => (string) $task->task,
+            'loading_place' => $task->loading_place,
+            'delivery_place' => $task->delivery_place,
             'comment' => $task->comment,
             'is_direct' => (bool) $task->is_direct,
             'is_boursagri' => (bool) $task->is_boursagri,
@@ -265,9 +276,10 @@ class AprevoirArchiveService
         ];
     }
 
-    private function findDuplicateActiveTask(AprevoirArchivedTask $task): ?AprevoirTask
+    private function findDuplicateActiveTask(Model $task): ?Model
     {
-        $query = AprevoirTask::query()
+        $taskModelClass = $this->taskModelClass();
+        $query = $taskModelClass::query()
             ->where('task', (string) $task->task)
             ->where('is_direct', (bool) $task->is_direct)
             ->where('is_boursagri', (bool) $task->is_boursagri)
@@ -278,6 +290,10 @@ class AprevoirArchiveService
         $this->applyNullableWhere($query, 'assignee_id', $task->assignee_id);
         $this->applyNullableWhere($query, 'assignee_label_free', $task->assignee_label_free);
         $this->applyNullableWhere($query, 'vehicle_id', $task->vehicle_id);
+        $this->applyNullableWhere($query, 'remorque_id', $task->remorque_id);
+        $this->applyNullableWhere($query, 'fin_date', $task->fin_date?->toDateString());
+        $this->applyNullableWhere($query, 'loading_place', $task->loading_place);
+        $this->applyNullableWhere($query, 'delivery_place', $task->delivery_place);
 
         if ($task->comment === null) {
             $query->whereNull('comment');
@@ -307,7 +323,8 @@ class AprevoirArchiveService
 
     private function nextPositionForGroup(?string $date, ?string $assigneeType, ?int $assigneeId, ?string $assigneeLabelFree): int
     {
-        $query = AprevoirTask::query();
+        $taskModelClass = $this->taskModelClass();
+        $query = $taskModelClass::query();
 
         if ($date === null || $date === '') {
             $query->whereNull('date');
@@ -326,5 +343,25 @@ class AprevoirArchiveService
         }
 
         return (int) $query->max('position') + 1;
+    }
+
+    protected function taskModelClass(): string
+    {
+        return AprevoirTask::class;
+    }
+
+    protected function archivedTaskModelClass(): string
+    {
+        return AprevoirArchivedTask::class;
+    }
+
+    protected function logModule(): string
+    {
+        return 'a_prevoir';
+    }
+
+    protected function moduleLabel(): string
+    {
+        return 'À Prévoir';
     }
 }

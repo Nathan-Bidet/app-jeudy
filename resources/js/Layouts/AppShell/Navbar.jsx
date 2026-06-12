@@ -196,6 +196,19 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             disabled: true,
             hint: 'Module à venir',
         } : null,
+        safeHasRoute('engrais.index') && (permissions?.engrais_view ?? false) ? {
+            key: 'engrais-planning',
+            label: 'Engrais',
+            href: safeHref('engrais.index'),
+            icon: Clock3,
+            active: safeCurrent('engrais.*'),
+        } : isAdmin ? {
+            key: 'engrais-planning',
+            label: 'Engrais',
+            href: safeHref('engrais.index'),
+            icon: Clock3,
+            active: safeCurrent('engrais.*'),
+        } : null,
         safeHasRoute('task.data.index') && canTaskData ? {
             key: 'ldt-data',
             label: 'Données',

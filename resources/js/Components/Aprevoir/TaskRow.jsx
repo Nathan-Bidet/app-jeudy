@@ -5,6 +5,7 @@ import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { BookOpen, CheckCircle2, Circle, Copy, Pencil, Trash2 } from 'lucide-react';
 
 function bookButton(task) {
+    if (!task?.book) return null;
     const left = task?.updated_by?.initials || '--';
     const right = task?.created_by?.initials || '--';
     const projected = Boolean(task?.book?.projected && task?.book?.url);

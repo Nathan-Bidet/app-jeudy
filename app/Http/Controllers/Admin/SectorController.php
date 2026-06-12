@@ -37,6 +37,14 @@ class SectorController extends Controller
         'heures.view',
         'heures.create',
         'heures.export',
+        'engrais.view',
+        'engrais.view.current_week_only',
+        'engrais.create',
+        'engrais.update',
+        'engrais.delete',
+        'engrais.point',
+        'engrais.export',
+        'engrais.sms',
     ];
 
     public function __construct(private readonly AuditLogService $auditLogService)

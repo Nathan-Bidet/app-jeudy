@@ -12,6 +12,10 @@ Schedule::command('a-prevoir:archive-old')
     ->dailyAt('05:00')
     ->timezone(config('app.timezone', 'Europe/Paris'));
 
+Schedule::command('engrais:archive-old')
+    ->dailyAt('05:05')
+    ->timezone(config('app.timezone', 'Europe/Paris'));
+
 Schedule::command('hours:send-missing-reminders')
     ->dailyAt(config('hours.reminder_time', '18:30'))
     ->timezone(config('app.timezone', 'Europe/Paris'));

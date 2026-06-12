@@ -11,6 +11,7 @@ const ABILITY_GROUP_ORDER = [
     'dashboard',
     'directory',
     'a_prevoir',
+    'engrais',
     'ldt',
     'task.data',
     'task.formatting',
@@ -27,6 +28,7 @@ const ABILITY_GROUP_LABELS = {
     dashboard: 'Dashboard',
     directory: 'Annuaire',
     a_prevoir: 'À Prévoir',
+    engrais: 'Engrais',
     ldt: 'Livre du Travail',
     'task.data': 'Tâches - Données',
     'task.formatting': 'Mise en forme',
@@ -51,7 +53,7 @@ function abilityGroupKey(ability) {
 
     const [prefix] = ability.split('.');
 
-    if (['dashboard', 'directory', 'a_prevoir', 'ldt'].includes(prefix)) {
+    if (['dashboard', 'directory', 'a_prevoir', 'engrais', 'ldt'].includes(prefix)) {
         return prefix;
     }
 

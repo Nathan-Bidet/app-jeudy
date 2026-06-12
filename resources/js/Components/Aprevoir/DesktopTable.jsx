@@ -7,6 +7,7 @@ import { BookOpen, Check, Circle, Copy, Filter, GripVertical, Pencil, Search, Tr
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 function compactBookButton(task) {
+    if (!task?.book) return null;
     const left = task?.updated_by?.initials || '--';
     const right = task?.created_by?.initials || '--';
     const projected = Boolean(task?.book?.projected && task?.book?.url);
@@ -33,6 +34,7 @@ function compactBookButton(task) {
 }
 
 function plainBookButton(task) {
+    if (!task?.book) return null;
     const projected = Boolean(task?.book?.projected && task?.book?.url);
     const className =
         'inline-flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-[var(--app-text)]';

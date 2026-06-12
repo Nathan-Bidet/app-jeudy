@@ -17,6 +17,7 @@ class AprevoirArchivedTask extends Model
     {
         return [
             'date' => 'date',
+            'fin_date' => 'date',
             'pointed' => 'boolean',
             'pointed_at' => 'datetime',
             'is_direct' => 'boolean',
@@ -27,4 +28,3 @@ class AprevoirArchivedTask extends Model
         ];
     }
 }
-

@@ -350,7 +350,7 @@ export default function AdminLogsIndex({
                                     }}
                                     className="text-[var(--app-text)] underline decoration-dotted underline-offset-2 hover:opacity-80"
                                 >
-                                    Ouvrir la tâche #{selectedLog.task_id} dans À Prévoir
+                                    Ouvrir la tâche #{selectedLog.task_id} dans {selectedLog.task_module_label || 'À Prévoir'}
                                 </button>
                             </div>
                         ) : null}

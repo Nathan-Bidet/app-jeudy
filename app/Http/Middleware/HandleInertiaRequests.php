@@ -46,6 +46,7 @@ class HandleInertiaRequests extends Middleware
                 'is_admin' => (bool) $user?->hasRole('admin'),
                 'permissions' => [
                     'a_prevoir_view' => (bool) ($user && $accessManager->can($user, 'a_prevoir.view')),
+                    'engrais_view' => (bool) ($user && $accessManager->can($user, 'engrais.view')),
                     'ldt_view' => (bool) ($user && $accessManager->can($user, 'ldt.view')),
                     'ldt_sms' => (bool) ($user && $accessManager->can($user, 'ldt.sms')),
                     'task_data_view' => (bool) ($user && $accessManager->can($user, 'task.data.view')),
