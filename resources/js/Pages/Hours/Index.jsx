@@ -165,6 +165,7 @@ function defaultDayState({ isFriday = false } = {}) {
         morning_end: '12:00',
         afternoon_start: '14:00',
         afternoon_end: isFriday ? '17:00' : '18:00',
+        description: '',
         is_not_worked: false,
         has_breakfast_before_5: false,
         has_lunch: false,
@@ -179,6 +180,7 @@ function nonWorkedDayState() {
         morning_end: '',
         afternoon_start: '',
         afternoon_end: '',
+        description: '',
         is_not_worked: true,
         has_breakfast_before_5: false,
         has_lunch: false,
@@ -205,7 +207,7 @@ export default function HoursIndex({
     canCreate = false,
     canExport = false,
 }) {
-    const { flash = {} } = usePage().props;
+    const { flash = {}, errors = {} } = usePage().props;
     const flashError = flash?.error || null;
     const shouldHideUnauthorizedFlash = !canCreate
         && String(flashError || '').toLowerCase().includes('action non autorisée');
@@ -320,6 +322,7 @@ export default function HoursIndex({
                 morning_end: normalizeTimeForSelect(existing.morning_end),
                 afternoon_start: normalizeTimeForSelect(existing.afternoon_start),
                 afternoon_end: normalizeTimeForSelect(existing.afternoon_end),
+                description: existing.description || '',
                 is_not_worked: Boolean(existing.is_not_worked),
                 has_breakfast_before_5: Boolean(existing.has_breakfast_before_5),
                 has_lunch: Boolean(existing.has_lunch),
@@ -435,6 +438,7 @@ export default function HoursIndex({
                 morning_end: normalizeTimeForSelect(existing.morning_end),
                 afternoon_start: normalizeTimeForSelect(existing.afternoon_start),
                 afternoon_end: normalizeTimeForSelect(existing.afternoon_end),
+                description: existing.description || '',
                 is_not_worked: Boolean(existing.is_not_worked),
                 has_breakfast_before_5: Boolean(existing.has_breakfast_before_5),
                 has_lunch: Boolean(existing.has_lunch),
@@ -462,6 +466,16 @@ export default function HoursIndex({
         }));
     };
 
+    const onInlineDescriptionChange = (workDate, value) => {
+        setInlineEditingByDate((prev) => ({
+            ...prev,
+            [workDate]: {
+                ...prev[workDate],
+                description: value,
+            },
+        }));
+    };
+
     const onInlineToggleCheck = (workDate, field) => {
         setInlineEditingByDate((prev) => ({
             ...prev,
@@ -478,6 +492,9 @@ export default function HoursIndex({
             return;
         }
         const coverage = leaveCoverage(approvedLeavesByDate[day.work_date]);
+        if (!dayState.is_not_worked && !String(dayState.description || '').trim()) {
+            return;
+        }
 
         setSavingDates((prev) => {
             const next = new Set(prev);
@@ -492,6 +509,7 @@ export default function HoursIndex({
             morning_end: coverage.morning ? null : (dayState.morning_end || null),
             afternoon_start: coverage.afternoon ? null : (dayState.afternoon_start || null),
             afternoon_end: coverage.afternoon ? null : (dayState.afternoon_end || null),
+            description: dayState.description || null,
             has_breakfast_before_5: Boolean(dayState.has_breakfast_before_5),
             has_lunch: Boolean(dayState.has_lunch),
             has_dinner_after_21: Boolean(dayState.has_dinner_after_21),
@@ -530,6 +548,7 @@ export default function HoursIndex({
             morning_end: null,
             afternoon_start: null,
             afternoon_end: null,
+            description: null,
             has_breakfast_before_5: false,
             has_lunch: false,
             has_dinner_after_21: false,
@@ -552,6 +571,9 @@ export default function HoursIndex({
             return;
         }
         const coverage = leaveCoverage(approvedLeavesByDate[workDate]);
+        if (!dayState.is_not_worked && !String(dayState.description || '').trim()) {
+            return;
+        }
 
         const morningRange = coverage.morning
             ? { minutes: 0, error: null }
@@ -577,6 +599,7 @@ export default function HoursIndex({
             morning_end: coverage.morning ? null : (dayState.morning_end || null),
             afternoon_start: coverage.afternoon ? null : (dayState.afternoon_start || null),
             afternoon_end: coverage.afternoon ? null : (dayState.afternoon_end || null),
+            description: dayState.description || null,
             has_breakfast_before_5: Boolean(dayState.has_breakfast_before_5),
             has_lunch: Boolean(dayState.has_lunch),
             has_dinner_after_21: Boolean(dayState.has_dinner_after_21),
@@ -700,6 +723,7 @@ export default function HoursIndex({
                                     : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
                                 const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
                                 const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
+                                const descriptionMissing = !isNotWorked && !String(dayState.description || '').trim();
                                 const isSaving = savingDates.has(day.work_date);
 
                                 return (
@@ -801,11 +825,32 @@ export default function HoursIndex({
                                             })}
                                         </div>
 
+                                        <label className="mt-4 grid gap-1 text-sm">
+                                            <span className="font-medium">Description des travaux réalisés</span>
+                                            <textarea
+                                                rows={4}
+                                                maxLength={5000}
+                                                value={dayState.description || ''}
+                                                onChange={(event) => onTimeChange(day.id, 'description', event.target.value)}
+                                                disabled={isNotWorked}
+                                                placeholder="Décrivez les travaux effectués durant la journée..."
+                                                className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)] disabled:bg-gray-100"
+                                            />
+                                            {descriptionMissing && (
+                                                <span className="text-xs text-red-600">
+                                                    La description des travaux réalisés est obligatoire.
+                                                </span>
+                                            )}
+                                            {errors.description && (
+                                                <span className="text-xs text-red-600">{errors.description}</span>
+                                            )}
+                                        </label>
+
                                         <div className="mt-4 space-y-2">
                                             <button
                                                 type="button"
                                                 onClick={() => saveDay(day)}
-                                                disabled={isSaving || errorMessages.length > 0}
+                                                disabled={isSaving || errorMessages.length > 0 || descriptionMissing}
                                                 className="w-full rounded-xl bg-[#F1BF0C] px-4 py-3 text-sm font-semibold text-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
                                                 {isSaving ? 'Enregistrement...' : 'Enregistrer'}
@@ -860,6 +905,7 @@ export default function HoursIndex({
                                                 : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
                                             const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
                                             const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
+                                            const descriptionMissing = !isNotWorked && !String(dayState.description || '').trim();
                                             const isSaving = savingDates.has(sheet.work_date);
 
                                                     return (
@@ -973,11 +1019,32 @@ export default function HoursIndex({
                                                         })}
                                                     </div>
 
+                                                    <label className="mt-4 grid gap-1 text-sm">
+                                                        <span className="font-medium">Description des travaux réalisés</span>
+                                                        <textarea
+                                                            rows={4}
+                                                            maxLength={5000}
+                                                            value={dayState.description || ''}
+                                                            onChange={(event) => onInlineDescriptionChange(sheet.work_date, event.target.value)}
+                                                            disabled={isNotWorked}
+                                                            placeholder="Décrivez les travaux effectués durant la journée..."
+                                                            className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)] disabled:bg-gray-100"
+                                                        />
+                                                        {descriptionMissing && (
+                                                            <span className="text-xs text-red-600">
+                                                                La description des travaux réalisés est obligatoire.
+                                                            </span>
+                                                        )}
+                                                        {errors.description && (
+                                                            <span className="text-xs text-red-600">{errors.description}</span>
+                                                        )}
+                                                    </label>
+
                                                     <div className="mt-4 flex gap-2">
                                                         <button
                                                             type="button"
                                                             onClick={() => saveInlineDay(sheet.work_date)}
-                                                            disabled={isSaving || errorMessages.length > 0}
+                                                            disabled={isSaving || errorMessages.length > 0 || descriptionMissing}
                                                             className="rounded-xl bg-[var(--brand-yellow)] px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {isSaving ? 'Enregistrement...' : 'Enregistrer'}
@@ -997,7 +1064,12 @@ export default function HoursIndex({
                                             <div>
                                                 <p className="font-semibold">Date : {formatHistoryDate(sheet.work_date)}</p>
                                                 {sheet.is_not_worked ? (
-                                                    <p>Statut : Non travaillé</p>
+                                                    <>
+                                                        <p>Statut : Non travaillé</p>
+                                                        <p>
+                                                            Description : {String(sheet.description || '').trim() || 'Non renseignée'}
+                                                        </p>
+                                                    </>
                                                 ) : (
                                                     (() => {
                                                         const coverage = leaveCoverage(entry.leave);
@@ -1022,6 +1094,9 @@ export default function HoursIndex({
                                                     <>
                                                 <p>Heures : {hoursLabel}</p>
                                                 <p>Total heures travaillées : {formatWorkedDuration(totalWorkedMinutes)}</p>
+                                                <p>
+                                                    Description : {String(sheet.description || '').trim() || 'Non renseignée'}
+                                                </p>
                                                 <p>
                                                     Cases cochées :
                                                     {' '}

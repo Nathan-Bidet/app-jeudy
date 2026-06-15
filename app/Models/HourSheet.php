@@ -15,6 +15,7 @@ class HourSheet extends Model
         'afternoon_start',
         'afternoon_end',
         'total_minutes',
+        'description',
         'is_not_worked',
         'has_breakfast_before_5',
         'has_lunch',

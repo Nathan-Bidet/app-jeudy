@@ -46,6 +46,7 @@ class HourSheetController extends Controller
                 'afternoon_start' => $hourSheet->afternoon_start,
                 'afternoon_end' => $hourSheet->afternoon_end,
                 'total_minutes' => (int) $hourSheet->total_minutes,
+                'description' => $hourSheet->description,
                 'is_not_worked' => (bool) $hourSheet->is_not_worked,
                 'has_breakfast_before_5' => (bool) $hourSheet->has_breakfast_before_5,
                 'has_lunch' => (bool) $hourSheet->has_lunch,
@@ -80,6 +81,7 @@ class HourSheetController extends Controller
             'morning_end' => ['nullable', 'date_format:H:i'],
             'afternoon_start' => ['nullable', 'date_format:H:i'],
             'afternoon_end' => ['nullable', 'date_format:H:i'],
+            'description' => ['nullable', 'string', 'max:5000'],
             'is_not_worked' => ['nullable', 'boolean'],
             'has_breakfast_before_5' => ['nullable', 'boolean'],
             'has_lunch' => ['nullable', 'boolean'],
@@ -103,6 +105,13 @@ class HourSheetController extends Controller
         $beforeSnapshot = $existingHourSheet ? $this->hourSheetAuditSnapshot($existingHourSheet) : null;
 
         $isNotWorked = (bool) ($validated['is_not_worked'] ?? false);
+        $description = trim((string) ($validated['description'] ?? ''));
+        if (! $isNotWorked && $description === '') {
+            throw ValidationException::withMessages([
+                'description' => 'La description des travaux réalisés est obligatoire.',
+            ]);
+        }
+
         $approvedLeave = $this->approvedLeaveDayService->approvedLeaveMapForUser(
             $targetUserId,
             $validated['work_date'],
@@ -144,6 +153,7 @@ class HourSheetController extends Controller
                 'afternoon_start' => $afternoonStart,
                 'afternoon_end' => $afternoonEnd,
                 'total_minutes' => $morningMinutes + $afternoonMinutes,
+                'description' => $description !== '' ? $description : null,
                 'is_not_worked' => $isNotWorked,
                 'has_breakfast_before_5' => $isNotWorked ? false : (bool) ($validated['has_breakfast_before_5'] ?? false),
                 'has_lunch' => $isNotWorked ? false : (bool) ($validated['has_lunch'] ?? false),
@@ -268,6 +278,7 @@ class HourSheetController extends Controller
                 'Début soir',
                 'Fin soir',
                 'Total heures travaillées',
+                'Description',
                 'Casse-croûte (Avant 5h)',
                 'Déjeuner',
                 'Dîner (Après 21h)',
@@ -308,6 +319,7 @@ class HourSheetController extends Controller
                         '',
                         '',
                         '',
+                        '',
                     ]));
                     continue;
                 }
@@ -324,6 +336,7 @@ class HourSheetController extends Controller
                             '',
                             '',
                             '',
+                            $sheet->description ?? '',
                             '',
                             '',
                             '',
@@ -350,6 +363,7 @@ class HourSheetController extends Controller
                         $afternoonOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->afternoon_start),
                         $afternoonOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->afternoon_end),
                         $this->formatMinutesForExport($totalMinutes),
+                        $sheet->description ?? '',
                         $sheet->has_breakfast_before_5 ? 'Oui' : 'Non',
                         $sheet->has_lunch ? 'Oui' : 'Non',
                         $sheet->has_dinner_after_21 ? 'Oui' : 'Non',
@@ -375,6 +389,7 @@ class HourSheetController extends Controller
                     '',
                     '',
                     '',
+                    '',
                 ]));
             }
         }
@@ -389,6 +404,7 @@ class HourSheetController extends Controller
                 'Début soir',
                 'Fin soir',
                 'Total heures travaillées',
+                'Description',
                 'Casse-croûte (Avant 5h)',
                 'Déjeuner',
                 'Dîner (Après 21h)',
@@ -533,6 +549,7 @@ class HourSheetController extends Controller
             'afternoon_start' => $hourSheet->afternoon_start,
             'afternoon_end' => $hourSheet->afternoon_end,
             'total_minutes' => (int) $hourSheet->total_minutes,
+            'description' => $hourSheet->description,
             'is_not_worked' => (bool) $hourSheet->is_not_worked,
             'has_breakfast_before_5' => (bool) $hourSheet->has_breakfast_before_5,
             'has_lunch' => (bool) $hourSheet->has_lunch,
