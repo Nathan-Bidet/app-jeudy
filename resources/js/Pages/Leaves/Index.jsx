@@ -15,6 +15,7 @@ export default function LeavesIndex({
 }) {
     const [modificationForms, setModificationForms] = useState({});
     const [showValidationHistory, setShowValidationHistory] = useState(false);
+    const [validationUserId, setValidationUserId] = useState('');
     const [showAllMyLeaveRequests, setShowAllMyLeaveRequests] = useState(false);
 
     const formatDateFr = (isoDate) => {
@@ -220,9 +221,42 @@ export default function LeavesIndex({
         )),
         [leaveRequestsToValidate],
     );
+    const validationUsers = useMemo(() => {
+        const usersById = new Map();
+
+        leaveRequestsToValidate.forEach((request) => {
+            const userId = String(request.target_user_id || '');
+            if (userId && !usersById.has(userId)) {
+                usersById.set(userId, {
+                    id: userId,
+                    label: request.target_label,
+                });
+            }
+        });
+
+        return Array.from(usersById.values()).sort((left, right) => (
+            String(left.label || '').localeCompare(String(right.label || ''), 'fr', { sensitivity: 'base' })
+        ));
+    }, [leaveRequestsToValidate]);
+    const filterValidationRequestsByUser = (requests) => {
+        if (!validationUserId) {
+            return requests;
+        }
+
+        return requests.filter((request) => String(request.target_user_id) === validationUserId);
+    };
     const visibleLeaveRequestsToValidate = showValidationHistory
-        ? leaveRequestsToValidate
-        : pendingLeaveRequestsToValidate;
+        ? filterValidationRequestsByUser(leaveRequestsToValidate)
+        : filterValidationRequestsByUser(pendingLeaveRequestsToValidate);
+
+    const handleValidationUserChange = (event) => {
+        const nextUserId = event.target.value;
+        setValidationUserId(nextUserId);
+
+        if (nextUserId) {
+            setShowValidationHistory(true);
+        }
+    };
 
     return (
         <AppLayout title="Congés">
@@ -327,13 +361,28 @@ export default function LeavesIndex({
                     <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-5 sm:px-6 sm:py-6">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <h2 className="text-lg font-bold text-[var(--app-text)]">Demandes à valider</h2>
-                            <button
-                                type="button"
-                                className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
-                                onClick={() => setShowValidationHistory((prev) => !prev)}
-                            >
-                                {showValidationHistory ? "Masquer l'historique" : "Afficher l'historique"}
-                            </button>
+                            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                                <select
+                                    aria-label="Filtrer les demandes par utilisateur"
+                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm text-[var(--app-text)] sm:w-auto"
+                                    value={validationUserId}
+                                    onChange={handleValidationUserChange}
+                                >
+                                    <option value="">Tous les utilisateurs</option>
+                                    {validationUsers.map((user) => (
+                                        <option key={user.id} value={user.id}>
+                                            {user.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button
+                                    type="button"
+                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
+                                    onClick={() => setShowValidationHistory((prev) => !prev)}
+                                >
+                                    {showValidationHistory ? "Masquer l'historique" : "Afficher l'historique"}
+                                </button>
+                            </div>
                         </div>
                         <div className="mt-3 space-y-3">
                             {visibleLeaveRequestsToValidate.length === 0 ? (

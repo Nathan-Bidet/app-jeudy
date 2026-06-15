@@ -80,6 +80,7 @@ class LeaveRequestController extends Controller
 
             return [
                 'id' => $leaveRequest->id,
+                'target_user_id' => (int) $leaveRequest->target_user_id,
                 'target_label' => $targetLabel !== '' ? $targetLabel : ($target?->name ?: $target?->email),
                 'leave_type_label' => $leaveType?->name,
                 'start_at' => $leaveRequest->start_at?->toDateString(),
