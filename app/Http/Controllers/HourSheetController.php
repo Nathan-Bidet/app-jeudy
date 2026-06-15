@@ -103,11 +103,24 @@ class HourSheetController extends Controller
         $beforeSnapshot = $existingHourSheet ? $this->hourSheetAuditSnapshot($existingHourSheet) : null;
 
         $isNotWorked = (bool) ($validated['is_not_worked'] ?? false);
+        $approvedLeave = $this->approvedLeaveDayService->approvedLeaveMapForUser(
+            $targetUserId,
+            $validated['work_date'],
+            $validated['work_date']
+        )[$validated['work_date']] ?? null;
 
-        $morningStart = $isNotWorked ? null : ($validated['morning_start'] ?? null);
-        $morningEnd = $isNotWorked ? null : ($validated['morning_end'] ?? null);
-        $afternoonStart = $isNotWorked ? null : ($validated['afternoon_start'] ?? null);
-        $afternoonEnd = $isNotWorked ? null : ($validated['afternoon_end'] ?? null);
+        if ((bool) ($approvedLeave['is_full_day'] ?? false)) {
+            throw ValidationException::withMessages([
+                'work_date' => 'Vous êtes en congé ce jour-là, aucune heure ne peut être saisie.',
+            ]);
+        }
+
+        $morningUnavailable = (bool) ($approvedLeave['morning'] ?? false);
+        $afternoonUnavailable = (bool) ($approvedLeave['afternoon'] ?? false);
+        $morningStart = $isNotWorked || $morningUnavailable ? null : ($validated['morning_start'] ?? null);
+        $morningEnd = $isNotWorked || $morningUnavailable ? null : ($validated['morning_end'] ?? null);
+        $afternoonStart = $isNotWorked || $afternoonUnavailable ? null : ($validated['afternoon_start'] ?? null);
+        $afternoonEnd = $isNotWorked || $afternoonUnavailable ? null : ($validated['afternoon_end'] ?? null);
 
         $morningMinutes = $isNotWorked ? 0 : $this->computeRangeMinutes(
             $morningStart,
@@ -275,6 +288,30 @@ class HourSheetController extends Controller
             sort($allDates);
 
             foreach ($allDates as $dateKey) {
+                $leave = $leaveMap[$dateKey] ?? null;
+                $morningOnLeave = (bool) ($leave['morning'] ?? false);
+                $afternoonOnLeave = (bool) ($leave['afternoon'] ?? false);
+                $isFullDayLeave = (bool) ($leave['is_full_day'] ?? false)
+                    || ($morningOnLeave && $afternoonOnLeave);
+
+                if ($isFullDayLeave) {
+                    $leaveDate = CarbonImmutable::parse($dateKey);
+                    $writer->addRow(Row::fromValues([
+                        $leaveDate->format('d/m/Y'),
+                        ucfirst((string) $leaveDate->locale('fr')->translatedFormat('l')),
+                        'Congé validé',
+                        '',
+                        '',
+                        '',
+                        '',
+                        '',
+                        '',
+                        '',
+                        '',
+                    ]));
+                    continue;
+                }
+
                 if (isset($rowsByDate[$dateKey])) {
                     $sheet = $rowsByDate[$dateKey];
                     $date = $sheet->work_date;
@@ -295,14 +332,24 @@ class HourSheetController extends Controller
                         continue;
                     }
 
+                    $totalMinutes = ($morningOnLeave ? 0 : $this->computeRangeMinutes(
+                        $sheet->morning_start,
+                        $sheet->morning_end,
+                        'matin'
+                    )) + ($afternoonOnLeave ? 0 : $this->computeRangeMinutes(
+                        $sheet->afternoon_start,
+                        $sheet->afternoon_end,
+                        'soir'
+                    ));
+
                     $writer->addRow(Row::fromValues([
                         $date?->format('d/m/Y'),
                         $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
-                        $this->formatTimeForExport($sheet->morning_start),
-                        $this->formatTimeForExport($sheet->morning_end),
-                        $this->formatTimeForExport($sheet->afternoon_start),
-                        $this->formatTimeForExport($sheet->afternoon_end),
-                        $this->formatMinutesForExport((int) $sheet->total_minutes),
+                        $morningOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->morning_start),
+                        $morningOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->morning_end),
+                        $afternoonOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->afternoon_start),
+                        $afternoonOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->afternoon_end),
+                        $this->formatMinutesForExport($totalMinutes),
                         $sheet->has_breakfast_before_5 ? 'Oui' : 'Non',
                         $sheet->has_lunch ? 'Oui' : 'Non',
                         $sheet->has_dinner_after_21 ? 'Oui' : 'Non',
@@ -311,7 +358,7 @@ class HourSheetController extends Controller
                     continue;
                 }
 
-                if (! isset($leaveMap[$dateKey])) {
+                if (! $leave) {
                     continue;
                 }
 
@@ -319,10 +366,10 @@ class HourSheetController extends Controller
                 $writer->addRow(Row::fromValues([
                     $leaveDate->format('d/m/Y'),
                     ucfirst((string) $leaveDate->locale('fr')->translatedFormat('l')),
-                    'Congé validé',
-                    '',
-                    '',
-                    '',
+                    $morningOnLeave ? 'Congé' : '',
+                    $morningOnLeave ? 'Congé' : '',
+                    $afternoonOnLeave ? 'Congé' : '',
+                    $afternoonOnLeave ? 'Congé' : '',
                     '',
                     '',
                     '',

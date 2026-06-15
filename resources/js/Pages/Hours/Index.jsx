@@ -35,6 +35,8 @@ const TIME_FIELDS = [
     { key: 'afternoon_start', label: 'Début soir' },
     { key: 'afternoon_end', label: 'Fin soir' },
 ];
+const MORNING_TIME_FIELDS = TIME_FIELDS.slice(0, 2);
+const AFTERNOON_TIME_FIELDS = TIME_FIELDS.slice(2);
 
 const CHECKBOX_FIELDS = [
     { key: 'has_breakfast_before_5', label: 'Casse-croûte (Avant 5h)' },
@@ -182,6 +184,17 @@ function nonWorkedDayState() {
         has_lunch: false,
         has_dinner_after_21: false,
         has_long_night: false,
+    };
+}
+
+function leaveCoverage(leaveInfo) {
+    const morning = Boolean(leaveInfo?.morning);
+    const afternoon = Boolean(leaveInfo?.afternoon);
+
+    return {
+        morning,
+        afternoon,
+        fullDay: Boolean(leaveInfo?.is_full_day) || (morning && afternoon),
     };
 }
 
@@ -378,14 +391,15 @@ export default function HoursIndex({
         }
 
         const hasHourSheet = Boolean(sheetsByDate[day.work_date]);
-        const hasApprovedLeave = Boolean(approvedLeavesByDate[day.work_date]);
+        const approvedLeave = approvedLeavesByDate[day.work_date];
+        const hasFullDayLeave = leaveCoverage(approvedLeave).fullDay;
         const isPastDay = day.work_date < todayIso;
 
-        if (hasApprovedLeave && isPastDay) {
+        if (hasFullDayLeave && isPastDay) {
             return false;
         }
 
-        return !hasHourSheet || hasApprovedLeave;
+        return !hasHourSheet;
     });
 
     const onTimeChange = (dayId, field, value) => {
@@ -463,6 +477,7 @@ export default function HoursIndex({
         if (!dayState) {
             return;
         }
+        const coverage = leaveCoverage(approvedLeavesByDate[day.work_date]);
 
         setSavingDates((prev) => {
             const next = new Set(prev);
@@ -473,16 +488,19 @@ export default function HoursIndex({
         router.post(route('hours.store'), {
             work_date: day.work_date,
             is_not_worked: Boolean(dayState.is_not_worked),
-            morning_start: dayState.morning_start || null,
-            morning_end: dayState.morning_end || null,
-            afternoon_start: dayState.afternoon_start || null,
-            afternoon_end: dayState.afternoon_end || null,
+            morning_start: coverage.morning ? null : (dayState.morning_start || null),
+            morning_end: coverage.morning ? null : (dayState.morning_end || null),
+            afternoon_start: coverage.afternoon ? null : (dayState.afternoon_start || null),
+            afternoon_end: coverage.afternoon ? null : (dayState.afternoon_end || null),
             has_breakfast_before_5: Boolean(dayState.has_breakfast_before_5),
             has_lunch: Boolean(dayState.has_lunch),
             has_dinner_after_21: Boolean(dayState.has_dinner_after_21),
             has_long_night: Boolean(dayState.has_long_night),
         }, {
             preserveScroll: true,
+            onSuccess: () => {
+                setHistoryOpen(true);
+            },
             onFinish: () => {
                 setSavingDates((prev) => {
                     const next = new Set(prev);
@@ -533,9 +551,14 @@ export default function HoursIndex({
         if (!dayState) {
             return;
         }
+        const coverage = leaveCoverage(approvedLeavesByDate[workDate]);
 
-        const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
-        const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
+        const morningRange = coverage.morning
+            ? { minutes: 0, error: null }
+            : computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
+        const eveningRange = coverage.afternoon
+            ? { minutes: 0, error: null }
+            : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
         const hasErrors = [morningRange.error, eveningRange.error].some(Boolean);
         if (hasErrors) {
             return;
@@ -550,10 +573,10 @@ export default function HoursIndex({
         router.post(route('hours.store'), {
             work_date: workDate,
             is_not_worked: Boolean(dayState.is_not_worked),
-            morning_start: dayState.morning_start || null,
-            morning_end: dayState.morning_end || null,
-            afternoon_start: dayState.afternoon_start || null,
-            afternoon_end: dayState.afternoon_end || null,
+            morning_start: coverage.morning ? null : (dayState.morning_start || null),
+            morning_end: coverage.morning ? null : (dayState.morning_end || null),
+            afternoon_start: coverage.afternoon ? null : (dayState.afternoon_start || null),
+            afternoon_end: coverage.afternoon ? null : (dayState.afternoon_end || null),
             has_breakfast_before_5: Boolean(dayState.has_breakfast_before_5),
             has_lunch: Boolean(dayState.has_lunch),
             has_dinner_after_21: Boolean(dayState.has_dinner_after_21),
@@ -572,24 +595,26 @@ export default function HoursIndex({
     };
 
     const historyEntries = useMemo(() => {
-        const entries = [
-            ...hourSheets.map((sheet) => ({
-                type: 'sheet',
-                date: sheet.work_date,
-                key: `sheet-${sheet.work_date}`,
-                data: sheet,
-            })),
-            ...Object.entries(approvedLeavesByDate).map(([date, leave]) => ({
-                type: 'leave',
+        const dates = new Set([
+            ...Object.keys(sheetsByDate),
+            ...Object.keys(approvedLeavesByDate),
+        ]);
+        const entries = Array.from(dates).map((date) => {
+            const sheet = sheetsByDate[date] || null;
+            const leave = approvedLeavesByDate[date] || null;
+
+            return {
+                type: sheet && !leaveCoverage(leave).fullDay ? 'sheet' : 'leave',
                 date,
-                key: `leave-${date}`,
-                data: leave,
-            })),
-        ];
+                key: `history-${date}`,
+                sheet,
+                leave,
+            };
+        });
 
         entries.sort((a, b) => String(b.date).localeCompare(String(a.date)));
         return entries;
-    }, [hourSheets, approvedLeavesByDate]);
+    }, [sheetsByDate, approvedLeavesByDate]);
 
     return (
         <AppLayout
@@ -650,7 +675,8 @@ export default function HoursIndex({
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                             {visibleWeekDays.map((day) => {
                                 const leaveInfo = approvedLeavesByDate[day.work_date];
-                                if (leaveInfo) {
+                                const coverage = leaveCoverage(leaveInfo);
+                                if (coverage.fullDay) {
                                     return (
                                         <section
                                             key={day.id}
@@ -666,8 +692,12 @@ export default function HoursIndex({
 
                                 const dayState = formState[day.id];
                                 const isNotWorked = Boolean(dayState.is_not_worked);
-                                const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
-                                const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
+                                const morningRange = coverage.morning
+                                    ? { minutes: 0, error: null }
+                                    : computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
+                                const eveningRange = coverage.afternoon
+                                    ? { minutes: 0, error: null }
+                                    : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
                                 const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
                                 const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
                                 const isSaving = savingDates.has(day.work_date);
@@ -686,7 +716,33 @@ export default function HoursIndex({
                                         )}
 
                                         <div className="mt-4 grid gap-3">
-                                            {TIME_FIELDS.map((field) => (
+                                            {coverage.morning ? (
+                                                <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                    Vous êtes en congé ce matin.
+                                                </p>
+                                            ) : MORNING_TIME_FIELDS.map((field) => (
+                                                <label key={field.key} className="grid gap-1 text-sm">
+                                                    <span className="font-medium">{field.label}</span>
+                                                    <select
+                                                        value={dayState[field.key]}
+                                                        onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
+                                                        disabled={isNotWorked}
+                                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                                    >
+                                                        <option value="">--:--</option>
+                                                        {timeOptions.map((time) => (
+                                                            <option key={time} value={time}>
+                                                                {time}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+                                            ))}
+                                            {coverage.afternoon ? (
+                                                <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                    Vous êtes en congé cet après-midi.
+                                                </p>
+                                            ) : AFTERNOON_TIME_FIELDS.map((field) => (
                                                 <label key={field.key} className="grid gap-1 text-sm">
                                                     <span className="font-medium">{field.label}</span>
                                                     <select
@@ -783,20 +839,25 @@ export default function HoursIndex({
                         ) : (
                             <div className="mt-4 space-y-3">
                                 {historyEntries.map((entry) => {
-                                    const sheet = entry.type === 'sheet' ? entry.data : null;
+                                    const sheet = entry.sheet;
                                     return (
                                     <article key={entry.key} className="rounded-xl border border-[var(--app-border)] bg-white p-3 text-sm text-black">
                                         {entry.type === 'leave' ? (
                                             <div>
                                                 <p className="font-semibold">Date : {formatHistoryDate(entry.date)}</p>
                                                 <p>Statut : En congé</p>
-                                                <p>Congé validé — aucune heure à saisir</p>
+                                                <p>{entry.leave?.message || 'Congé validé'}</p>
                                             </div>
                                         ) : (canCreate && inlineEditingByDate[sheet.work_date] ? (() => {
                                             const dayState = inlineEditingByDate[sheet.work_date];
                                             const isNotWorked = Boolean(dayState.is_not_worked);
-                                            const morningRange = computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
-                                            const eveningRange = computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
+                                            const coverage = leaveCoverage(approvedLeavesByDate[sheet.work_date]);
+                                            const morningRange = coverage.morning
+                                                ? { minutes: 0, error: null }
+                                                : computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
+                                            const eveningRange = coverage.afternoon
+                                                ? { minutes: 0, error: null }
+                                                : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
                                             const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
                                             const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
                                             const isSaving = savingDates.has(sheet.work_date);
@@ -827,7 +888,33 @@ export default function HoursIndex({
                                                     )}
 
                                                     <div className="mt-4 grid gap-3">
-                                                        {TIME_FIELDS.map((field) => (
+                                                        {coverage.morning ? (
+                                                            <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                                Vous êtes en congé ce matin.
+                                                            </p>
+                                                        ) : MORNING_TIME_FIELDS.map((field) => (
+                                                            <label key={field.key} className="grid gap-1 text-sm">
+                                                                <span className="font-medium">{field.label}</span>
+                                                                <select
+                                                                    value={dayState[field.key]}
+                                                                    onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
+                                                                    disabled={isNotWorked}
+                                                                    className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                                                >
+                                                                    <option value="">--:--</option>
+                                                                    {timeOptions.map((time) => (
+                                                                        <option key={time} value={time}>
+                                                                            {time}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </label>
+                                                        ))}
+                                                        {coverage.afternoon ? (
+                                                            <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                                Vous êtes en congé cet après-midi.
+                                                            </p>
+                                                        ) : AFTERNOON_TIME_FIELDS.map((field) => (
                                                             <label key={field.key} className="grid gap-1 text-sm">
                                                                 <span className="font-medium">{field.label}</span>
                                                                 <select
@@ -912,13 +999,29 @@ export default function HoursIndex({
                                                 {sheet.is_not_worked ? (
                                                     <p>Statut : Non travaillé</p>
                                                 ) : (
+                                                    (() => {
+                                                        const coverage = leaveCoverage(entry.leave);
+                                                        const morningStart = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_start);
+                                                        const morningEnd = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_end);
+                                                        const afternoonStart = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_start);
+                                                        const afternoonEnd = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_end);
+                                                        const morningRange = coverage.morning
+                                                            ? { minutes: 0 }
+                                                            : computeRangeDuration(sheet.morning_start, sheet.morning_end, 'matin');
+                                                        const afternoonRange = coverage.afternoon
+                                                            ? { minutes: 0 }
+                                                            : computeRangeDuration(sheet.afternoon_start, sheet.afternoon_end, 'soir');
+                                                        const totalWorkedMinutes = morningRange.minutes + afternoonRange.minutes;
+                                                        const hoursLabel = coverage.morning
+                                                            ? `Congé / Congé / ${afternoonStart} - ${afternoonEnd}`
+                                                            : coverage.afternoon
+                                                                ? `${morningStart} - ${morningEnd} / Congé / Congé`
+                                                                : `${morningStart} - ${morningEnd} / ${afternoonStart} - ${afternoonEnd}`;
+
+                                                        return (
                                                     <>
-                                                <p>
-                                                    Heures : {formatHistoryTime(sheet.morning_start)} - {formatHistoryTime(sheet.morning_end)}
-                                                    {' / '}
-                                                    {formatHistoryTime(sheet.afternoon_start)} - {formatHistoryTime(sheet.afternoon_end)}
-                                                </p>
-                                                <p>Total heures travaillées : {formatWorkedDuration(Number(sheet.total_minutes || 0))}</p>
+                                                <p>Heures : {hoursLabel}</p>
+                                                <p>Total heures travaillées : {formatWorkedDuration(totalWorkedMinutes)}</p>
                                                 <p>
                                                     Cases cochées :
                                                     {' '}
@@ -930,8 +1033,10 @@ export default function HoursIndex({
                                                     ].filter(Boolean).join(', ') || 'Aucune'}
                                                 </p>
                                                     </>
+                                                        );
+                                                    })()
                                                 )}
-                                                {canCreate && (
+                                                {canCreate && !leaveCoverage(approvedLeavesByDate[sheet.work_date]).fullDay && (
                                                     <button
                                                         type="button"
                                                         onClick={() => startInlineEdit(sheet.work_date)}
