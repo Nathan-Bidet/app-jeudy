@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -41,10 +42,6 @@ class LogsController extends Controller
             $query->where('action', (string) $validated['action']);
         }
 
-        if ($search !== '') {
-            $query->whereRaw('LOWER(description) LIKE ?', ['%'.mb_strtolower($search).'%']);
-        }
-
         if (! empty($validated['date_from'])) {
             $query->whereDate('created_at', '>=', (string) $validated['date_from']);
         }
@@ -53,40 +50,35 @@ class LogsController extends Controller
             $query->whereDate('created_at', '<=', (string) $validated['date_to']);
         }
 
-        $logs = $query
-            ->orderByDesc('created_at')
-            ->paginate($perPage)
-            ->withQueryString()
-            ->through(function (AuditLog $log): array {
-                $payload = is_array($log->payload) ? $log->payload : null;
-                $before = is_array($payload['before'] ?? null) ? $payload['before'] : null;
-                $after = is_array($payload['after'] ?? null) ? $payload['after'] : null;
-                $changes = $this->extractChanges($before, $after);
-                $taskId = $this->resolveTaskId($payload);
-                $taskRoute = $log->module === 'engrais' ? 'engrais.index' : 'a_prevoir.index';
+        if ($search !== '') {
+            $currentPage = LengthAwarePaginator::resolveCurrentPage();
+            $needle = mb_strtolower($search);
+            $filteredLogs = $query
+                ->orderByDesc('created_at')
+                ->get()
+                ->map(fn (AuditLog $log): array => $this->formatLog($log))
+                ->filter(function (array $log) use ($needle): bool {
+                    return str_contains(mb_strtolower((string) ($log['description_display'] ?? '')), $needle);
+                })
+                ->values();
 
-                return [
-                    'id' => $log->id,
-                    'created_at' => $log->created_at?->toIso8601String(),
-                    'created_at_label' => $log->created_at?->format('d/m/Y H:i:s'),
-                    'user_id' => $log->user_id,
-                    'user_name' => $log->user_name,
-                    'action' => $log->action,
-                    'module' => $log->module,
-                    'description' => $log->description,
-                    'description_display' => $this->buildReadableDescription($log, $payload, $changes),
-                    'route' => $log->route,
-                    'method' => $log->method,
-                    'url' => $log->url,
-                    'ip_address' => $log->ip_address,
-                    'user_agent' => $log->user_agent,
-                    'payload' => $payload,
-                    'changes' => $changes,
-                    'task_id' => $taskId,
-                    'task_module_label' => $log->module === 'engrais' ? 'Engrais' : 'À Prévoir',
-                    'task_href' => $taskId ? route($taskRoute, ['focus_task_id' => $taskId]) : null,
-                ];
-            });
+            $logs = new LengthAwarePaginator(
+                $filteredLogs->forPage($currentPage, $perPage)->values(),
+                $filteredLogs->count(),
+                $perPage,
+                $currentPage,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                ],
+            );
+        } else {
+            $logs = $query
+                ->orderByDesc('created_at')
+                ->paginate($perPage)
+                ->withQueryString()
+                ->through(fn (AuditLog $log): array => $this->formatLog($log));
+        }
 
         $userIds = AuditLog::query()
             ->whereNotNull('user_id')
@@ -127,6 +119,41 @@ class LogsController extends Controller
                 'actions' => AuditLog::query()->select('action')->distinct()->orderBy('action')->pluck('action')->all(),
             ],
         ]);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function formatLog(AuditLog $log): array
+    {
+        $payload = is_array($log->payload) ? $log->payload : null;
+        $before = is_array($payload['before'] ?? null) ? $payload['before'] : null;
+        $after = is_array($payload['after'] ?? null) ? $payload['after'] : null;
+        $changes = $this->extractChanges($before, $after);
+        $taskId = $this->resolveTaskId($payload);
+        $taskRoute = $log->module === 'engrais' ? 'engrais.index' : 'a_prevoir.index';
+
+        return [
+            'id' => $log->id,
+            'created_at' => $log->created_at?->toIso8601String(),
+            'created_at_label' => $log->created_at?->format('d/m/Y H:i:s'),
+            'user_id' => $log->user_id,
+            'user_name' => $log->user_name,
+            'action' => $log->action,
+            'module' => $log->module,
+            'description' => $log->description,
+            'description_display' => $this->buildReadableDescription($log, $payload, $changes),
+            'route' => $log->route,
+            'method' => $log->method,
+            'url' => $log->url,
+            'ip_address' => $log->ip_address,
+            'user_agent' => $log->user_agent,
+            'payload' => $payload,
+            'changes' => $changes,
+            'task_id' => $taskId,
+            'task_module_label' => $log->module === 'engrais' ? 'Engrais' : 'À Prévoir',
+            'task_href' => $taskId ? route($taskRoute, ['focus_task_id' => $taskId]) : null,
+        ];
     }
 
     /**
