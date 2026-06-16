@@ -10,6 +10,8 @@ import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2, Globe, X, Play, Square
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const WEEK_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+const WORKDAY_START_MINUTES = 8 * 60;
+const WORKDAY_END_MINUTES = 18 * 60;
 
 function toDate(value) {
     const parsed = new Date(value);
@@ -414,12 +416,99 @@ function rangesOverlap(startA, endA, startB, endB) {
     return startA < endB && endA > startB;
 }
 
+function isLeaveEvent(eventItem) {
+    return String(eventItem?.id || '').startsWith('leave-');
+}
+
+function isWeekMixedLeaveEvent(eventItem) {
+    return isLeaveEvent(eventItem) && eventItem?.isMultiDay && !eventItem?.isAllDay;
+}
+
+function weekLeaveSegmentForDay(eventItem, day) {
+    if (!isWeekMixedLeaveEvent(eventItem)) return null;
+
+    const start = eventItem.startDateTime;
+    const end = eventItem.endDateTime;
+    if (!start || !end) return null;
+
+    const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0);
+    const dayEnd = addDays(dayStart, 1);
+    if (!rangesOverlap(start.getTime(), end.getTime(), dayStart.getTime(), dayEnd.getTime())) return null;
+
+    const segmentStart = new Date(Math.max(start.getTime(), dayStart.getTime()));
+    const segmentEnd = new Date(Math.min(end.getTime(), dayEnd.getTime()));
+    const coveredStartMinutes = segmentStart.getTime() <= dayStart.getTime()
+        ? 0
+        : Math.max(0, Math.min(1440, minutesSinceMidnight(segmentStart)));
+    const coveredEndMinutes = segmentEnd.getTime() >= dayEnd.getTime()
+        ? 1440
+        : Math.max(0, Math.min(1440, minutesSinceMidnight(segmentEnd)));
+    const isFullWorkday = coveredStartMinutes <= WORKDAY_START_MINUTES
+        && coveredEndMinutes >= WORKDAY_END_MINUTES;
+
+    if (isFullWorkday) {
+        return {
+            type: 'all-day',
+            dayKey: toIsoDate(dayStart),
+        };
+    }
+
+    const startMinutes = Math.max(WORKDAY_START_MINUTES, coveredStartMinutes);
+    const endMinutes = Math.min(WORKDAY_END_MINUTES, coveredEndMinutes);
+    if (endMinutes <= startMinutes) return null;
+
+    return {
+        type: 'timed',
+        dayKey: toIsoDate(dayStart),
+        startMinutes,
+        endMinutes,
+    };
+}
+
+function buildWeekLeaveAllDaySegments(weekDays, eventItem) {
+    const segments = [];
+    let currentSegment = null;
+
+    weekDays.forEach((day, dayIndex) => {
+        const segment = weekLeaveSegmentForDay(eventItem, day);
+
+        if (segment?.type === 'all-day') {
+            if (!currentSegment) {
+                currentSegment = {
+                    event: eventItem,
+                    colStart: dayIndex,
+                    colEnd: dayIndex + 1,
+                };
+            } else {
+                currentSegment.colEnd = dayIndex + 1;
+            }
+            return;
+        }
+
+        if (currentSegment) {
+            segments.push(currentSegment);
+            currentSegment = null;
+        }
+    });
+
+    if (currentSegment) {
+        segments.push(currentSegment);
+    }
+
+    return segments;
+}
+
 function buildWeekAllDayLanes(weekDays, normalizedEvents) {
     const weekStart = weekDays[0];
     const weekEnd = weekDays[6];
     const segments = [];
 
     normalizedEvents.forEach((eventItem) => {
+        if (isWeekMixedLeaveEvent(eventItem)) {
+            segments.push(...buildWeekLeaveAllDaySegments(weekDays, eventItem));
+            return;
+        }
+
         if (!eventItem.isAllDay) return;
         if (eventItem.end.getTime() < weekStart.getTime() || eventItem.start.getTime() > weekEnd.getTime()) return;
 
@@ -474,14 +563,25 @@ function buildWeekTimedByDay(weekDays, normalizedEvents) {
             if (!start || !end) return;
             if (!rangesOverlap(start.getTime(), end.getTime(), dayStart.getTime(), dayEnd.getTime())) return;
 
+            const leaveSegment = weekLeaveSegmentForDay(eventItem, dayStart);
+            if (leaveSegment?.type === 'all-day') return;
+
             const segmentStart = new Date(Math.max(start.getTime(), dayStart.getTime()));
             const segmentEnd = new Date(Math.min(end.getTime(), dayEnd.getTime()));
-            const startMinutes = segmentStart.getTime() <= dayStart.getTime()
-                ? 0
-                : Math.max(0, Math.min(1440, minutesSinceMidnight(segmentStart)));
-            const rawEndMinutes = segmentEnd.getTime() >= dayEnd.getTime()
-                ? 1440
-                : Math.max(0, Math.min(1440, minutesSinceMidnight(segmentEnd)));
+            const startMinutes = leaveSegment?.type === 'timed'
+                ? leaveSegment.startMinutes
+                : (
+                    segmentStart.getTime() <= dayStart.getTime()
+                        ? 0
+                        : Math.max(0, Math.min(1440, minutesSinceMidnight(segmentStart)))
+                );
+            const rawEndMinutes = leaveSegment?.type === 'timed'
+                ? leaveSegment.endMinutes
+                : (
+                    segmentEnd.getTime() >= dayEnd.getTime()
+                        ? 1440
+                        : Math.max(0, Math.min(1440, minutesSinceMidnight(segmentEnd)))
+                );
             const endMinutes = Math.max(startMinutes + 1, rawEndMinutes);
             const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
             const endEffective = new Date(Math.max(start.getTime(), end.getTime() - 1));
@@ -494,7 +594,14 @@ function buildWeekTimedByDay(weekDays, normalizedEvents) {
 
             let timeLabel = '';
             let timeLabelType = null;
-            if (totalTouchedDays === 1) {
+            if (leaveSegment?.type === 'timed') {
+                const labelStart = new Date(dayStart);
+                labelStart.setMinutes(startMinutes);
+                const labelEnd = new Date(dayStart);
+                labelEnd.setMinutes(endMinutes);
+                timeLabel = `${formatHourMinute(labelStart)} - ${formatHourMinute(labelEnd)}`;
+                timeLabelType = 'range';
+            } else if (totalTouchedDays === 1) {
                 timeLabel = `${formatHourMinute(start)} - ${formatHourMinute(end)}`;
                 timeLabelType = 'range';
             } else if (totalTouchedDays === 2) {
@@ -1049,9 +1156,12 @@ function WeekMobileDayGrid({ day, today, normalizedEvents, openDayEventsModal, o
     const allDayItems = useMemo(() => {
         return normalizedEvents
             .filter((eventItem) => (
-                eventItem.isAllDay
-                && eventItem.start.getTime() <= dayDate.getTime()
-                && eventItem.end.getTime() >= dayDate.getTime()
+                (
+                    eventItem.isAllDay
+                    && eventItem.start.getTime() <= dayDate.getTime()
+                    && eventItem.end.getTime() >= dayDate.getTime()
+                )
+                || weekLeaveSegmentForDay(eventItem, dayDate)?.type === 'all-day'
             ))
             .sort((left, right) => left.start.getTime() - right.start.getTime());
     }, [normalizedEvents, dayDate]);
