@@ -18,12 +18,14 @@ class LogsController extends Controller
             'user_id' => ['nullable', 'integer'],
             'module' => ['nullable', 'string', 'max:120'],
             'action' => ['nullable', 'string', 'max:120'],
+            'search' => ['nullable', 'string', 'max:255'],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date'],
             'per_page' => ['nullable', 'integer', Rule::in([25, 50, 100, 150, 200])],
         ]);
 
         $perPage = (int) ($validated['per_page'] ?? 25);
+        $search = trim((string) ($validated['search'] ?? ''));
 
         $query = AuditLog::query()->with('user:id,name,first_name,last_name,email');
 
@@ -37,6 +39,10 @@ class LogsController extends Controller
 
         if (! empty($validated['action'])) {
             $query->where('action', (string) $validated['action']);
+        }
+
+        if ($search !== '') {
+            $query->whereRaw('LOWER(description) LIKE ?', ['%'.mb_strtolower($search).'%']);
         }
 
         if (! empty($validated['date_from'])) {
@@ -110,6 +116,7 @@ class LogsController extends Controller
                 'user_id' => ! empty($validated['user_id']) ? (int) $validated['user_id'] : null,
                 'module' => $validated['module'] ?? '',
                 'action' => $validated['action'] ?? '',
+                'search' => $search,
                 'date_from' => $validated['date_from'] ?? '',
                 'date_to' => $validated['date_to'] ?? '',
                 'per_page' => $perPage,

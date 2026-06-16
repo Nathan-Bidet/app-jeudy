@@ -12,6 +12,7 @@ export default function AdminLogsIndex({
         user_id: filters.user_id ? String(filters.user_id) : '',
         module: filters.module || '',
         action: filters.action || '',
+        search: filters.search || '',
         date_from: filters.date_from || '',
         date_to: filters.date_to || '',
         per_page: String(filters.per_page || 25),
@@ -41,6 +42,7 @@ export default function AdminLogsIndex({
             user_id: localFilters.user_id || undefined,
             module: localFilters.module || undefined,
             action: localFilters.action || undefined,
+            search: localFilters.search || undefined,
             date_from: localFilters.date_from || undefined,
             date_to: localFilters.date_to || undefined,
             per_page: localFilters.per_page || 25,
@@ -56,6 +58,7 @@ export default function AdminLogsIndex({
             user_id: '',
             module: '',
             action: '',
+            search: '',
             date_from: '',
             date_to: '',
             per_page: '25',
@@ -117,7 +120,7 @@ export default function AdminLogsIndex({
             <div className="space-y-6">
                 <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm sm:p-6">
                     <h3 className="text-lg font-semibold text-[var(--app-text)]">Filtres</h3>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
                         <div>
                             <label className="mb-1 block text-sm font-medium text-[var(--app-muted)]">Utilisateur</label>
                             <select
@@ -164,6 +167,17 @@ export default function AdminLogsIndex({
                                     </option>
                                 ))}
                             </select>
+                        </div>
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-[var(--app-muted)]">Recherche</label>
+                            <input
+                                type="text"
+                                className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-text)]"
+                                value={localFilters.search}
+                                placeholder="Rechercher dans les descriptions..."
+                                onChange={(event) => setLocalFilters((prev) => ({ ...prev, search: event.target.value }))}
+                            />
                         </div>
 
                         <div>
@@ -301,6 +315,7 @@ export default function AdminLogsIndex({
                                             user_id: localFilters.user_id || undefined,
                                             module: localFilters.module || undefined,
                                             action: localFilters.action || undefined,
+                                            search: localFilters.search || undefined,
                                             date_from: localFilters.date_from || undefined,
                                             date_to: localFilters.date_to || undefined,
                                             per_page: value || 25,
