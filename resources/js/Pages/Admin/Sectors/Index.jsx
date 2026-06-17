@@ -89,6 +89,7 @@ function SectorRow({ sector, abilities }) {
     const form = useForm({
         name: sector.name,
         description: sector.description ?? '',
+        leave_color: sector.leave_color ?? '',
         default_abilities: sector.default_abilities ?? [],
     });
 
@@ -102,6 +103,15 @@ function SectorRow({ sector, abilities }) {
     useEffect(() => {
         form.setData('default_abilities', sector.default_abilities ?? []);
     }, [sector.default_abilities]);
+
+    useEffect(() => {
+        form.setData({
+            name: sector.name,
+            description: sector.description ?? '',
+            leave_color: sector.leave_color ?? '',
+            default_abilities: sector.default_abilities ?? [],
+        });
+    }, [sector.id, sector.name, sector.description, sector.leave_color]);
 
     useEffect(() => {
         const nextState = {};
@@ -162,7 +172,7 @@ function SectorRow({ sector, abilities }) {
 
     return (
         <div className="space-y-4 rounded border border-gray-200 p-4">
-            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_14rem_auto] sm:items-end">
                 <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">Nom</label>
                     <input
@@ -181,6 +191,33 @@ function SectorRow({ sector, abilities }) {
                         onChange={(event) => form.setData('description', event.target.value)}
                     />
                     <InputError className="mt-2" message={form.errors.description} />
+                </div>
+
+                <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Couleur congés</label>
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="color"
+                            className="h-10 w-12 rounded border border-gray-300 bg-white p-1"
+                            value={form.data.leave_color || '#0f6930'}
+                            onChange={(event) => form.setData('leave_color', event.target.value)}
+                        />
+                        <input
+                            type="text"
+                            className="min-w-0 flex-1 rounded border-gray-300 text-sm"
+                            value={form.data.leave_color}
+                            onChange={(event) => form.setData('leave_color', event.target.value)}
+                            placeholder="#0f6930"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => form.setData('leave_color', '')}
+                            className="rounded border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                        >
+                            Vider
+                        </button>
+                    </div>
+                    <InputError className="mt-2" message={form.errors.leave_color} />
                 </div>
 
                 <div className="text-xs text-gray-500">
@@ -322,6 +359,7 @@ export default function AdminSectorsIndex({ sectors, abilities = [] }) {
     const form = useForm({
         name: '',
         description: '',
+        leave_color: '',
     });
 
     const submit = (event) => {
@@ -329,7 +367,7 @@ export default function AdminSectorsIndex({ sectors, abilities = [] }) {
 
         form.post(route('admin.sectors.store'), {
             preserveScroll: true,
-            onSuccess: () => form.reset('name', 'description'),
+            onSuccess: () => form.reset('name', 'description', 'leave_color'),
         });
     };
 
@@ -340,7 +378,7 @@ export default function AdminSectorsIndex({ sectors, abilities = [] }) {
             <div className="space-y-6">
                 <section className="rounded-lg bg-white p-4 shadow-sm sm:p-6">
                     <h3 className="text-lg font-semibold text-gray-900">Nouveau secteur</h3>
-                    <form onSubmit={submit} className="mt-4 grid gap-4 sm:grid-cols-3 sm:items-end">
+                    <form onSubmit={submit} className="mt-4 grid gap-4 sm:grid-cols-[1fr_1fr_14rem_auto] sm:items-end">
                         <div>
                             <label className="mb-1 block text-sm font-medium text-gray-700">Nom</label>
                             <input
@@ -359,6 +397,33 @@ export default function AdminSectorsIndex({ sectors, abilities = [] }) {
                                 onChange={(event) => form.setData('description', event.target.value)}
                             />
                             <InputError className="mt-2" message={form.errors.description} />
+                        </div>
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-gray-700">Couleur congés</label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="color"
+                                    className="h-10 w-12 rounded border border-gray-300 bg-white p-1"
+                                    value={form.data.leave_color || '#0f6930'}
+                                    onChange={(event) => form.setData('leave_color', event.target.value)}
+                                />
+                                <input
+                                    type="text"
+                                    className="min-w-0 flex-1 rounded border-gray-300 text-sm"
+                                    value={form.data.leave_color}
+                                    onChange={(event) => form.setData('leave_color', event.target.value)}
+                                    placeholder="#0f6930"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => form.setData('leave_color', '')}
+                                    className="rounded border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                                >
+                                    Vider
+                                </button>
+                            </div>
+                            <InputError className="mt-2" message={form.errors.leave_color} />
                         </div>
 
                         <div>

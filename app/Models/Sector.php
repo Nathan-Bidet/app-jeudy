@@ -11,6 +11,7 @@ class Sector extends Model
         'name',
         'slug',
         'description',
+        'leave_color',
     ];
 
     public function users(): HasMany

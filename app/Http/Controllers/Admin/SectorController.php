@@ -60,12 +60,13 @@ class SectorController extends Controller
                 ->with(['defaultPermissions:id,sector_id,ability'])
                 ->withCount('users')
                 ->orderBy('name')
-                ->get(['id', 'name', 'slug', 'description'])
+                ->get(['id', 'name', 'slug', 'description', 'leave_color'])
                 ->map(fn (Sector $sector): array => [
                     'id' => $sector->id,
                     'name' => $sector->name,
                     'slug' => $sector->slug,
                     'description' => $sector->description,
+                    'leave_color' => $sector->leave_color,
                     'users_count' => $sector->users_count,
                     'default_abilities' => $sector->defaultPermissions
                         ->pluck('ability')
@@ -81,12 +82,14 @@ class SectorController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:120', 'unique:sectors,name'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'leave_color' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
         ]);
 
         Sector::query()->create([
             'name' => $validated['name'],
             'slug' => $this->generateUniqueSlug($validated['name']),
             'description' => $validated['description'] ?? null,
+            'leave_color' => $this->normalizeColor($validated['leave_color'] ?? null),
         ]);
 
         return back()->with('status', 'Sector created.');
@@ -98,6 +101,7 @@ class SectorController extends Controller
             'name' => $sector->name,
             'slug' => $sector->slug,
             'description' => $sector->description,
+            'leave_color' => $sector->leave_color,
         ];
 
         $validated = $request->validate([
@@ -108,6 +112,7 @@ class SectorController extends Controller
                 Rule::unique('sectors', 'name')->ignore($sector->id),
             ],
             'description' => ['nullable', 'string', 'max:1000'],
+            'leave_color' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
         ]);
 
         $slug = $sector->slug;
@@ -122,6 +127,7 @@ class SectorController extends Controller
             'name' => $validated['name'],
             'slug' => $slug,
             'description' => $validated['description'] ?? null,
+            'leave_color' => $this->normalizeColor($validated['leave_color'] ?? null),
         ]);
 
         $this->auditLogService->log([
@@ -135,6 +141,7 @@ class SectorController extends Controller
                     'name' => $validated['name'],
                     'slug' => $slug,
                     'description' => $validated['description'] ?? null,
+                    'leave_color' => $this->normalizeColor($validated['leave_color'] ?? null),
                 ],
             ],
         ]);
@@ -152,6 +159,7 @@ class SectorController extends Controller
                 'name' => $duplicateName,
                 'slug' => $this->generateUniqueSlug($duplicateName),
                 'description' => $sector->description,
+                'leave_color' => $sector->leave_color,
             ]);
 
             if ($abilities !== []) {
@@ -230,6 +238,7 @@ class SectorController extends Controller
             'name' => $sector->name,
             'slug' => $sector->slug,
             'description' => $sector->description,
+            'leave_color' => $sector->leave_color,
             'default_abilities' => $sector->defaultPermissions()->pluck('ability')->values()->all(),
         ];
 
@@ -241,6 +250,7 @@ class SectorController extends Controller
                 Rule::unique('sectors', 'name')->ignore($sector->id),
             ],
             'description' => ['nullable', 'string', 'max:1000'],
+            'leave_color' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'default_abilities' => ['nullable', 'array'],
             'default_abilities.*' => ['string', Rule::exists('permissions', 'name')],
         ]);
@@ -258,6 +268,7 @@ class SectorController extends Controller
                 'name' => $validated['name'],
                 'slug' => $slug,
                 'description' => $validated['description'] ?? null,
+                'leave_color' => $this->normalizeColor($validated['leave_color'] ?? null),
             ]);
 
             $abilities = array_values(array_unique($validated['default_abilities'] ?? []));
@@ -289,10 +300,12 @@ class SectorController extends Controller
                     'name' => $before['name'],
                     'slug' => $before['slug'],
                     'description' => $before['description'],
+                    'leave_color' => $before['leave_color'],
                 ],
                 'after' => [
                     'name' => $validated['name'],
                     'description' => $validated['description'] ?? null,
+                    'leave_color' => $this->normalizeColor($validated['leave_color'] ?? null),
                 ],
             ],
         ]);
@@ -372,6 +385,17 @@ class SectorController extends Controller
 
             $counter++;
         }
+    }
+
+    private function normalizeColor(?string $color): ?string
+    {
+        $value = trim((string) $color);
+
+        if ($value === '') {
+            return null;
+        }
+
+        return strtolower($value);
     }
 
     private function ensureTaskDataPermissionsExist(): void

@@ -128,7 +128,8 @@ class CalendarController extends Controller
 
             $leaveEvents = LeaveRequest::query()
                 ->with([
-                    'target:id,name,first_name,last_name,email',
+                    'target:id,name,first_name,last_name,email,sector_id',
+                    'target.sector:id,leave_color',
                     'requester:id,name,first_name,last_name,email',
                 ])
                 ->where(function ($query) use ($range): void {
@@ -173,10 +174,11 @@ class CalendarController extends Controller
                     ) ?: ($requester?->name ?: $requester?->email);
                     $leaveLabel = $targetLabel ?: $requesterLabel;
 
+                    $approvedLeaveColor = $target?->sector?->leave_color ?: '#22c55e';
                     $colors = match ($leave->status) {
                         LeaveRequest::STATUS_APPROVED => [
-                            'backgroundColor' => '#22c55e',
-                            'borderColor' => '#22c55e',
+                            'backgroundColor' => $approvedLeaveColor,
+                            'borderColor' => $approvedLeaveColor,
                             'textColor' => '#000000',
                         ],
                         LeaveRequest::STATUS_REFUSED => [
