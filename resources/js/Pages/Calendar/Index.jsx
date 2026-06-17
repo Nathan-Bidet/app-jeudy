@@ -747,6 +747,24 @@ function categoryPillStyle(color, selected = false) {
     };
 }
 
+function opaqueBackgroundColor(color) {
+    const raw = String(color || '').trim();
+    const match = raw.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*(\d?(?:\.\d+)?|1(?:\.0)?))?\s*\)$/i);
+    if (!match) return raw;
+
+    const alpha = match[4] === undefined ? 1 : Math.max(0, Math.min(1, Number.parseFloat(match[4])));
+    const channels = [1, 2, 3].map((index) => {
+        const value = Math.max(0, Math.min(255, Number.parseFloat(match[index])));
+        return Math.round(255 - ((255 - value) * alpha));
+    });
+
+    return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
+
+function opaqueColorFromRgbAlpha(rgb, alpha) {
+    return `rgb(${[rgb.r, rgb.g, rgb.b].map((channel) => Math.round(255 - ((255 - channel) * alpha))).join(', ')})`;
+}
+
 function eventPillStyle(eventItem, selected = false) {
     const eventId = String(eventItem?.id || '');
     const isLeaveEvent = eventId.startsWith('leave-');
@@ -761,12 +779,18 @@ function eventPillStyle(eventItem, selected = false) {
         if (backgroundColorRaw || borderColorRaw || textColorRaw) {
             return {
                 backgroundColor: rgb
-                    ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.10)`
-                    : (backgroundColorRaw || 'rgba(143,128,108,0.10)'),
+                    ? opaqueColorFromRgbAlpha(rgb, 0.10)
+                    : opaqueBackgroundColor(backgroundColorRaw || 'rgb(244, 242, 240)'),
                 borderColor: baseColor || 'rgba(143,128,108,0.45)',
                 color: baseColor || '#4D3F31',
             };
         }
+
+        const categoryStyle = categoryPillStyle(eventItem?.category?.color, selected);
+        return {
+            ...categoryStyle,
+            backgroundColor: opaqueBackgroundColor(categoryStyle.backgroundColor),
+        };
     }
 
     return categoryPillStyle(eventItem?.category?.color, selected);
@@ -993,13 +1017,27 @@ function WeekDesktopTimeGrid({ weekDays, today, normalizedEvents, openDayEventsM
                         Toute la journée
                     </div>
                     <div className="relative col-span-7" style={{ height: `${allDayRows * allDayRowHeight}px` }}>
-                        <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
+                        <div
+                            className="pointer-events-none absolute left-0 right-0 top-0 z-0 grid"
+                            style={{
+                                gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+                                height: `${(allDayRows * allDayRowHeight) + dayBodyHeight}px`,
+                            }}
+                        >
+                            {weekDays.map((day) => (
+                                <div
+                                    key={`all-day-grid-line-${toIsoDate(day)}`}
+                                    className="border-r border-[var(--app-border)] last:border-r-0"
+                                />
+                            ))}
+                        </div>
+                        <div className="absolute inset-0 z-[1] grid" style={{ gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
                             {weekDays.map((day) => (
                                 <button
                                     key={`all-day-bg-${toIsoDate(day)}`}
                                     type="button"
                                     onClick={() => openDayEventsModal(toIsoDate(day))}
-                                    className="border-r border-[var(--app-border)] last:border-r-0"
+                                    className="bg-transparent"
                                     aria-label={`Voir ${toIsoDate(day)}`}
                                 />
                             ))}
@@ -1007,18 +1045,26 @@ function WeekDesktopTimeGrid({ weekDays, today, normalizedEvents, openDayEventsM
                         {allDayLanes.flatMap((lane, laneIndex) => lane.map((segment) => {
                             const leftPct = (segment.colStart / 7) * 100;
                             const widthPct = ((segment.colEnd - segment.colStart) / 7) * 100;
+                            const leftInsetPx = 4;
+                            const rightInsetPx = 4;
+                            const segmentStyle = eventPillStyle(segment.event, false);
                             return (
-                            <button
-                                key={`all-day-segment-${segment.event.id}-${laneIndex}-${segment.colStart}`}
-                                type="button"
-                                onClick={(event) => openEditModal(event, segment.event.id)}
-                                    className="absolute z-[2] h-[20px] overflow-hidden whitespace-nowrap rounded-md border px-1.5 py-0 text-left text-[12px] font-normal leading-[18px] hover:brightness-95"
+                                <button
+                                    key={`all-day-segment-${segment.event.id}-${laneIndex}-${segment.colStart}`}
+                                    type="button"
+                                    onClick={(event) => openEditModal(event, segment.event.id)}
+                                    className="absolute z-[5] box-border overflow-hidden whitespace-nowrap rounded-md border px-1.5 py-0 text-left text-[12px] font-normal leading-[18px] hover:brightness-95"
                                     style={{
-                                        ...eventPillStyle(segment.event, false),
+                                        ...segmentStyle,
                                         ...eventTextFontStyle,
+                                        display: 'block',
+                                        height: `${allDayRowHeight - 4}px`,
+                                        minHeight: '0px',
+                                        maxHeight: `${allDayRowHeight - 4}px`,
                                         top: `${laneIndex * allDayRowHeight + 2}px`,
-                                        left: `calc(${leftPct}% + 2px)`,
-                                        width: `calc(${widthPct}% - 4px)`,
+                                        left: `${leftPct}%`,
+                                        marginLeft: `${leftInsetPx}px`,
+                                        width: `calc(${widthPct}% - ${leftInsetPx + rightInsetPx}px)`,
                                     }}
                                     title={segment.event?.feed_name ? `${segment.event.title} · ${segment.event.feed_name}` : segment.event.title}
                                 >
@@ -1062,13 +1108,13 @@ function WeekDesktopTimeGrid({ weekDays, today, normalizedEvents, openDayEventsM
                             scrollMarginTop: `calc(var(--app-navbar-height,72px) + ${toolbarHeight + 48 + (allDayRows * allDayRowHeight) + 10}px)`,
                         }}
                     />
-                    <div className="absolute inset-0 grid" style={{ gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
+                    <div className="absolute inset-0 z-[1] grid" style={{ gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
                         {weekDays.map((day) => (
                             <button
                                 key={`week-day-bg-${toIsoDate(day)}`}
                                 type="button"
                                 onClick={() => openDayEventsModal(toIsoDate(day))}
-                                className="border-r border-[var(--app-border)] last:border-r-0"
+                                className="bg-transparent"
                                 aria-label={`Voir ${toIsoDate(day)}`}
                             />
                         ))}
