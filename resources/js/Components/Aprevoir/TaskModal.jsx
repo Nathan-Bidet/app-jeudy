@@ -1,7 +1,7 @@
 import InputError from '@/Components/InputError';
 import Modal from '@/Components/Modal';
 import { htmlToMarkedText, renderFormattedHtml } from '@/Support/textFormatting';
-import { Bold, Save, Strikethrough } from 'lucide-react';
+import { Bold, Copy, Save, Strikethrough } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 function detectFlags(taskText, commentText) {
@@ -571,11 +571,21 @@ function RichTextMarkerField({
 export default function TaskModal({
     open,
     mode = 'create',
+    isDuplicate = false,
     form,
     reference,
     onClose,
     onSubmit,
 }) {
+    const SubmitIcon = isDuplicate ? Copy : Save;
+    const modalTitle = isDuplicate
+        ? 'DUPLIQUER UNE TÂCHE'
+        : (mode === 'edit' ? 'MODIFIER UNE TÂCHE' : 'AJOUTER UNE TÂCHE');
+    const submitLabel = isDuplicate ? 'Dupliquer' : 'Enregistrer';
+    const processingLabel = isDuplicate ? 'Duplication...' : 'Enregistrement...';
+    const submitButtonClassName = isDuplicate
+        ? 'w-full rounded-xl border border-[#0f6930] bg-[#0f6930] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-white transition hover:bg-[#12803b] focus:outline-none focus:ring-2 focus:ring-[#0f6930]/35 disabled:opacity-60 sm:w-auto'
+        : 'w-full rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)] disabled:opacity-60 sm:w-auto';
     const detected = useMemo(
         () => detectFlags(form?.data?.task, form?.data?.comment),
         [form?.data?.task, form?.data?.comment],
@@ -682,7 +692,7 @@ export default function TaskModal({
             <form onSubmit={onSubmit}>
                 <div className="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
                     <h3 className="text-sm font-black uppercase tracking-[0.08em]">
-                        {mode === 'edit' ? 'Modifier une tâche' : 'Ajouter une tâche'}
+                        {modalTitle}
                     </h3>
                 </div>
 
@@ -895,14 +905,14 @@ export default function TaskModal({
                     <button
                         type="submit"
                         disabled={form.processing}
-                        className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)] disabled:opacity-60 sm:w-auto"
+                        className={submitButtonClassName}
                     >
                         {form.processing ? (
-                            'Enregistrement...'
+                            processingLabel
                         ) : (
                             <span className="inline-flex items-center gap-1.5">
-                                <Save className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                <span>Enregistrer</span>
+                                <SubmitIcon className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                <span>{submitLabel}</span>
                             </span>
                         )}
                     </button>

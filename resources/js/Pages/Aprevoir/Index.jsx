@@ -1921,6 +1921,7 @@ export default function AprevoirIndex({
             <TaskModal
                 open={modalOpen}
                 mode={taskModalMode}
+                isDuplicate={Boolean(modalTemplateTask)}
                 form={taskForm}
                 reference={reference}
                 onClose={closeTaskModal}
