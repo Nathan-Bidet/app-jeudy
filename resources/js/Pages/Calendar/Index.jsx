@@ -151,10 +151,44 @@ function sortDayEvents(left, right) {
         return left.isWeekLayerEvent ? -1 : 1;
     }
 
+    const leaveColorDiff = compareLeaveColorOrder(left, right);
+    if (leaveColorDiff !== 0) return leaveColorDiff;
+
     const startDiff = left.start.getTime() - right.start.getTime();
     if (startDiff !== 0) return startDiff;
 
     return String(left.title || '').localeCompare(String(right.title || ''), 'fr');
+}
+
+function isLeaveEventItem(eventItem) {
+    return String(eventItem?.id || '').startsWith('leave-');
+}
+
+function leaveColorKey(eventItem) {
+    return String(eventItem?.backgroundColor || eventItem?.borderColor || '#22c55e').trim().toLowerCase();
+}
+
+function compareLeaveColorOrder(left, right) {
+    const leftIsLeave = isLeaveEventItem(left);
+    const rightIsLeave = isLeaveEventItem(right);
+
+    if (!leftIsLeave && !rightIsLeave) return 0;
+    if (leftIsLeave !== rightIsLeave) return leftIsLeave ? -1 : 1;
+
+    const colorDiff = leaveColorKey(left).localeCompare(leaveColorKey(right), 'fr');
+    if (colorDiff !== 0) return colorDiff;
+
+    const titleDiff = String(left?.title || '').localeCompare(String(right?.title || ''), 'fr');
+    if (titleDiff !== 0) return titleDiff;
+
+    const startDiff = (left?.start?.getTime?.() || 0) - (right?.start?.getTime?.() || 0);
+    if (startDiff !== 0) return startDiff;
+
+    return String(left?.id || '').localeCompare(String(right?.id || ''), 'fr');
+}
+
+function compareLeaveSegments(left, right) {
+    return compareLeaveColorOrder(left.event, right.event);
 }
 
 function buildEventsByDay(normalizedEvents) {
@@ -203,6 +237,8 @@ function buildWeekMultiDayLanes(weekDates, normalizedEvents) {
     });
 
     rawSegments.sort((left, right) => {
+        const leaveColorDiff = compareLeaveSegments(left, right);
+        if (leaveColorDiff !== 0) return leaveColorDiff;
         if (left.colStart !== right.colStart) return left.colStart - right.colStart;
         const leftWidth = left.colEnd - left.colStart;
         const rightWidth = right.colEnd - right.colStart;
@@ -522,6 +558,8 @@ function buildWeekAllDayLanes(weekDays, normalizedEvents) {
     });
 
     segments.sort((left, right) => {
+        const leaveColorDiff = compareLeaveSegments(left, right);
+        if (leaveColorDiff !== 0) return leaveColorDiff;
         if (left.colStart !== right.colStart) return left.colStart - right.colStart;
         return (right.colEnd - right.colStart) - (left.colEnd - left.colStart);
     });
@@ -639,7 +677,9 @@ function buildWeekTimedByDay(weekDays, normalizedEvents) {
         });
 
         items.sort((left, right) => (
-            left.startMinutes - right.startMinutes || right.endMinutes - left.endMinutes
+            left.startMinutes - right.startMinutes
+            || compareLeaveColorOrder(left.event, right.event)
+            || right.endMinutes - left.endMinutes
         ));
 
         const laneEnds = [];
@@ -1209,7 +1249,7 @@ function WeekMobileDayGrid({ day, today, normalizedEvents, openDayEventsModal, o
                 )
                 || weekLeaveSegmentForDay(eventItem, dayDate)?.type === 'all-day'
             ))
-            .sort((left, right) => left.start.getTime() - right.start.getTime());
+            .sort(sortDayEvents);
     }, [normalizedEvents, dayDate]);
 
     const allDayRows = Math.max(1, allDayItems.length);
