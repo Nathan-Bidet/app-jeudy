@@ -4,8 +4,9 @@ import GroupCard from '@/Components/Aprevoir/GroupCard';
 import TaskModal from '@/Components/Aprevoir/TaskModal';
 import Modal from '@/Components/Modal';
 import AppLayout from '@/Layouts/AppLayout';
+import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { Head, router, useForm } from '@inertiajs/react';
-import { ArrowUp, Filter, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUp, Check, Filter, Plus, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_TASK_FORM = {
@@ -54,6 +55,44 @@ function buildFilterState(raw = {}) {
 
 function toBool(value) {
     return Boolean(value);
+}
+
+function taskColorMeta(task) {
+    const style = task?.style;
+    if (!style?.matched) return null;
+
+    const label = String(style.rule_name || style.rule_pattern || 'Couleur').trim() || 'Couleur';
+    const bgColor = String(style.bg_color || '').trim();
+    const textColor = String(style.text_color || '').trim();
+    const ruleId = style.rule_id ? String(style.rule_id) : '';
+    const key = `rid:${ruleId}|label:${label.toLowerCase()}|bg:${bgColor.toLowerCase()}|text:${textColor.toLowerCase()}`;
+
+    return { key, label, bgColor: bgColor || null, textColor: textColor || null };
+}
+
+function colorOptionsFromGroups(groups = []) {
+    const seen = new Map();
+
+    groups.forEach((group) => {
+        (group.tasks || []).forEach((task) => {
+            const color = taskColorMeta(task);
+            if (!color) return;
+            if (!seen.has(color.key)) seen.set(color.key, color);
+        });
+    });
+
+    return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+}
+
+function filterGroupsByTaskColor(groups = [], colorFilter = '') {
+    if (!colorFilter) return groups;
+
+    return groups
+        .map((group) => ({
+            ...group,
+            tasks: (group.tasks || []).filter((task) => taskColorMeta(task)?.key === colorFilter),
+        }))
+        .filter((group) => (group.tasks || []).length > 0);
 }
 
 function toDayMonth(value) {
@@ -524,6 +563,9 @@ function MobileFiltersModal({
     onClose,
     filters,
     setFilters,
+    colorOptions = [],
+    colorFilter = '',
+    onColorFilterChange,
     searchValue,
     onSearchChange,
     onApply,
@@ -532,6 +574,7 @@ function MobileFiltersModal({
     vehicles,
 }) {
     const [showAssigneePicker, setShowAssigneePicker] = useState(false);
+    const [showColorPicker, setShowColorPicker] = useState(false);
     const [assigneeSearch, setAssigneeSearch] = useState('');
 
     const selectedAssigneeValue =
@@ -556,6 +599,11 @@ function MobileFiltersModal({
         );
     }, [assigneeOptions, assigneeSearch]);
 
+    const selectedColor = useMemo(
+        () => colorOptions.find((option) => option.key === colorFilter) || null,
+        [colorOptions, colorFilter],
+    );
+
     const selectAssignee = (raw) => {
         const value = String(raw || '');
         if (!value) {
@@ -576,6 +624,7 @@ function MobileFiltersModal({
     useEffect(() => {
         if (!open) {
             setShowAssigneePicker(false);
+            setShowColorPicker(false);
             setAssigneeSearch('');
         }
     }, [open]);
@@ -720,19 +769,104 @@ function MobileFiltersModal({
                     </select>
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                     <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
                         Couleur
                     </label>
-                    <select
-                        value={filters.color_filter}
-                        onChange={(e) => setFilters((prev) => ({ ...prev, color_filter: e.target.value }))}
-                        className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                    <button
+                        type="button"
+                        onClick={() => setShowColorPicker((prev) => !prev)}
+                        className="mt-1 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-left text-sm"
                     >
-                        <option value="all">Toutes</option>
-                        <option value="matched">Avec couleur</option>
-                        <option value="unmatched">Sans couleur</option>
-                    </select>
+                        <span className="flex min-w-0 items-center gap-2">
+                            {selectedColor ? (
+                                <span
+                                    className="h-4 w-4 shrink-0 rounded-full border border-black/10"
+                                    style={{ backgroundColor: selectedColor.bgColor || selectedColor.textColor || 'var(--brand-yellow-dark)' }}
+                                />
+                            ) : (
+                                <Filter className="h-4 w-4 shrink-0 text-[var(--app-muted)]" strokeWidth={2.2} />
+                            )}
+                            <span className="min-w-0">
+                                <span className="block truncate text-[11px] font-black uppercase tracking-[0.08em]">
+                                    Filtrer par couleur
+                                </span>
+                                <span className="block truncate text-sm">
+                                    {selectedColor ? selectedColor.label : 'Toutes les couleurs'}
+                                </span>
+                            </span>
+                        </span>
+                        <span className="shrink-0 text-xs text-[var(--app-muted)]">{showColorPicker ? '▲' : '▼'}</span>
+                    </button>
+
+                    {showColorPicker ? (
+                        <div className="mt-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    onColorFilterChange?.('');
+                                    setShowColorPicker(false);
+                                }}
+                                className={`mb-2 flex min-h-11 w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+                                    !colorFilter
+                                        ? 'bg-[var(--brand-yellow-light)] text-[var(--color-black)]'
+                                        : 'hover:bg-[var(--app-surface-soft)]'
+                                }`}
+                            >
+                                <span>Toutes les couleurs</span>
+                                {!colorFilter ? <Check className="h-4 w-4 shrink-0" strokeWidth={2.4} /> : null}
+                            </button>
+
+                            <div className="max-h-64 space-y-1 overflow-y-auto border-t border-[var(--app-border)] pt-2">
+                                {colorOptions.length ? (
+                                    colorOptions.map((option) => {
+                                        const optionStyle = adaptiveTaskStyle({
+                                            bg_color: option.bgColor || '',
+                                            text_color: option.textColor || '',
+                                        });
+
+                                        return (
+                                            <button
+                                                key={option.key}
+                                                type="button"
+                                                onClick={() => {
+                                                    onColorFilterChange?.(option.key);
+                                                    setShowColorPicker(false);
+                                                }}
+                                                className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-left text-sm font-semibold"
+                                                style={{
+                                                    ...optionStyle,
+                                                    backgroundColor: optionStyle.backgroundColor || 'var(--app-surface-soft)',
+                                                    color: optionStyle.color || 'var(--app-text)',
+                                                    borderColor: 'var(--app-border)',
+                                                }}
+                                            >
+                                                <span className="min-w-0 truncate">{option.label}</span>
+                                                {colorFilter === option.key ? <Check className="h-4 w-4 shrink-0" strokeWidth={2.4} /> : null}
+                                            </button>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="px-2 py-2 text-xs text-[var(--app-muted)]">
+                                        Aucune couleur visible.
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        onColorFilterChange?.('');
+                                        setShowColorPicker(false);
+                                    }}
+                                    className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1.5 text-xs font-bold uppercase tracking-[0.08em]"
+                                >
+                                    Effacer
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
 
                 <div className="sm:col-span-2">
@@ -844,6 +978,7 @@ export default function AprevoirIndex({
 
     const [filterState, setFilterState] = useState(buildFilterState(filters));
     const [mobileFilterDraft, setMobileFilterDraft] = useState(buildFilterState(filters));
+    const [mobileTaskColorFilter, setMobileTaskColorFilter] = useState('');
 
     const taskForm = useForm({ ...EMPTY_TASK_FORM });
     const deleteForm = useForm({});
@@ -1058,6 +1193,20 @@ export default function AprevoirIndex({
         scrollToTableResults();
     }, [localGroups]);
 
+    const mobileColorOptions = useMemo(() => colorOptionsFromGroups(localGroups), [localGroups]);
+
+    useEffect(() => {
+        if (!mobileTaskColorFilter) return;
+        if (!mobileColorOptions.some((option) => option.key === mobileTaskColorFilter)) {
+            setMobileTaskColorFilter('');
+        }
+    }, [mobileTaskColorFilter, mobileColorOptions]);
+
+    const mobileDisplayGroups = useMemo(
+        () => filterGroupsByTaskColor(localGroups, mobileTaskColorFilter),
+        [localGroups, mobileTaskColorFilter],
+    );
+
     useEffect(() => {
         const targetId = Number(focus_task_id || 0);
         if (!targetId || Number(lastHandledFocusId || 0) === targetId) return;
@@ -1231,6 +1380,7 @@ export default function AprevoirIndex({
         const next = { ...EMPTY_FILTER_STATE };
         setMobileFilterDraft(next);
         setFilterState(next);
+        setMobileTaskColorFilter('');
         submitFilters(next);
         setShowMobileFilters(false);
     };
@@ -1887,13 +2037,13 @@ export default function AprevoirIndex({
                     onPointedFilterChange={applyPointedFilterFromDesktop}
                 />
 
-                {localGroups.length === 0 ? (
+                {mobileDisplayGroups.length === 0 ? (
                     <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)] lg:hidden">
                         Aucune tâche pour les filtres sélectionnés.
                     </div>
                 ) : (
                     <div className="grid gap-4 lg:hidden">
-                        {localGroups.map((group) => (
+                        {mobileDisplayGroups.map((group) => (
                             <GroupCard
                                 key={group.key}
                                 group={group}
@@ -1940,6 +2090,9 @@ export default function AprevoirIndex({
                 onClose={closeMobileFilters}
                 filters={mobileFilterDraft}
                 setFilters={setMobileFilterDraft}
+                colorOptions={mobileColorOptions}
+                colorFilter={mobileTaskColorFilter}
+                onColorFilterChange={setMobileTaskColorFilter}
                 searchValue={filterState.search}
                 onSearchChange={onSearchChange}
                 onApply={applyMobileFilters}
