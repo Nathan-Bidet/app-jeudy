@@ -152,7 +152,7 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
     const canAdminEntities = Boolean(isAdmin || permissions?.admin_entities_view || permissions?.admin_entities_manage);
     const canAdminLogs = Boolean(isAdmin || permissions?.admin_logs_view);
     const canAdminLeaves = Boolean(isAdmin);
-    const canAccessAdministration = canAdminUsers || canAdminSectors || canAdminEntities || canAdminLogs || canAdminLeaves;
+    const canAdminCotations = Boolean(isAdmin || permissions?.cotations_admin);
     const canTaskData = Boolean(
         permissions?.task_data_view
         || permissions?.task_data_jeudy_view
@@ -167,6 +167,7 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
         ? permissions.includes('task.archive.view')
         : Boolean(permissions?.task_archive_view || permissions?.['task.archive.view']);
     const canCalendarView = Boolean(isAdmin || permissions?.calendar_view || permissions?.['calendar.view']);
+    const canCotationsView = Boolean(isAdmin || permissions?.cotations_view || permissions?.['cotations.view']);
 
     const tasksChildren = [
         safeHasRoute('ldt.index') && (permissions?.ldt_view ?? true) ? {
@@ -327,6 +328,13 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             icon: FileText,
             active: safeCurrent('admin.logs.*'),
         },
+        canAdminCotations && {
+            key: 'admin-cotations',
+            label: 'Cotations',
+            href: safeHref('admin.cotations.index'),
+            icon: FileText,
+            active: safeCurrent('admin.cotations.*'),
+        },
         {
             key: 'crm',
             label: 'CRM',
@@ -370,6 +378,25 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             key: 'calendar',
             label: 'Calendrier',
             icon: CalendarDays,
+            active: false,
+            href: null,
+            disabled: true,
+            hint: 'Accès requis',
+            children: [],
+            simple: true,
+        } : null,
+        safeHasRoute('cotations.index') && canCotationsView ? {
+            key: 'cotations',
+            label: 'Cotations',
+            icon: FileText,
+            active: safeCurrent('cotations.*'),
+            href: safeHref('cotations.index'),
+            children: [],
+            simple: true,
+        } : isAdmin ? {
+            key: 'cotations',
+            label: 'Cotations',
+            icon: FileText,
             active: false,
             href: null,
             disabled: true,

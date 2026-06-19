@@ -19,3 +19,8 @@ Schedule::command('engrais:archive-old')
 Schedule::command('hours:send-missing-reminders')
     ->dailyAt(config('hours.reminder_time', '18:30'))
     ->timezone(config('app.timezone', 'Europe/Paris'));
+
+Schedule::command('cotations:refresh')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->timezone(config('app.timezone', 'Europe/Paris'));

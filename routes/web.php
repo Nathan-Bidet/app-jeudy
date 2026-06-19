@@ -7,6 +7,7 @@ use App\Http\Controllers\CalendarCategoryController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\CalendarEventController;
 use App\Http\Controllers\CalendarFeedController;
+use App\Http\Controllers\CotationController;
 use App\Http\Controllers\FormattingRuleController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\HourSheetController;
@@ -173,6 +174,16 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/calendar', [CalendarController::class, 'index'])
         ->middleware('sector.access:calendar.view')
         ->name('calendar.index');
+    Route::get('/cotations', [CotationController::class, 'index'])
+        ->middleware('sector.access:cotations.view')
+        ->name('cotations.index');
+    Route::get('/cotations/market-data', [CotationController::class, 'marketData'])
+        ->middleware('sector.access:cotations.view')
+        ->name('cotations.market-data');
+    Route::put('/cotations/settings', [CotationController::class, 'updateSettings'])
+        ->middleware('sector.access:cotations.manage')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.settings.update');
     Route::get('/calendar/leaves/export', [CalendarController::class, 'exportLeavesCsv'])
         ->middleware('sector.access:calendar.view')
         ->middleware('throttle:calendar-export')
