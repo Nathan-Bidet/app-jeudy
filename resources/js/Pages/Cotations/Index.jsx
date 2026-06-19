@@ -799,6 +799,262 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
     };
     let lastComputedHt = null;
     let gnrAgriFirstHt = null;
+    const fuelSectionModels = sections.map((section) => {
+        const taxHt = parseDecimal(grid.gnr_tax?.ht) ?? 0;
+        const forcedFirstHt = section.id === 'gnr_taxe' && gnrAgriFirstHt !== null
+            ? gnrAgriFirstHt + taxHt
+            : null;
+        const computedRows = computedRowsFor(section.rows || [], lastComputedHt, forcedFirstHt);
+        if (section.id === 'gnr_agri' && computedRows.length) {
+            gnrAgriFirstHt = computedRows[0].computed_ht;
+        }
+        lastComputedHt = computedRows.length ? computedRows[computedRows.length - 1].computed_ht : lastComputedHt;
+
+        return { ...section, computedRows };
+    });
+    const fuelSectionsById = fuelSectionModels.reduce((carry, section) => ({
+        ...carry,
+        [section.id]: section,
+    }), {});
+    const gazole = grid.gazole || {};
+    const gazoleGap = parseDecimal(gazole.gap) ?? 0;
+    const gazoleTtc = parseDecimal(gazole.ttc);
+    const gazoleHtFromManualTtc = htFromTtc(gazole.ttc);
+    const gazoleHt = gazoleHtFromManualTtc !== null ? gazoleHtFromManualTtc : (lastComputedHt !== null ? lastComputedHt - gazoleGap : null);
+    const gazoleDisplayedTtc = gazoleTtc !== null ? gazoleTtc : ttcFromHt(gazoleHt);
+    const gazoleCustomText = String(gazole.text ?? '').trim();
+    const fuelTableColumnCount = canManage ? 4 : 3;
+    const fuelHeaderSpacerClass = `w-[8.5rem] ${COTATION_HEADER_CELL_CLASS}`;
+    const fuelValueHeaderClass = `w-[5.25rem] border-y border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`;
+    const fuelBodyCellClass = `border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`;
+    const renderFuelSectionTable = (section, extraRows = null) => (
+        <div className="overflow-x-auto">
+            <table className={`${COTATION_TABLE_CLASS} w-full table-fixed border-separate border-spacing-0`}>
+                <thead>
+                    <tr className={COTATION_HEADER_ROW_CLASS}>
+                        <th className={fuelHeaderSpacerClass} aria-hidden="true"></th>
+                        {canManage ? (
+                            <th className={`w-[4.75rem] rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
+                                Écart
+                            </th>
+                        ) : null}
+                        <th className={`${canManage ? '' : 'rounded-tl-xl border-l '} ${fuelValueHeaderClass}`}>
+                            HT
+                        </th>
+                        <th className={`rounded-tr-xl ${fuelValueHeaderClass}`}>
+                            TTC
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th colSpan={fuelTableColumnCount} className={`rounded-tl-xl border-x border-t border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-center`}>
+                            {canManage ? (
+                                <input
+                                    type="text"
+                                    value={section.label ?? ''}
+                                    onChange={(event) => setSection(section.id, 'label', event.target.value)}
+                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-center uppercase tracking-[0.04em] ${TRANSPORT_HEADER_INPUT_CLASS}`}
+                                />
+                            ) : (
+                                <div className={TRANSPORT_HEADER_LABEL_CLASS}>{section.label}</div>
+                            )}
+                        </th>
+                    </tr>
+                    {extraRows}
+                    {(section.computedRows || []).map((row, rowIndex) => {
+                        const customText = String(row.text ?? '').trim();
+                        const isLastRow = rowIndex === (section.computedRows || []).length - 1 && !canManage;
+
+                        return (
+                            <tr key={`${section.id}-${row.id}`}>
+                                <th className={`w-[8.5rem] border-x border-b border-[var(--app-border)] bg-[var(--app-surface)] ${COTATION_BODY_CELL_CLASS} text-left ${isLastRow ? 'rounded-bl-xl' : ''}`}>
+                                    {canManage ? (
+                                        <div className="grid grid-cols-[minmax(0,1fr)_2rem] gap-1">
+                                            <input
+                                                type="text"
+                                                value={row.tranche ?? ''}
+                                                onChange={(event) => setSectionRow(section.id, row.id, 'tranche', event.target.value)}
+                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 ${TRANSPORT_HEADER_INPUT_CLASS}`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => removeSectionRow(section.id, row.id)}
+                                                disabled={(section.rows || []).length <= 1}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] disabled:opacity-30"
+                                                aria-label="Supprimer la tranche"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className={TRANSPORT_HEADER_LABEL_CLASS}>{row.tranche}</div>
+                                    )}
+                                </th>
+                                {canManage ? (
+                                    <td className={fuelBodyCellClass}>
+                                        {row.is_forced_ht ? (
+                                            <span className={COTATION_VALUE_CLASS}>—</span>
+                                        ) : (
+                                            <input
+                                                type="number"
+                                                step="0.0001"
+                                                value={row.gap ?? ''}
+                                                onChange={(event) => setSectionRow(section.id, row.id, 'gap', normalizeSignedNumberInput(event.target.value))}
+                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
+                                            />
+                                        )}
+                                    </td>
+                                ) : null}
+                                <td className={fuelBodyCellClass}>
+                                    {canManage ? (
+                                        <div className="grid gap-1">
+                                            <span className={COTATION_VALUE_CLASS}>{customText || displayHt(row.computed_ht)}</span>
+                                            {row.is_forced_ht ? null : (
+                                                <input
+                                                    type="number"
+                                                    step="0.0001"
+                                                    value={row.ht ?? ''}
+                                                    onChange={(event) => setSectionRow(section.id, row.id, 'ht', event.target.value)}
+                                                    placeholder="HT de base"
+                                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
+                                                />
+                                            )}
+                                            <input
+                                                type="text"
+                                                value={row.text ?? ''}
+                                                onChange={(event) => setSectionRow(section.id, row.id, 'text', event.target.value)}
+                                                placeholder="Texte personnalisé"
+                                                className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center text-[11px] font-medium"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <span className={COTATION_VALUE_CLASS}>{customText || displayHt(row.computed_ht)}</span>
+                                    )}
+                                </td>
+                                <td className={`${fuelBodyCellClass} ${isLastRow ? 'rounded-br-xl' : ''}`}>
+                                    <span className={COTATION_VALUE_CLASS}>{customText || displayTtc(row.computed_ht)}</span>
+                                </td>
+                            </tr>
+                        );
+                    })}
+                    {canManage ? (
+                        <tr>
+                            <td colSpan={fuelTableColumnCount} className="rounded-b-xl border-x border-b border-[var(--app-border)] px-3 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => addSectionRow(section.id)}
+                                    className="w-full rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--brand-brown)]"
+                                >
+                                    Ajouter une tranche
+                                </button>
+                            </td>
+                        </tr>
+                    ) : null}
+                </tbody>
+            </table>
+        </div>
+    );
+    const renderGazoleTable = () => (
+        <div className="overflow-x-auto">
+            <table className={`${COTATION_TABLE_CLASS} w-full table-fixed border-separate border-spacing-0`}>
+                <thead>
+                    <tr className={COTATION_HEADER_ROW_CLASS}>
+                        <th className={fuelHeaderSpacerClass} aria-hidden="true"></th>
+                        {canManage ? (
+                            <th className={`w-[4.75rem] rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
+                                Écart
+                            </th>
+                        ) : null}
+                        <th className={`${canManage ? '' : 'rounded-tl-xl border-l '} ${fuelValueHeaderClass}`}>
+                            HT
+                        </th>
+                        <th className={`rounded-tr-xl ${fuelValueHeaderClass}`}>
+                            TTC
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th className={`w-[8.5rem] rounded-bl-xl rounded-tl-xl border-x border-t border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left font-black`}>
+                            <div className={TRANSPORT_HEADER_LABEL_CLASS}>{gazole.tranche || 'GAZOLE'}</div>
+                        </th>
+                        {canManage ? (
+                            <td className={`border-t ${fuelBodyCellClass}`}>
+                                <input
+                                    type="number"
+                                    step="0.0001"
+                                    value={gazole.gap ?? ''}
+                                    onChange={(event) => setGazole('gap', normalizeSignedNumberInput(event.target.value))}
+                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
+                                />
+                            </td>
+                        ) : null}
+                        <td className={`border-t ${fuelBodyCellClass}`}>
+                            {canManage ? (
+                                <div className="grid gap-1">
+                                    <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || displayHt(gazoleHt)}</span>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        min="0"
+                                        value={gazole.ttc ?? ''}
+                                        onChange={(event) => setGazole('ttc', event.target.value)}
+                                        placeholder="TTC gazole"
+                                        className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
+                                    />
+                                    <input
+                                        type="text"
+                                        value={gazole.text ?? ''}
+                                        onChange={(event) => setGazole('text', event.target.value)}
+                                        placeholder="Texte personnalisé"
+                                        className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center text-[11px] font-medium"
+                                    />
+                                </div>
+                            ) : (
+                                <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || displayHt(gazoleHt)}</span>
+                            )}
+                        </td>
+                        <td className={`border-t ${fuelBodyCellClass} rounded-br-xl`}>
+                            <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || formatPrice(gazoleDisplayedTtc)}</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    );
+    const gnrTaxConfigRow = canManage ? (
+        <tr key="gnr-tax-config">
+            <th className={`border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left`}>
+                <div className={TRANSPORT_HEADER_LABEL_CLASS}>Taxe GNR</div>
+            </th>
+            <td className={fuelBodyCellClass}>
+                <span className={COTATION_VALUE_CLASS}>—</span>
+            </td>
+            <td className={fuelBodyCellClass}>
+                <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={grid.gnr_tax?.ht ?? ''}
+                    onChange={(event) => setGnrTaxHt(event.target.value)}
+                    placeholder="Taxe HT"
+                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
+                />
+            </td>
+            <td className={fuelBodyCellClass}>
+                <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={grid.gnr_tax?.ttc ?? ''}
+                    onChange={(event) => setGnrTaxTtc(event.target.value)}
+                    placeholder="Taxe TTC"
+                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
+                />
+            </td>
+        </tr>
+    ) : null;
 
     return (
         <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
@@ -821,232 +1077,16 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                 </label>
             ) : null}
 
-            <div className="overflow-x-auto">
-                <table className={`${COTATION_TABLE_CLASS} min-w-full border-separate border-spacing-0`}>
-                    <thead>
-                        <tr className={COTATION_HEADER_ROW_CLASS}>
-                            <th className={`sticky left-0 z-[1] ${COTATION_HEADER_CELL_CLASS}`} aria-hidden="true">
-                            </th>
-                            {canManage ? (
-                                <th className={`rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
-                                    Écart
-                                </th>
-                            ) : null}
-                            <th className={`${canManage ? 'border-y border-r' : 'rounded-tl-xl border-y border-l border-r'} border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
-                                HT
-                            </th>
-                            <th className={`rounded-tr-xl border-y border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
-                                TTC
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sections.flatMap((section, sectionIndex) => {
-                            const taxHt = parseDecimal(grid.gnr_tax?.ht) ?? 0;
-                            const forcedFirstHt = section.id === 'gnr_taxe' && gnrAgriFirstHt !== null
-                                ? gnrAgriFirstHt + taxHt
-                                : null;
-                            const computedRows = computedRowsFor(section.rows || [], lastComputedHt, forcedFirstHt);
-                            if (section.id === 'gnr_agri' && computedRows.length) {
-                                gnrAgriFirstHt = computedRows[0].computed_ht;
-                            }
-                            lastComputedHt = computedRows.length ? computedRows[computedRows.length - 1].computed_ht : lastComputedHt;
+            <div className="grid gap-4 lg:grid-cols-2">
+                {fuelSectionsById.fuel_grand_froid ? renderFuelSectionTable(fuelSectionsById.fuel_grand_froid) : null}
+                {renderGazoleTable()}
+            </div>
 
-                            return [
-                                <tr key={`${section.id}-section`}>
-                                    <th colSpan={canManage ? 4 : 3} className={`${sectionIndex === 0 ? 'border-t ' : ''}border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                        {canManage ? (
-                                            <input
-                                                type="text"
-                                                value={section.label ?? ''}
-                                                onChange={(event) => setSection(section.id, 'label', event.target.value)}
-                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-center uppercase tracking-[0.04em] ${TRANSPORT_HEADER_INPUT_CLASS}`}
-                                            />
-                                        ) : (
-                                            <div className={TRANSPORT_HEADER_LABEL_CLASS}>{section.label}</div>
-                                        )}
-                                    </th>
-                                </tr>,
-                                canManage && section.id === 'gnr_agri' ? (
-                                    <tr key="gnr-tax-config">
-                                        <th className={`border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left`}>
-                                            <div className={TRANSPORT_HEADER_LABEL_CLASS}>Taxe GNR</div>
-                                        </th>
-                                        <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                            <span className={COTATION_VALUE_CLASS}>—</span>
-                                        </td>
-                                        <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                            <input
-                                                type="number"
-                                                step="0.0001"
-                                                min="0"
-                                                value={grid.gnr_tax?.ht ?? ''}
-                                                onChange={(event) => setGnrTaxHt(event.target.value)}
-                                                placeholder="Taxe HT"
-                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
-                                            />
-                                        </td>
-                                        <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                            <input
-                                                type="number"
-                                                step="0.0001"
-                                                min="0"
-                                                value={grid.gnr_tax?.ttc ?? ''}
-                                                onChange={(event) => setGnrTaxTtc(event.target.value)}
-                                                placeholder="Taxe TTC"
-                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
-                                            />
-                                        </td>
-                                    </tr>
-                                ) : null,
-                                ...computedRows.map((row) => {
-                                    const customText = String(row.text ?? '').trim();
+            <div className="h-10" aria-hidden="true"></div>
 
-                                    return (
-                                        <tr key={`${section.id}-${row.id}`}>
-                                            <th className={`sticky left-0 z-[1] min-w-[12rem] border-x border-b border-[var(--app-border)] bg-[var(--app-surface)] ${COTATION_BODY_CELL_CLASS} text-left`}>
-                                                {canManage ? (
-                                                    <div className="grid grid-cols-[minmax(0,1fr)_2rem] gap-1">
-                                                        <input
-                                                            type="text"
-                                                            value={row.tranche ?? ''}
-                                                            onChange={(event) => setSectionRow(section.id, row.id, 'tranche', event.target.value)}
-                                                            className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 ${TRANSPORT_HEADER_INPUT_CLASS}`}
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => removeSectionRow(section.id, row.id)}
-                                                            disabled={(section.rows || []).length <= 1}
-                                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] disabled:opacity-30"
-                                                            aria-label="Supprimer la tranche"
-                                                        >
-                                                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className={TRANSPORT_HEADER_LABEL_CLASS}>{row.tranche}</div>
-                                                )}
-                                            </th>
-                                            {canManage ? (
-                                                <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                                    {row.is_forced_ht ? (
-                                                        <span className={COTATION_VALUE_CLASS}>—</span>
-                                                    ) : (
-                                                        <input
-                                                            type="number"
-                                                            step="0.0001"
-                                                            value={row.gap ?? ''}
-                                                            onChange={(event) => setSectionRow(section.id, row.id, 'gap', normalizeSignedNumberInput(event.target.value))}
-                                                            className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
-                                                        />
-                                                    )}
-                                                </td>
-                                            ) : null}
-                                            <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                                {canManage ? (
-                                                    <div className="grid gap-1">
-                                                        <span className={COTATION_VALUE_CLASS}>{customText || displayHt(row.computed_ht)}</span>
-                                                        {row.is_forced_ht ? null : (
-                                                            <input
-                                                                type="number"
-                                                                step="0.0001"
-                                                                value={row.ht ?? ''}
-                                                                onChange={(event) => setSectionRow(section.id, row.id, 'ht', event.target.value)}
-                                                                placeholder="HT de base"
-                                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
-                                                            />
-                                                        )}
-                                                        <input
-                                                            type="text"
-                                                            value={row.text ?? ''}
-                                                            onChange={(event) => setSectionRow(section.id, row.id, 'text', event.target.value)}
-                                                            placeholder="Texte personnalisé"
-                                                            className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center text-[11px] font-medium"
-                                                        />
-                                                    </div>
-                                                ) : (
-                                                    <span className={COTATION_VALUE_CLASS}>{customText || displayHt(row.computed_ht)}</span>
-                                                )}
-                                            </td>
-                                            <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                                <span className={COTATION_VALUE_CLASS}>{customText || displayTtc(row.computed_ht)}</span>
-                                            </td>
-                                        </tr>
-                                    );
-                                }),
-                                canManage ? (
-                                    <tr key={`${section.id}-add`}>
-                                        <td colSpan={4} className="border-x border-b border-[var(--app-border)] px-3 py-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => addSectionRow(section.id)}
-                                                className="w-full rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--brand-brown)]"
-                                            >
-                                                Ajouter une tranche
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ) : null,
-                            ].filter(Boolean);
-                        })}
-                        {(() => {
-                            const gazole = grid.gazole || {};
-                            const gap = parseDecimal(gazole.gap) ?? 0;
-                            const ttc = parseDecimal(gazole.ttc);
-                            const htFromManualTtc = htFromTtc(gazole.ttc);
-                            const ht = htFromManualTtc !== null ? htFromManualTtc : (lastComputedHt !== null ? lastComputedHt - gap : null);
-                            const displayedTtc = ttc !== null ? ttc : ttcFromHt(ht);
-                            const customText = String(gazole.text ?? '').trim();
-
-                            return (
-                                <tr>
-                                    <th className={`sticky left-0 z-[1] min-w-[12rem] border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left font-black rounded-bl-xl`}>
-                                        <div className={TRANSPORT_HEADER_LABEL_CLASS}>{gazole.tranche || 'GAZOLE'}</div>
-                                    </th>
-                                    {canManage ? (
-                                        <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                            <input
-                                                type="number"
-                                                step="0.0001"
-                                                value={gazole.gap ?? ''}
-                                                onChange={(event) => setGazole('gap', normalizeSignedNumberInput(event.target.value))}
-                                                className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
-                                            />
-                                        </td>
-                                    ) : null}
-                                    <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`}>
-                                        {canManage ? (
-                                            <div className="grid gap-1">
-                                                <span className={COTATION_VALUE_CLASS}>{customText || displayHt(ht)}</span>
-                                                <input
-                                                    type="number"
-                                                    step="0.0001"
-                                                    min="0"
-                                                    value={gazole.ttc ?? ''}
-                                                    onChange={(event) => setGazole('ttc', event.target.value)}
-                                                    placeholder="TTC gazole"
-                                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center ${COTATION_VALUE_CLASS}`}
-                                                />
-                                                <input
-                                                    type="text"
-                                                    value={gazole.text ?? ''}
-                                                    onChange={(event) => setGazole('text', event.target.value)}
-                                                    placeholder="Texte personnalisé"
-                                                    className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-center text-[11px] font-medium"
-                                                />
-                                            </div>
-                                        ) : (
-                                            <span className={COTATION_VALUE_CLASS}>{customText || displayHt(ht)}</span>
-                                        )}
-                                    </td>
-                                    <td className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center rounded-br-xl`}>
-                                        <span className={COTATION_VALUE_CLASS}>{customText || formatPrice(displayedTtc)}</span>
-                                    </td>
-                                </tr>
-                            );
-                        })()}
-                    </tbody>
-                </table>
+            <div className="grid gap-4 lg:grid-cols-2">
+                {fuelSectionsById.gnr_agri ? renderFuelSectionTable(fuelSectionsById.gnr_agri) : null}
+                {fuelSectionsById.gnr_taxe ? renderFuelSectionTable(fuelSectionsById.gnr_taxe, gnrTaxConfigRow) : null}
             </div>
         </section>
     );
