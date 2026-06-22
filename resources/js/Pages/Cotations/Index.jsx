@@ -1,6 +1,6 @@
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, useForm } from '@inertiajs/react';
-import { Fuel, Pencil, RefreshCw, Save, Settings2, Trash2, Truck, X } from 'lucide-react';
+import { ChevronRight, Fuel, GripVertical, Pencil, RefreshCw, Save, Settings2, Trash2, Truck, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 const BASE_CEREALS = [
@@ -19,6 +19,73 @@ const COTATION_ROW_LABEL_CLASS = 'text-xs font-black leading-4 sm:text-sm sm:lea
 const COTATION_HARVEST_TITLE_CLASS = 'border-b border-[var(--app-border)] bg-[#FACC51] px-3 py-2 text-[13px] font-black uppercase leading-4 tracking-[0.08em] text-[var(--color-black)]';
 const TRANSPORT_HEADER_LABEL_CLASS = 'text-sm font-black leading-5';
 const TRANSPORT_HEADER_INPUT_CLASS = 'text-sm font-black leading-5';
+
+function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3' }) {
+    const [isOpen, setIsOpen] = useState(false);
+
+    return (
+        <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                {titleEditor ? (
+                    <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setIsOpen((value) => !value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setIsOpen((value) => !value);
+                            }
+                        }}
+                        aria-expanded={isOpen}
+                        className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                    >
+                        <span className="flex min-w-0 max-w-full flex-1 items-center gap-2">
+                            {Icon ? <Icon className="h-5 w-5 shrink-0 text-[var(--brand-brown)]" strokeWidth={2.3} /> : null}
+                            <span className="min-w-0 max-w-full flex-1" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                                {titleEditor}
+                            </span>
+                        </span>
+                        <ChevronRight
+                            className={`h-5 w-5 shrink-0 text-[var(--app-muted)] transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}
+                            strokeWidth={2.4}
+                        />
+                    </div>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => setIsOpen((value) => !value)}
+                        aria-expanded={isOpen}
+                        className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                    >
+                        <span className="flex min-w-0 max-w-full flex-1 items-center gap-2">
+                            {Icon ? <Icon className="h-5 w-5 shrink-0 text-[var(--brand-brown)]" strokeWidth={2.3} /> : null}
+                            <span className={`${titleClassName} min-w-0 max-w-full break-words font-black uppercase tracking-[0.04em] [overflow-wrap:anywhere]`}>
+                                {title}
+                            </span>
+                        </span>
+                        <ChevronRight
+                            className={`h-5 w-5 shrink-0 text-[var(--app-muted)] transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}
+                            strokeWidth={2.4}
+                        />
+                    </button>
+                )}
+
+                {actions ? (
+                    <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+                        {actions}
+                    </div>
+                ) : null}
+            </div>
+
+            {isOpen ? (
+                <div className={`min-w-0 max-w-full ${bodyClassName}`}>
+                    {children}
+                </div>
+            ) : null}
+        </section>
+    );
+}
 
 function formatDateTime(value) {
     if (!value) return 'Jamais';
@@ -118,7 +185,10 @@ function lineTypeFor(row) {
 }
 
 function transportDefaultGrid() {
-    return {
+    const defaultSection = {
+        id: 'transport_1',
+        title: 'PRIX DES TRANSPORTS',
+        first_column_label: 'TRANSPORT',
         reference_key: '',
         columns: [
             { id: 'col_1', label: 'Colonne 1', reference_key: '', base: 0 },
@@ -130,19 +200,28 @@ function transportDefaultGrid() {
         ],
         cells: {},
     };
-}
-
-function normalizeTransportGrid(grid = {}) {
-    const defaults = transportDefaultGrid();
-    const columns = Array.isArray(grid.columns) && grid.columns.length ? grid.columns : defaults.columns;
-    const rows = Array.isArray(grid.rows) && grid.rows.length ? grid.rows : defaults.rows;
 
     return {
-        reference_key: grid.reference_key || '',
+        ...defaultSection,
+        sections: [defaultSection],
+    };
+}
+
+function normalizeTransportSection(section = {}, index = 0) {
+    const defaults = transportDefaultGrid();
+    const source = section || {};
+    const columns = Array.isArray(source.columns) && source.columns.length ? source.columns : defaults.columns;
+    const rows = Array.isArray(source.rows) && source.rows.length ? source.rows : defaults.rows;
+
+    return {
+        id: source.id || `transport_${index + 1}`,
+        title: String(source.title || '').trim() || defaults.title,
+        first_column_label: String(source.first_column_label || '').trim() || defaults.first_column_label,
+        reference_key: source.reference_key || '',
         columns: columns.map((column, index) => ({
             id: column.id || `col_${index + 1}`,
             label: column.label ?? `Colonne ${index + 1}`,
-            reference_key: column.reference_key ?? grid.reference_key ?? '',
+            reference_key: column.reference_key ?? source.reference_key ?? '',
             base: column.base ?? 0,
         })),
         rows: rows.map((row, index) => ({
@@ -150,10 +229,22 @@ function normalizeTransportGrid(grid = {}) {
             label: row.label ?? `Ligne ${index + 1}`,
             base: row.base ?? 0,
         })),
-        cells: Object.fromEntries(Object.entries(grid.cells || {}).map(([key, cell]) => [
+        cells: Object.fromEntries(Object.entries(source.cells || {}).map(([key, cell]) => [
             key,
             { text: typeof cell === 'object' && cell !== null ? cell.text ?? '' : '' },
         ])),
+    };
+}
+
+function normalizeTransportGrid(grid = {}) {
+    grid = grid || {};
+    const rawSections = Array.isArray(grid.sections) && grid.sections.length ? grid.sections : [grid];
+    const sections = rawSections.map((section, index) => normalizeTransportSection(section, index));
+    const firstSection = sections[0] || normalizeTransportSection({}, 0);
+
+    return {
+        ...firstSection,
+        sections,
     };
 }
 
@@ -190,11 +281,12 @@ function fuelDefaultGrid() {
             },
         ],
         gnr_tax: { ht: '', ttc: '' },
-        gazole: { id: 'gazole', tranche: 'GAZOLE', ttc: '', gap: 0, text: '' },
+        gazole: { id: 'gazole', label: 'GAZOLE', tranche: 'GAZOLE', ttc: '', gap: 0, text: '' },
     };
 }
 
 function normalizeFuelGrid(grid = {}) {
+    grid = grid || {};
     const defaults = fuelDefaultGrid();
     const sections = Array.isArray(grid.sections) && grid.sections.length ? grid.sections : defaults.sections;
 
@@ -217,6 +309,7 @@ function normalizeFuelGrid(grid = {}) {
         },
         gazole: {
             id: grid.gazole?.id || 'gazole',
+            label: grid.gazole?.label ?? 'GAZOLE',
             tranche: grid.gazole?.tranche ?? 'GAZOLE',
             ttc: grid.gazole?.ttc ?? grid.gazole?.ht ?? '',
             gap: grid.gazole?.gap ?? 0,
@@ -251,7 +344,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                 display_label: event.target.value,
                             })}
                             placeholder="Nom personnalisé"
-                            className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
+                            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
                         />
                         <select
                             value={isMatifLine ? draft.market_identity_hash || '' : 'custom'}
@@ -280,7 +373,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                     has_euronext: false,
                                 });
                             }}
-                            className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
+                            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
                         >
                             <option value="custom">Option personnalisée</option>
                             {options.map((option) => (
@@ -292,7 +385,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                     </div>
                 ) : (
                     <>
-                        <div className={`truncate ${COTATION_ROW_LABEL_CLASS}`}>{row.display_label || row.label || row.maturity_label || 'Échéance'}</div>
+                        <div className={`${COTATION_ROW_LABEL_CLASS} break-words [overflow-wrap:anywhere]`}>{row.display_label || row.label || row.maturity_label || 'Échéance'}</div>
                     </>
                 )}
                 {!isMatifLine && canManage ? (
@@ -307,7 +400,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                         min="0"
                         value={matifValue}
                         onChange={(event) => setManualPrice(row, 'manual_matif', event.target.value)}
-                        className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                        className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
                     />
                 ) : (
                     <span className={COTATION_VALUE_CLASS}>{formatPrice(matifValue)}</span>
@@ -324,7 +417,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                             inputMode="numeric"
                             value={marginValue}
                             onChange={(event) => setManualPrice(row, 'margin', normalizeMarginInput(event.target.value))}
-                            className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
                         />
                     </div>
                 ) : (
@@ -339,10 +432,10 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                     <button
                         type="button"
                         onClick={() => deleteManualRow(row)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-[var(--app-muted)] hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-transparent text-[var(--app-muted)] hover:border-red-200 hover:bg-red-50 hover:text-red-700 sm:h-8 sm:w-8"
                         aria-label="Supprimer l'échéance"
                     >
-                        <Trash2 className="h-4 w-4" strokeWidth={2.2} />
+                        <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2.2} />
                     </button>
                 </td>
             ) : null}
@@ -363,19 +456,19 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
     const title = harvest?.year ? `Récolte ${harvest.year}` : 'Récolte';
 
     return (
-        <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)]">
+        <div className="w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)]">
             <div className={COTATION_HARVEST_TITLE_CLASS}>
                 {title}
             </div>
             {displayedRows.length ? (
-                <div>
+                <div className="w-full max-w-full overflow-hidden">
                     <table className={COTATION_TABLE_CLASS}>
                         <colgroup>
-                            <col className={canManage ? 'w-[32%]' : 'w-[34%]'} />
-                            <col className={canManage ? 'w-[22%]' : 'w-[23%]'} />
+                            <col className={canManage ? 'w-[31%]' : 'w-[34%]'} />
+                            <col className={canManage ? 'w-[21%]' : 'w-[23%]'} />
                             <col className={canManage ? 'w-[17%]' : 'w-[18%]'} />
                             <col className={canManage ? 'w-[23%]' : 'w-[25%]'} />
-                            {canManage ? <col className="w-[6%]" /> : null}
+                            {canManage ? <col className="w-[8%]" /> : null}
                         </colgroup>
                         <thead>
                             <tr className={COTATION_HEADER_ROW_CLASS}>
@@ -419,34 +512,53 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
     );
 }
 
-function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup }) {
+function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, dragHandle = null }) {
     const leftHarvest = group?.harvests?.left || {};
     const rightHarvest = group?.harvests?.right || {};
     const leftOptions = optionGroup?.harvests?.left?.rows || [];
     const rightOptions = optionGroup?.harvests?.right?.rows || [];
+    const canEditCustomCereal = Boolean(canManage && customCereal);
+    const titleEditor = canEditCustomCereal ? (
+        <input
+            type="text"
+            value={customCereal.name ?? ''}
+            onChange={(event) => setCustomCereal(customCereal, 'name', event.target.value)}
+            placeholder="Nom personnalisé"
+            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-xl font-black uppercase tracking-[0.04em] text-[var(--app-text)] sm:max-w-[28rem]"
+        />
+    ) : null;
+    const actions = canEditCustomCereal ? (
+        <select
+            value={customCereal.base_product_code ?? 'EBM'}
+            onChange={(event) => setCustomCereal(customCereal, 'base_product_code', event.target.value)}
+            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm font-bold sm:w-44"
+            aria-label="Céréale de base"
+        >
+            {BASE_CEREALS.map((base) => (
+                <option key={base.code} value={base.code}>Basée sur {base.name}</option>
+            ))}
+        </select>
+    ) : null;
+    const headerActions = dragHandle || actions ? (
+        <div className="flex flex-wrap items-center gap-2">
+            {dragHandle}
+            {actions}
+        </div>
+    ) : null;
 
     return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-xl font-black uppercase tracking-[0.04em]">{group.name || 'Céréale'}</h2>
-                {group.code ? <span className="text-xs font-black uppercase tracking-[0.12em] text-[var(--app-muted)]">{group.code}</span> : null}
-            </div>
-            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+        <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3">
+            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
                 <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} />
                 <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} />
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }
 
 function ManualSection({ title, icon: Icon, rows = [], canManage, form, setFormSetting }) {
     return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-                {Icon ? <Icon className="h-5 w-5 text-[var(--brand-brown)]" strokeWidth={2.3} /> : null}
-                <h2 className="text-lg font-black uppercase tracking-[0.04em]">{title}</h2>
-            </div>
-
+        <CollapsibleSection title={title} icon={Icon}>
             <div className="space-y-2">
                 {rows.map((row) => {
                     const draft = form.data.settings.find((item) => Number(item.id) === Number(row.id)) || row;
@@ -492,28 +604,34 @@ function ManualSection({ title, icon: Icon, rows = [], canManage, form, setFormS
                     );
                 })}
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }
 
-function TransportGridSection({ grid, canManage, finalPriceOptions, setTransportGrid }) {
+function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSection, canRemove, onDuplicate, onRemove }) {
     const columns = grid.columns || [];
     const rows = grid.rows || [];
     const cells = grid.cells || {};
+    const sectionTitle = String(grid.title || '').trim() || 'PRIX DES TRANSPORTS';
+    const firstColumnLabel = String(grid.first_column_label || '').trim() || 'TRANSPORT';
     const optionsByKey = Object.fromEntries(finalPriceOptions.map((option) => [option.key, option]));
     const cellKey = (rowId, columnId) => `${rowId}__${columnId}`;
+    const setGridField = (field, value) => setTransportSection({
+        ...grid,
+        [field]: value,
+    });
 
-    const setColumn = (columnId, field, value) => setTransportGrid({
+    const setColumn = (columnId, field, value) => setTransportSection({
         ...grid,
         columns: columns.map((column) => (column.id === columnId ? { ...column, [field]: value } : column)),
     });
-    const setRow = (rowId, field, value) => setTransportGrid({
+    const setRow = (rowId, field, value) => setTransportSection({
         ...grid,
         rows: rows.map((row) => (row.id === rowId ? { ...row, [field]: value } : row)),
     });
     const setCellText = (rowId, columnId, text) => {
         const key = cellKey(rowId, columnId);
-        setTransportGrid({
+        setTransportSection({
             ...grid,
             cells: {
                 ...cells,
@@ -524,32 +642,44 @@ function TransportGridSection({ grid, canManage, finalPriceOptions, setTransport
             },
         });
     };
-    const addColumn = () => setTransportGrid({
+    const addColumn = () => setTransportSection({
         ...grid,
         columns: [...columns, { id: `col_${Date.now().toString(36)}`, label: `Colonne ${columns.length + 1}`, reference_key: '', base: 0 }],
     });
-    const addRow = () => setTransportGrid({
+    const addRow = () => setTransportSection({
         ...grid,
         rows: [...rows, { id: `row_${Date.now().toString(36)}`, label: `Ligne ${rows.length + 1}`, base: 0 }],
     });
     const removeColumn = (columnId) => {
         if (columns.length <= 1) return;
-        setTransportGrid({ ...grid, columns: columns.filter((column) => column.id !== columnId) });
+        setTransportSection({ ...grid, columns: columns.filter((column) => column.id !== columnId) });
     };
     const removeRow = (rowId) => {
         if (rows.length <= 1) return;
-        setTransportGrid({ ...grid, rows: rows.filter((row) => row.id !== rowId) });
+        setTransportSection({ ...grid, rows: rows.filter((row) => row.id !== rowId) });
     };
+    const titleEditor = canManage ? (
+        <input
+            type="text"
+            value={grid.title ?? ''}
+            onChange={(event) => setGridField('title', event.target.value)}
+            placeholder="PRIX DES TRANSPORTS"
+            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-lg font-black uppercase tracking-[0.04em] text-[var(--app-text)] sm:max-w-[28rem]"
+        />
+    ) : null;
 
     return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-                <Truck className="h-5 w-5 text-[var(--brand-brown)]" strokeWidth={2.3} />
-                <h2 className="text-lg font-black uppercase tracking-[0.04em]">Prix des transports</h2>
-            </div>
-
+        <CollapsibleSection title={sectionTitle} titleEditor={titleEditor} icon={Truck}>
             {canManage ? (
                 <div className="mb-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={onDuplicate} className="rounded-lg border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-[11px] font-black uppercase tracking-[0.08em] text-[var(--color-black)]">
+                        Dupliquer la section
+                    </button>
+                    {canRemove ? (
+                        <button type="button" onClick={onRemove} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-black uppercase tracking-[0.08em] text-red-700">
+                            Supprimer la section
+                        </button>
+                    ) : null}
                     <button type="button" onClick={addColumn} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-[11px] font-black uppercase tracking-[0.08em]">
                         Ajouter une colonne
                     </button>
@@ -564,7 +694,17 @@ function TransportGridSection({ grid, canManage, finalPriceOptions, setTransport
                     <thead>
                         <tr className={COTATION_HEADER_ROW_CLASS}>
                             <th className={`sticky left-0 z-[1] rounded-tl-xl border border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-left text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
-                                Transport
+                                {canManage ? (
+                                    <input
+                                        type="text"
+                                        value={grid.first_column_label ?? ''}
+                                        onChange={(event) => setGridField('first_column_label', event.target.value)}
+                                        placeholder="TRANSPORT"
+                                        className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-left uppercase tracking-[0.04em] ${TRANSPORT_HEADER_INPUT_CLASS}`}
+                                    />
+                                ) : (
+                                    firstColumnLabel
+                                )}
                             </th>
                             {columns.map((column, index) => (
                                 <th
@@ -690,11 +830,93 @@ function TransportGridSection({ grid, canManage, finalPriceOptions, setTransport
                     </tbody>
                 </table>
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }
 
-function FuelGridSection({ grid, canManage, setFuelGrid }) {
+function TransportGridSection({ grid, canManage, finalPriceOptions, setTransportGrid }) {
+    const normalized = normalizeTransportGrid(grid);
+    const sections = normalized.sections || [];
+
+    const updateSections = (nextSections) => {
+        const firstSection = nextSections[0] || normalizeTransportSection({}, 0);
+        setTransportGrid({
+            ...firstSection,
+            sections: nextSections,
+        });
+    };
+    const updateSection = (sectionId, nextSection) => updateSections(
+        sections.map((section) => (section.id === sectionId ? normalizeTransportSection(nextSection) : section)),
+    );
+    const duplicateSection = (section) => {
+        const now = Date.now().toString(36);
+        const cloneId = `transport_${now}`;
+        const cloned = normalizeTransportSection({
+            ...section,
+            id: cloneId,
+            title: `${section.title || 'PRIX DES TRANSPORTS'} (copie)`,
+            columns: (section.columns || []).map((column, index) => ({
+                ...column,
+                id: `col_${now}_${index + 1}`,
+            })),
+            rows: (section.rows || []).map((row, index) => ({
+                ...row,
+                id: `row_${now}_${index + 1}`,
+            })),
+            cells: Object.fromEntries(Object.entries(section.cells || {}).map(([key, cell]) => {
+                const [rowId, columnId] = key.split('__');
+                const rowIndex = (section.rows || []).findIndex((row) => row.id === rowId);
+                const columnIndex = (section.columns || []).findIndex((column) => column.id === columnId);
+
+                if (rowIndex < 0 || columnIndex < 0) {
+                    return [key, cell];
+                }
+
+                return [`row_${now}_${rowIndex + 1}__col_${now}_${columnIndex + 1}`, { ...cell }];
+            })),
+        }, sections.length);
+
+        const currentIndex = sections.findIndex((item) => item.id === section.id);
+        const insertIndex = currentIndex >= 0 ? currentIndex + 1 : sections.length;
+        updateSections([
+            ...sections.slice(0, insertIndex),
+            cloned,
+            ...sections.slice(insertIndex),
+        ]);
+    };
+    const removeSection = (sectionId) => {
+        if (sections.length <= 1) return;
+        updateSections(sections.filter((section) => section.id !== sectionId));
+    };
+
+    return (
+        <div className="grid w-full max-w-full min-w-0 gap-4">
+            {sections.map((section) => (
+                <TransportGridTable
+                    key={section.id}
+                    grid={section}
+                    canManage={canManage}
+                    finalPriceOptions={finalPriceOptions}
+                    setTransportSection={(nextSection) => updateSection(section.id, nextSection)}
+                    canRemove={sections.length > 1}
+                    onDuplicate={() => duplicateSection(section)}
+                    onRemove={() => removeSection(section.id)}
+                />
+            ))}
+        </div>
+    );
+}
+
+function FuelGridSection({
+    grid,
+    canManage,
+    canEdit = false,
+    setFuelGrid,
+    onStartEditing,
+    onCancelEditing,
+    onSave,
+    processing = false,
+}) {
     const sections = grid.sections || [];
     const vatRate = parseDecimal(grid.vat_rate) ?? 20;
 
@@ -825,7 +1047,7 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
     const gazoleCustomText = String(gazole.text ?? '').trim();
     const fuelTableColumnCount = canManage ? 4 : 3;
     const fuelHeaderSpacerClass = `w-[8.5rem] ${COTATION_HEADER_CELL_CLASS}`;
-    const fuelValueHeaderClass = `w-[5.25rem] border-y border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`;
+    const fuelValueHeaderClass = `w-[5.25rem] border-y border-r border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`;
     const fuelBodyCellClass = `border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center`;
     const renderFuelSectionTable = (section, extraRows = null) => (
         <div className="overflow-x-auto">
@@ -834,7 +1056,7 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                     <tr className={COTATION_HEADER_ROW_CLASS}>
                         <th className={fuelHeaderSpacerClass} aria-hidden="true"></th>
                         {canManage ? (
-                            <th className={`w-[4.75rem] rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
+                            <th className={`w-[4.75rem] rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
                                 Écart
                             </th>
                         ) : null}
@@ -848,13 +1070,13 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                 </thead>
                 <tbody>
                     <tr>
-                        <th colSpan={fuelTableColumnCount} className={`rounded-tl-xl border-x border-t border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-center`}>
+                        <th colSpan={fuelTableColumnCount} className={`rounded-tl-xl border-x border-t border-b border-[var(--app-border)] bg-[#FACC51] ${COTATION_BODY_CELL_CLASS} text-left text-[var(--color-black)]`}>
                             {canManage ? (
                                 <input
                                     type="text"
                                     value={section.label ?? ''}
                                     onChange={(event) => setSection(section.id, 'label', event.target.value)}
-                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-center uppercase tracking-[0.04em] ${TRANSPORT_HEADER_INPUT_CLASS}`}
+                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-left uppercase tracking-[0.04em] ${TRANSPORT_HEADER_INPUT_CLASS}`}
                                 />
                             ) : (
                                 <div className={TRANSPORT_HEADER_LABEL_CLASS}>{section.label}</div>
@@ -962,7 +1184,7 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                     <tr className={COTATION_HEADER_ROW_CLASS}>
                         <th className={fuelHeaderSpacerClass} aria-hidden="true"></th>
                         {canManage ? (
-                            <th className={`w-[4.75rem] rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
+                            <th className={`w-[4.75rem] rounded-tl-xl border-y border-l border-r border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
                                 Écart
                             </th>
                         ) : null}
@@ -976,11 +1198,34 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                 </thead>
                 <tbody>
                     <tr>
-                        <th className={`w-[8.5rem] rounded-bl-xl rounded-tl-xl border-x border-t border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left font-black`}>
-                            <div className={TRANSPORT_HEADER_LABEL_CLASS}>{gazole.tranche || 'GAZOLE'}</div>
+                        <th colSpan={fuelTableColumnCount} className={`rounded-tl-xl border-x border-t border-b border-[var(--app-border)] bg-[#FACC51] ${COTATION_BODY_CELL_CLASS} text-left text-[var(--color-black)]`}>
+                            {canManage ? (
+                                <input
+                                    type="text"
+                                    value={gazole.label ?? ''}
+                                    onChange={(event) => setGazole('label', event.target.value)}
+                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-left uppercase tracking-[0.04em] ${TRANSPORT_HEADER_INPUT_CLASS}`}
+                                />
+                            ) : (
+                                <div className={TRANSPORT_HEADER_LABEL_CLASS}>{gazole.label || 'GAZOLE'}</div>
+                            )}
+                        </th>
+                    </tr>
+                    <tr>
+                        <th className={`w-[8.5rem] rounded-bl-xl border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left font-black`}>
+                            {canManage ? (
+                                <input
+                                    type="text"
+                                    value={gazole.tranche ?? ''}
+                                    onChange={(event) => setGazole('tranche', event.target.value)}
+                                    className={`w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 ${TRANSPORT_HEADER_INPUT_CLASS}`}
+                                />
+                            ) : (
+                                <div className={TRANSPORT_HEADER_LABEL_CLASS}>{gazole.tranche || 'GAZOLE'}</div>
+                            )}
                         </th>
                         {canManage ? (
-                            <td className={`border-t ${fuelBodyCellClass}`}>
+                            <td className={fuelBodyCellClass}>
                                 <input
                                     type="number"
                                     step="0.0001"
@@ -990,10 +1235,13 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                                 />
                             </td>
                         ) : null}
-                        <td className={`border-t ${fuelBodyCellClass}`}>
+                        <td className={fuelBodyCellClass}>
+                            <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || displayHt(gazoleHt)}</span>
+                        </td>
+                        <td className={`${fuelBodyCellClass} rounded-br-xl`}>
                             {canManage ? (
                                 <div className="grid gap-1">
-                                    <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || displayHt(gazoleHt)}</span>
+                                    <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || formatPrice(gazoleDisplayedTtc)}</span>
                                     <input
                                         type="number"
                                         step="0.0001"
@@ -1012,11 +1260,8 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                                     />
                                 </div>
                             ) : (
-                                <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || displayHt(gazoleHt)}</span>
+                                <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || formatPrice(gazoleDisplayedTtc)}</span>
                             )}
-                        </td>
-                        <td className={`border-t ${fuelBodyCellClass} rounded-br-xl`}>
-                            <span className={COTATION_VALUE_CLASS}>{gazoleCustomText || formatPrice(gazoleDisplayedTtc)}</span>
                         </td>
                     </tr>
                 </tbody>
@@ -1056,13 +1301,43 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
         </tr>
     ) : null;
 
-    return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-                <Fuel className="h-5 w-5 text-[var(--brand-brown)]" strokeWidth={2.3} />
-                <h2 className="text-lg font-black uppercase tracking-[0.04em]">Prix carburant</h2>
+    const fuelActions = canEdit ? (
+        canManage ? (
+            <div className="flex flex-wrap gap-2">
+                <button
+                    type="button"
+                    onClick={onCancelEditing}
+                    disabled={processing}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+                >
+                    <X className="h-3.5 w-3.5" strokeWidth={2.3} />
+                    Annuler
+                </button>
+                <button
+                    type="button"
+                    onClick={onSave}
+                    disabled={processing}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--color-black)] disabled:opacity-60"
+                >
+                    <Save className="h-3.5 w-3.5" strokeWidth={2.3} />
+                    Enregistrer
+                </button>
             </div>
+        ) : (
+            <button
+                type="button"
+                onClick={onStartEditing}
+                disabled={processing}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+            >
+                <Pencil className="h-3.5 w-3.5" strokeWidth={2.3} />
+                Modifier le carburant
+            </button>
+        )
+    ) : null;
 
+    return (
+        <CollapsibleSection title="Prix carburant" icon={Fuel} actions={fuelActions}>
             {canManage ? (
                 <label className="mb-3 block max-w-[12rem]">
                     <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">TVA (%)</span>
@@ -1088,7 +1363,7 @@ function FuelGridSection({ grid, canManage, setFuelGrid }) {
                 {fuelSectionsById.gnr_agri ? renderFuelSectionTable(fuelSectionsById.gnr_agri) : null}
                 {fuelSectionsById.gnr_taxe ? renderFuelSectionTable(fuelSectionsById.gnr_taxe, gnrTaxConfigRow) : null}
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }
 
@@ -1096,12 +1371,7 @@ function HarvestSettings({ rows = [], canManage, form, setFormSetting }) {
     if (!canManage || rows.length === 0) return null;
 
     return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-                <Settings2 className="h-5 w-5 text-[var(--brand-brown)]" strokeWidth={2.3} />
-                <h2 className="text-lg font-black uppercase tracking-[0.04em]">Années affichées</h2>
-            </div>
-
+        <CollapsibleSection title="Années affichées" icon={Settings2}>
             <div className="grid gap-3 sm:grid-cols-2">
                 {rows.map((row) => {
                     const draft = form.data.settings.find((item) => Number(item.id) === Number(row.id)) || row;
@@ -1124,56 +1394,14 @@ function HarvestSettings({ rows = [], canManage, form, setFormSetting }) {
                     );
                 })}
             </div>
-        </section>
-    );
-}
-
-function CustomCerealSection({ canManage, form, setCustomCereal, addCustomCereal }) {
-    if (!canManage) return null;
-
-    return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-                <Settings2 className="h-5 w-5 text-[var(--brand-brown)]" strokeWidth={2.3} />
-                <h2 className="text-lg font-black uppercase tracking-[0.04em]">Céréales personnalisées</h2>
-            </div>
-
-            <div className="space-y-2">
-                {(form.data.custom_cereals || []).map((cereal) => (
-                    <div key={cereal.form_key || cereal.code || cereal.id} className="grid gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
-                        <input
-                            type="text"
-                            value={cereal.name ?? ''}
-                            onChange={(event) => setCustomCereal(cereal, 'name', event.target.value)}
-                            placeholder="Nom personnalisé"
-                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm font-bold"
-                        />
-                        <select
-                            value={cereal.base_product_code ?? 'EBM'}
-                            onChange={(event) => setCustomCereal(cereal, 'base_product_code', event.target.value)}
-                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm font-bold"
-                        >
-                            {BASE_CEREALS.map((base) => (
-                                <option key={base.code} value={base.code}>{base.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                ))}
-            </div>
-
-            <button
-                type="button"
-                onClick={addCustomCereal}
-                className="mt-3 w-full rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--brand-brown)]"
-            >
-                Ajouter une céréale personnalisée
-            </button>
-        </section>
+        </CollapsibleSection>
     );
 }
 
 function flattenSettings(manualSettings = {}) {
-    return [...(manualSettings.display || []), ...(manualSettings.transport || []), ...(manualSettings.fuel || [])].map((row) => ({
+    const settings = manualSettings || {};
+
+    return [...(settings.display || []), ...(settings.transport || []), ...(settings.fuel || [])].map((row) => ({
         id: row.id,
         value: row.value ?? '',
         note: row.note ?? '',
@@ -1181,7 +1409,9 @@ function flattenSettings(manualSettings = {}) {
 }
 
 function flattenMarketRows(groups = []) {
-    return groups.flatMap((group) => ['left', 'right'].flatMap((bucket) => (
+    const safeGroups = Array.isArray(groups) ? groups : [];
+
+    return safeGroups.flatMap((group) => ['left', 'right'].flatMap((bucket) => (
         (group?.harvests?.[bucket]?.rows || []).map((row) => ({
             identity_hash: row.identity_hash,
             market_identity_hash: row.market_identity_hash,
@@ -1206,13 +1436,26 @@ function flattenMarketRows(groups = []) {
 }
 
 function flattenCustomCereals(rows = []) {
-    return rows.map((row) => ({
+    const safeRows = Array.isArray(rows) ? rows : [];
+
+    return safeRows.map((row) => ({
         id: row.id,
         code: row.code,
         name: row.name ?? '',
         base_product_code: row.base_product_code ?? 'EBM',
         sort_order: row.sort_order ?? 100,
     }));
+}
+
+function normalizeCerealOrder(order = [], groups = []) {
+    const groupCodes = (Array.isArray(groups) ? groups : [])
+        .map((group) => group?.code)
+        .filter(Boolean);
+    const knownCodes = new Set(groupCodes);
+    const orderedCodes = (Array.isArray(order) ? order : [])
+        .filter((code) => knownCodes.has(code));
+
+    return [...orderedCodes, ...groupCodes.filter((code) => !orderedCodes.includes(code))];
 }
 
 export default function CotationsIndex({
@@ -1228,11 +1471,17 @@ export default function CotationsIndex({
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
     const [isEditing, setIsEditing] = useState(false);
+    const [isFuelEditing, setIsFuelEditing] = useState(false);
+    const [draggedCerealCode, setDraggedCerealCode] = useState(null);
+    const canViewCereals = Boolean(permissions?.can_view_cereals);
+    const canViewFuel = Boolean(permissions?.can_view_fuel);
     const canManage = Boolean(permissions?.can_manage);
+    const canManageFuel = Boolean(permissions?.can_manage_fuel);
     const form = useForm({
         settings: flattenSettings(manualSettings),
         manual_prices: flattenMarketRows(initialMarketData?.groups || []),
         custom_cereals: flattenCustomCereals(initialMarketData?.custom_cereals || []),
+        cereal_order: normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []),
         transport_grid: normalizeTransportGrid(transportGrid),
         fuel_grid: normalizeFuelGrid(fuelGrid),
         deleted_manual_price_ids: [],
@@ -1247,18 +1496,19 @@ export default function CotationsIndex({
         if (!isEditing) {
             form.setData('manual_prices', flattenMarketRows(initialMarketData?.groups || []));
             form.setData('custom_cereals', flattenCustomCereals(initialMarketData?.custom_cereals || []));
+            form.setData('cereal_order', normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []));
         }
     }, [initialMarketData]);
 
     useEffect(() => {
-        if (!isEditing) {
+        if (!isEditing && !isFuelEditing) {
             form.setData('transport_grid', normalizeTransportGrid(transportGrid));
             form.setData('fuel_grid', normalizeFuelGrid(fuelGrid));
         }
     }, [transportGrid, fuelGrid]);
 
     const fetchMarketData = async ({ initial = false } = {}) => {
-        if (!routes.market_data) return;
+        if (!canViewCereals || !routes.market_data) return;
         setError('');
         if (initial) setLoading(true);
         else setRefreshing(true);
@@ -1288,7 +1538,7 @@ export default function CotationsIndex({
         const interval = window.setInterval(() => fetchMarketData(), 60000);
 
         return () => window.clearInterval(interval);
-    }, [routes.market_data]);
+    }, [routes.market_data, canViewCereals]);
 
     const setFormSetting = (id, field, value) => {
         form.setData('settings', form.data.settings.map((row) => (
@@ -1375,16 +1625,21 @@ export default function CotationsIndex({
 
     const addCustomCereal = () => {
         const now = Date.now().toString(36).toUpperCase();
-        form.setData('custom_cereals', [
-            ...(form.data.custom_cereals || []),
-            {
-                form_key: `custom-${now}`,
-                code: `C${now}`.slice(0, 16),
-                name: '',
-                base_product_code: 'EBM',
-                sort_order: 100 + (form.data.custom_cereals || []).length,
-            },
-        ]);
+        const code = `C${now}`.slice(0, 16);
+        form.setData({
+            ...form.data,
+            custom_cereals: [
+                ...(form.data.custom_cereals || []),
+                {
+                    form_key: `custom-${now}`,
+                    code,
+                    name: '',
+                    base_product_code: 'EBM',
+                    sort_order: 100 + (form.data.custom_cereals || []).length,
+                },
+            ],
+            cereal_order: [...(form.data.cereal_order || []), code],
+        });
     };
 
     const deleteManualRow = (row) => {
@@ -1415,6 +1670,7 @@ export default function CotationsIndex({
             settings: flattenSettings(manualSettings),
             manual_prices: flattenMarketRows(data?.groups || []),
             custom_cereals: flattenCustomCereals(data?.custom_cereals || []),
+            cereal_order: normalizeCerealOrder(data?.cereal_order || [], data?.groups || []),
             transport_grid: normalizeTransportGrid(transportGrid),
             fuel_grid: normalizeFuelGrid(fuelGrid),
             deleted_manual_price_ids: [],
@@ -1423,6 +1679,7 @@ export default function CotationsIndex({
 
     const startEditing = () => {
         resetDrafts();
+        setIsFuelEditing(false);
         setIsEditing(true);
     };
 
@@ -1438,10 +1695,63 @@ export default function CotationsIndex({
         });
     };
 
+    const resetFuelDraft = () => {
+        form.setData('fuel_grid', normalizeFuelGrid(fuelGrid));
+    };
+
+    const startFuelEditing = () => {
+        resetDrafts();
+        setIsEditing(false);
+        setIsFuelEditing(true);
+    };
+
+    const cancelFuelEditing = () => {
+        resetFuelDraft();
+        setIsFuelEditing(false);
+    };
+
+    const saveFuelSettings = () => {
+        form.put(routes.fuel_settings_update, {
+            preserveScroll: true,
+            onSuccess: () => setIsFuelEditing(false),
+        });
+    };
+
+    const moveCereal = (sourceCode, targetCode) => {
+        if (!sourceCode || !targetCode || sourceCode === targetCode) return;
+
+        const currentOrder = normalizeCerealOrder(form.data.cereal_order || [], cerealGroups);
+        const sourceIndex = currentOrder.indexOf(sourceCode);
+        const targetIndex = currentOrder.indexOf(targetCode);
+
+        if (sourceIndex < 0 || targetIndex < 0) return;
+
+        const nextOrder = [...currentOrder];
+        const [moved] = nextOrder.splice(sourceIndex, 1);
+        nextOrder.splice(targetIndex, 0, moved);
+        form.setData('cereal_order', nextOrder);
+    };
+
+    const handleCerealDrop = (targetCode) => {
+        moveCereal(draggedCerealCode, targetCode);
+        setDraggedCerealCode(null);
+    };
+
     const cerealGroups = useMemo(() => {
         const groups = marketData?.groups || [];
         if (isEditing) {
-            const existingCodes = new Set(groups.map((group) => group.code));
+            const customCerealsByCode = Object.fromEntries((form.data.custom_cereals || []).map((cereal) => [cereal.code, cereal]));
+            const mergedGroups = groups.map((group) => {
+                const customCereal = customCerealsByCode[group.code];
+
+                return customCereal ? {
+                    ...group,
+                    name: customCereal.name || group.name,
+                    base_product_code: customCereal.base_product_code || group.base_product_code,
+                    sort: customCereal.sort_order || group.sort,
+                } : group;
+            });
+            const existingCodes = new Set(mergedGroups.map((group) => group.code));
             const customGroups = (form.data.custom_cereals || [])
                 .filter((cereal) => cereal.name && !existingCodes.has(cereal.code))
                 .map((cereal) => ({
@@ -1455,14 +1765,18 @@ export default function CotationsIndex({
                     },
                 }));
 
-            return [...groups, ...customGroups].sort((left, right) => ((left.sort || 0) - (right.sort || 0)) || String(left.name).localeCompare(String(right.name)));
+            const defaultSortedGroups = [...mergedGroups, ...customGroups].sort((left, right) => ((left.sort || 0) - (right.sort || 0)) || String(left.name).localeCompare(String(right.name)));
+            const order = normalizeCerealOrder(form.data.cereal_order || [], defaultSortedGroups);
+            const orderIndex = Object.fromEntries(order.map((code, index) => [code, index]));
+
+            return [...defaultSortedGroups].sort((left, right) => (orderIndex[left.code] ?? 9999) - (orderIndex[right.code] ?? 9999));
         }
 
         return groups.filter((group) => (
             (group?.harvests?.left?.rows || []).length > 0
             || (group?.harvests?.right?.rows || []).length > 0
         ));
-    }, [marketData, isEditing, form.data.custom_cereals]);
+    }, [marketData, isEditing, form.data.custom_cereals, form.data.cereal_order]);
     const optionGroups = useMemo(() => marketData?.options || [], [marketData]);
     const optionGroupsByCode = useMemo(() => {
         const byCode = Object.fromEntries(optionGroups.map((group) => [group.code, group]));
@@ -1476,11 +1790,15 @@ export default function CotationsIndex({
         return byCode;
     }, [optionGroups, form.data.custom_cereals]);
     const finalPriceOptions = useMemo(() => {
-        const rows = isEditing
-            ? (form.data.manual_prices || [])
-            : flattenMarketRows(marketData?.groups || []);
+        const marketRows = flattenMarketRows(marketData?.groups || []);
+        const draftRows = isEditing ? (form.data.manual_prices || []) : [];
+        const rowsByKey = new Map();
 
-        return rows
+        [...marketRows, ...draftRows].forEach((row) => {
+            rowsByKey.set(transportReferenceKey(row), row);
+        });
+
+        return Array.from(rowsByKey.values())
             .map((row) => {
                 const matif = lineTypeFor(row) === 'matif'
                     ? parseDecimal(row.matif)
@@ -1508,29 +1826,33 @@ export default function CotationsIndex({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
                 <h1 className="text-[22px] leading-none font-black uppercase tracking-[0.06em]">Cotations</h1>
-                <p className="mt-1 text-sm text-[var(--app-muted)]">
-                    Dernière actualisation serveur : {formatDateTime(marketData?.fetched_at)}
-                </p>
+                {canViewCereals ? (
+                    <p className="mt-1 text-sm text-[var(--app-muted)]">
+                        Dernière actualisation serveur : {formatDateTime(marketData?.fetched_at)}
+                    </p>
+                ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
-                <button
-                    type="button"
-                    onClick={() => fetchMarketData()}
-                    disabled={refreshing}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--color-black)] disabled:opacity-60"
-                >
-                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} strokeWidth={2.3} />
-                    Actualiser
-                </button>
-                {canManage && !isEditing ? (
+                {canViewCereals ? (
+                    <button
+                        type="button"
+                        onClick={() => fetchMarketData()}
+                        disabled={refreshing}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--color-black)] disabled:opacity-60"
+                    >
+                        <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} strokeWidth={2.3} />
+                        Actualiser
+                    </button>
+                ) : null}
+                {canManage && !isEditing && !isFuelEditing ? (
                     <button
                         type="button"
                         onClick={startEditing}
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
                     >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2.3} />
-                        Modifier
+                        Modifier les cotations
                     </button>
                 ) : null}
             </div>
@@ -1541,64 +1863,118 @@ export default function CotationsIndex({
         <AppLayout title="Cotations" header={header}>
             <Head title="Cotations" />
 
-            <div className="space-y-5">
+            <div className="w-full max-w-full min-w-0 space-y-5 overflow-x-hidden">
                 {error ? (
                     <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                         {error}
                     </div>
                 ) : null}
 
-                <HarvestSettings
-                    rows={manualSettings.display || []}
-                    canManage={isEditing}
-                    form={form}
-                    setFormSetting={setFormSetting}
-                />
-
-                <CustomCerealSection
-                    canManage={isEditing}
-                    form={form}
-                    setCustomCereal={setCustomCereal}
-                    addCustomCereal={addCustomCereal}
-                />
-
-                {loading ? (
-                    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
-                        Chargement des cours...
+                {!canViewCereals && !canViewFuel ? (
+                    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm font-semibold text-[var(--app-muted)]">
+                        Vous n'avez pas accès à cette page.
                     </div>
-                ) : cerealGroups.length ? (
-                    <div className="grid gap-4">
-                        {cerealGroups.map((group, index) => (
-                            <CerealCard
-                                key={`${group.name}-${index}`}
-                                group={group}
-                                canManage={isEditing}
-                                form={form}
-                                setManualPrice={setManualPrice}
-                                addManualRow={addManualRow}
-                                deleteManualRow={deleteManualRow}
-                                optionGroup={optionGroupsByCode[group.code]}
-                            />
-                        ))}
-                    </div>
-                ) : (
-                    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
-                        Aucun cours disponible pour le moment.
-                    </div>
-                )}
+                ) : null}
 
-                <TransportGridSection
-                    grid={form.data.transport_grid}
-                    canManage={isEditing}
-                    finalPriceOptions={finalPriceOptions}
-                    setTransportGrid={setTransportGrid}
-                />
+                {canViewCereals ? (
+                    <>
+                        <HarvestSettings
+                            rows={manualSettings.display || []}
+                            canManage={isEditing}
+                            form={form}
+                            setFormSetting={setFormSetting}
+                        />
 
-                <FuelGridSection
-                    grid={form.data.fuel_grid}
-                    canManage={isEditing}
-                    setFuelGrid={setFuelGrid}
-                />
+                        {loading ? (
+                            <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
+                                Chargement des cours...
+                            </div>
+                        ) : cerealGroups.length ? (
+                            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-4">
+                                {isEditing ? (
+                                    <button
+                                        type="button"
+                                        onClick={addCustomCereal}
+                                        className="w-full rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--brand-brown)]"
+                                    >
+                                        Ajouter une céréale personnalisée
+                                    </button>
+                                ) : null}
+                                {cerealGroups.map((group, index) => (
+                                    <div
+                                        key={`${group.code || group.name}-${index}`}
+                                        data-cereal-code={group.code || ''}
+                                        className="min-w-0"
+                                        onDragOver={(event) => {
+                                            if (!isEditing) return;
+                                            event.preventDefault();
+                                        }}
+                                        onDrop={() => handleCerealDrop(group.code)}
+                                    >
+                                        <CerealCard
+                                            group={group}
+                                            canManage={isEditing}
+                                            form={form}
+                                            setManualPrice={setManualPrice}
+                                            addManualRow={addManualRow}
+                                            deleteManualRow={deleteManualRow}
+                                            optionGroup={optionGroupsByCode[group.code]}
+                                            customCereal={(form.data.custom_cereals || []).find((cereal) => cereal.code === group.code) || null}
+                                            setCustomCereal={setCustomCereal}
+                                            dragHandle={isEditing ? (
+                                                <button
+                                                    type="button"
+                                                    draggable
+                                                    onTouchStart={() => setDraggedCerealCode(group.code)}
+                                                    onTouchMove={(event) => event.preventDefault()}
+                                                    onTouchEnd={(event) => {
+                                                        const touch = event.changedTouches?.[0];
+                                                        const target = touch ? document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-cereal-code]') : null;
+                                                        handleCerealDrop(target?.getAttribute('data-cereal-code'));
+                                                    }}
+                                                    onDragStart={(event) => {
+                                                        setDraggedCerealCode(group.code);
+                                                        event.dataTransfer.effectAllowed = 'move';
+                                                        event.dataTransfer.setData('text/plain', group.code || '');
+                                                    }}
+                                                    onDragEnd={() => setDraggedCerealCode(null)}
+                                                    className="inline-flex h-10 w-10 touch-none cursor-grab items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)] active:cursor-grabbing"
+                                                    aria-label={`Déplacer ${group.name || 'céréale'}`}
+                                                >
+                                                    <GripVertical className="h-5 w-5" strokeWidth={2.3} />
+                                                </button>
+                                            ) : null}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
+                                Aucun cours disponible pour le moment.
+                            </div>
+                        )}
+
+                        <TransportGridSection
+                            grid={form.data.transport_grid}
+                            canManage={isEditing}
+                            finalPriceOptions={finalPriceOptions}
+                            setTransportGrid={setTransportGrid}
+                        />
+                    </>
+                ) : null}
+
+                {canViewFuel ? (
+                    <FuelGridSection
+                        grid={form.data.fuel_grid}
+                        canManage={isFuelEditing}
+                        canEdit={canManageFuel && !isEditing}
+                        setFuelGrid={setFuelGrid}
+                        onStartEditing={startFuelEditing}
+                        onCancelEditing={cancelFuelEditing}
+                        onSave={saveFuelSettings}
+                        processing={form.processing}
+                    />
+                ) : null}
 
                 {canManage && isEditing ? (
                     <div className="sticky bottom-4 z-10 flex flex-wrap justify-end gap-2">

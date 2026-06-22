@@ -283,6 +283,20 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             disabled: true,
             hint: 'Module à venir',
         } : null,
+        safeHasRoute('cotations.index') && canCotationsView ? {
+            key: 'cotations',
+            label: 'Cotations',
+            href: safeHref('cotations.index'),
+            icon: FileText,
+            active: safeCurrent('cotations.*'),
+        } : isAdmin ? {
+            key: 'cotations',
+            label: 'Cotations',
+            href: null,
+            icon: FileText,
+            disabled: true,
+            hint: 'Accès requis',
+        } : null,
     ].filter(Boolean);
 
     const toolsChildren = [
@@ -378,25 +392,6 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             key: 'calendar',
             label: 'Calendrier',
             icon: CalendarDays,
-            active: false,
-            href: null,
-            disabled: true,
-            hint: 'Accès requis',
-            children: [],
-            simple: true,
-        } : null,
-        safeHasRoute('cotations.index') && canCotationsView ? {
-            key: 'cotations',
-            label: 'Cotations',
-            icon: FileText,
-            active: safeCurrent('cotations.*'),
-            href: safeHref('cotations.index'),
-            children: [],
-            simple: true,
-        } : isAdmin ? {
-            key: 'cotations',
-            label: 'Cotations',
-            icon: FileText,
             active: false,
             href: null,
             disabled: true,

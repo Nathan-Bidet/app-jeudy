@@ -24,8 +24,10 @@ class CotationAccessController extends Controller
      * @var array<int, string>
      */
     private const ABILITIES = [
-        'cotations.view',
-        'cotations.manage',
+        'cotations.cereals.view',
+        'cotations.cereals.edit',
+        'cotations.fuel.view',
+        'cotations.fuel.edit',
         'cotations.admin',
     ];
 

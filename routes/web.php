@@ -175,15 +175,19 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->middleware('sector.access:calendar.view')
         ->name('calendar.index');
     Route::get('/cotations', [CotationController::class, 'index'])
-        ->middleware('sector.access:cotations.view')
+        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit|cotations.fuel.view|cotations.fuel.edit')
         ->name('cotations.index');
     Route::get('/cotations/market-data', [CotationController::class, 'marketData'])
-        ->middleware('sector.access:cotations.view')
+        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
         ->name('cotations.market-data');
     Route::put('/cotations/settings', [CotationController::class, 'updateSettings'])
-        ->middleware('sector.access:cotations.manage')
+        ->middleware('sector.access:cotations.cereals.edit')
         ->middleware('throttle:admin-sensitive')
         ->name('cotations.settings.update');
+    Route::put('/cotations/fuel-settings', [CotationController::class, 'updateFuelSettings'])
+        ->middleware('sector.access:cotations.fuel.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.fuel-settings.update');
     Route::get('/calendar/leaves/export', [CalendarController::class, 'exportLeavesCsv'])
         ->middleware('sector.access:calendar.view')
         ->middleware('throttle:calendar-export')

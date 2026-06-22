@@ -191,7 +191,8 @@ export default function AdminCotationsIndex({
             <div className="space-y-5">
                 <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 text-sm text-[var(--app-muted)]">
                     <strong className="text-[var(--app-text)]">Voir</strong> donne accès à la page Cotations.
-                    {' '}<strong className="text-[var(--app-text)]">Modifier</strong> autorise les prix transport/carburant.
+                    {' '}<strong className="text-[var(--app-text)]">Modifier céréales/transports</strong> autorise les cotations et le transport.
+                    {' '}<strong className="text-[var(--app-text)]">Modifier carburant</strong> autorise uniquement le bloc Prix carburant.
                     {' '}<strong className="text-[var(--app-text)]">Administrer</strong> autorise cet écran de droits.
                 </div>
 

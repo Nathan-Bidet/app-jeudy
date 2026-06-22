@@ -2,12 +2,13 @@
 
 namespace App\Services\Cotations;
 
-use App\Models\CotationCustomCereal;
 use App\Models\CotationMarketPrice;
 use App\Models\CotationMarketRefresh;
 use App\Models\CotationManualPrice;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class CotationMarketService
@@ -146,45 +147,65 @@ class CotationMarketService
         $configuredRows = [];
         $groups = [];
 
-        CotationManualPrice::query()
-            ->whereIn('harvest_year', $wantedYears)
-            ->orderBy('product_sort')
-            ->orderBy('product_name')
-            ->orderBy('harvest_year')
-            ->orderBy('sort_order')
-            ->orderBy('maturity_label')
-            ->get()
-            ->each(function (CotationManualPrice $manual) use (&$configuredRows, $marketRows): void {
-                $lineType = $manual->line_type === 'matif' ? 'matif' : 'custom';
-                $marketIdentity = $lineType === 'matif' ? $manual->market_identity_hash : null;
-                $market = $marketIdentity ? ($marketRows[$marketIdentity] ?? null) : null;
-                $matif = $lineType === 'matif'
-                    ? ($market['matif'] ?? null)
-                    : ($manual->manual_matif !== null ? (float) $manual->manual_matif : null);
+        if (Schema::hasTable('cotation_manual_prices')) {
+            CotationManualPrice::query()
+                ->select([
+                    'id',
+                    'identity_hash',
+                    'market_identity_hash',
+                    'line_type',
+                    'product_code',
+                    'product_name',
+                    'product_sort',
+                    'contract_code',
+                    'display_label',
+                    'maturity_label',
+                    'maturity_month',
+                    'maturity_year',
+                    'harvest_year',
+                    'manual_matif',
+                    'margin',
+                    'sort_order',
+                ])
+                ->whereIn('harvest_year', $wantedYears)
+                ->orderBy('product_sort')
+                ->orderBy('product_name')
+                ->orderBy('harvest_year')
+                ->orderBy('sort_order')
+                ->orderBy('maturity_label')
+                ->get()
+                ->each(function (CotationManualPrice $manual) use (&$configuredRows, $marketRows): void {
+                    $lineType = $manual->line_type === 'matif' ? 'matif' : 'custom';
+                    $marketIdentity = $lineType === 'matif' ? $manual->market_identity_hash : null;
+                    $market = $marketIdentity ? ($marketRows[$marketIdentity] ?? null) : null;
+                    $matif = $lineType === 'matif'
+                        ? ($market['matif'] ?? null)
+                        : ($manual->manual_matif !== null ? (float) $manual->manual_matif : null);
 
-                $configuredRows[] = [
-                    'identity_hash' => $manual->identity_hash,
-                    'market_identity_hash' => $marketIdentity,
-                    'line_type' => $lineType,
-                    'manual_id' => $manual->id,
-                    'product_code' => $manual->product_code,
-                    'product_name' => $manual->product_name,
-                    'product_sort' => (int) $manual->product_sort,
-                    'contract_code' => $market['contract_code'] ?? $manual->contract_code,
-                    'display_label' => $manual->display_label,
-                    'label' => $manual->maturity_label,
-                    'maturity_month' => $manual->maturity_month,
-                    'maturity_year' => (int) $manual->maturity_year,
-                    'harvest_year' => (int) $manual->harvest_year,
-                    'matif' => $matif,
-                    'euronext_price' => $market['matif'] ?? null,
-                    'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
-                    'margin' => $manual->margin !== null ? abs((float) $manual->margin) : null,
-                    'sort' => (int) $manual->sort_order,
-                    'last_seen_at' => $market['last_seen_at'] ?? null,
-                    'has_euronext' => $lineType === 'matif' && $market !== null,
-                ];
-            });
+                    $configuredRows[] = [
+                        'identity_hash' => $manual->identity_hash,
+                        'market_identity_hash' => $marketIdentity,
+                        'line_type' => $lineType,
+                        'manual_id' => $manual->id,
+                        'product_code' => $manual->product_code,
+                        'product_name' => $manual->product_name,
+                        'product_sort' => (int) $manual->product_sort,
+                        'contract_code' => $market['contract_code'] ?? $manual->contract_code,
+                        'display_label' => $manual->display_label,
+                        'label' => $manual->maturity_label,
+                        'maturity_month' => $manual->maturity_month,
+                        'maturity_year' => (int) $manual->maturity_year,
+                        'harvest_year' => (int) $manual->harvest_year,
+                        'matif' => $matif,
+                        'euronext_price' => $market['matif'] ?? null,
+                        'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
+                        'margin' => $manual->margin !== null ? abs((float) $manual->margin) : null,
+                        'sort' => (int) $manual->sort_order,
+                        'last_seen_at' => $market['last_seen_at'] ?? null,
+                        'has_euronext' => $lineType === 'matif' && $market !== null,
+                    ];
+                });
+        }
 
         if ($includeEmptyProducts) {
             foreach (self::BASE_PRODUCT_CODES as $code) {
@@ -330,16 +351,44 @@ class CotationMarketService
     {
         $rows = [];
 
-        CotationMarketPrice::query()
+        if (! Schema::hasTable('cotation_market_prices')) {
+            return $rows;
+        }
+
+        $latestIds = DB::table('cotation_market_prices')
+            ->selectRaw('MAX(id) as id')
             ->whereIn('harvest_year', $wantedYears)
             ->whereIn('product_code', self::BASE_PRODUCT_CODES)
+            ->groupBy('product_code', 'harvest_year', 'maturity_year', 'maturity_month', 'maturity_label')
+            ->pluck('id')
+            ->all();
+
+        if ($latestIds === []) {
+            return $rows;
+        }
+
+        DB::table('cotation_market_prices')
+            ->select([
+                'id',
+                'product_code',
+                'product_name',
+                'product_sort',
+                'contract_code',
+                'maturity_label',
+                'maturity_month',
+                'maturity_year',
+                'harvest_year',
+                'price',
+                'maturity_sort',
+                'created_at',
+            ])
+            ->whereIn('id', $latestIds)
             ->orderBy('product_sort')
             ->orderBy('product_name')
             ->orderBy('harvest_year')
             ->orderBy('maturity_sort')
-            ->orderByDesc('created_at')
             ->get()
-            ->each(function (CotationMarketPrice $price) use (&$rows): void {
+            ->each(function (object $price) use (&$rows): void {
                 $identity = CotationManualPrice::identityHash(
                     (string) $price->product_code,
                     (int) $price->harvest_year,
@@ -365,7 +414,7 @@ class CotationMarketService
                     'harvest_year' => (int) $price->harvest_year,
                     'matif' => (float) $price->price,
                     'sort' => (int) $price->maturity_sort,
-                    'last_seen_at' => $price->created_at?->toIso8601String(),
+                    'last_seen_at' => $price->created_at ? Carbon::parse($price->created_at)->toIso8601String() : null,
                 ];
             });
 
@@ -377,11 +426,16 @@ class CotationMarketService
      */
     private function customCereals(): array
     {
-        return CotationCustomCereal::query()
+        if (! Schema::hasTable('cotation_custom_cereals')) {
+            return [];
+        }
+
+        return DB::table('cotation_custom_cereals')
+            ->select(['code', 'name', 'base_product_code', 'sort_order'])
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get()
-            ->map(fn (CotationCustomCereal $cereal): array => [
+            ->map(fn (object $cereal): array => [
                 'code' => $cereal->code,
                 'name' => $cereal->name,
                 'base_product_code' => $cereal->base_product_code,
@@ -410,6 +464,10 @@ class CotationMarketService
 
     public function lastRefresh(): ?CotationMarketRefresh
     {
+        if (! Schema::hasTable('cotation_market_refreshes')) {
+            return null;
+        }
+
         return CotationMarketRefresh::query()->latest('fetched_at')->first();
     }
 

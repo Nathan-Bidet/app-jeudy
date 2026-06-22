@@ -11,9 +11,11 @@ use App\Support\Access\AccessManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
-use Inertia\Response;
+use Throwable;
 
 class CotationController extends Controller
 {
@@ -23,35 +25,109 @@ class CotationController extends Controller
     ) {
     }
 
-    public function index(Request $request): Response
+    public function index(Request $request)
     {
-        $access = app(AccessManager::class);
-        $user = $request->user();
+        try {
+            $access = app(AccessManager::class);
+            $user = $request->user();
 
-        return Inertia::render('Cotations/Index', [
-            'manualSettings' => $this->manualSettings(),
-            'displaySettings' => $this->displaySettings(),
-            'transportGrid' => $this->transportGridConfig(),
-            'fuelGrid' => $this->fuelGridConfig(),
-            'marketData' => $this->marketPayload($request),
-            'permissions' => [
-                'can_manage' => (bool) ($user && $access->can($user, 'cotations.manage')),
-                'can_admin' => (bool) ($user && $access->can($user, 'cotations.admin')),
-            ],
-            'routes' => [
-                'market_data' => route('cotations.market-data'),
-                'settings_update' => route('cotations.settings.update'),
-                'admin' => route('admin.cotations.index'),
-            ],
-        ]);
+            $canEditCereals = (bool) ($user && $access->can($user, 'cotations.cereals.edit'));
+            $canEditFuel = (bool) ($user && $access->can($user, 'cotations.fuel.edit'));
+            $canViewCereals = (bool) ($user && ($access->can($user, 'cotations.cereals.view') || $canEditCereals));
+            $canViewFuel = (bool) ($user && ($access->can($user, 'cotations.fuel.view') || $canEditFuel));
+            $canAdmin = (bool) ($user && $access->can($user, 'cotations.admin'));
+
+            $marketData = [
+                'source' => 'database',
+                'source_url' => CotationMarketService::EURONEXT_URL,
+                'fetched_at' => null,
+                'last_refresh' => null,
+                'harvest_years' => [
+                    'left' => now()->year,
+                    'right' => now()->year + 1,
+                ],
+                'leftYear' => now()->year,
+                'rightYear' => now()->year + 1,
+                'availableYears' => [now()->year, now()->year + 1],
+                'groups' => [],
+                'cereal_order' => [],
+                'options' => [],
+                'manualRows' => [],
+                'customCereals' => [],
+                'custom_cereals' => [],
+            ];
+
+            $fuelGrid = $this->fuelGridConfig();
+
+            $manualSettings = $this->manualSettings();
+            $displaySettings = $this->displaySettings();
+            $transportGrid = $this->transportGridConfig();
+
+            $can = [
+                'viewCereals' => $canViewCereals,
+                'viewFuel' => $canViewFuel,
+                'editCereals' => $canEditCereals,
+                'editFuel' => $canEditFuel,
+                'admin' => $canAdmin,
+            ];
+
+            return Inertia::render('Cotations/Index', [
+                'can' => $can,
+                'market' => $marketData,
+                'fuel' => $fuelGrid,
+                'manualSettings' => $manualSettings,
+                'displaySettings' => $displaySettings,
+                'transportGrid' => $transportGrid,
+                'fuelGrid' => $fuelGrid,
+                'marketData' => $marketData,
+                'permissions' => [
+                    'can_view_cereals' => $canViewCereals,
+                    'can_view_fuel' => $canViewFuel,
+                    'can_manage' => $canEditCereals,
+                    'can_manage_fuel' => $canEditFuel,
+                    'can_admin' => $canAdmin,
+                ],
+                'routes' => [
+                    'market_data' => route('cotations.market-data'),
+                    'settings_update' => route('cotations.settings.update'),
+                    'fuel_settings_update' => route('cotations.fuel-settings.update'),
+                    'admin' => route('admin.cotations.index'),
+                ],
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('cotations.index failed', [
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+            ]);
+
+            return response('Erreur cotations : '.$exception->getMessage(), 500);
+        }
     }
 
     public function marketData(Request $request): JsonResponse
     {
-        return response()->json([
-            'ok' => true,
-            ...$this->marketPayload($request),
-        ]);
+        try {
+            $user = $request->user();
+            $access = app(AccessManager::class);
+            if (! $user || (! $access->can($user, 'cotations.cereals.view') && ! $access->can($user, 'cotations.cereals.edit'))) {
+                return response()->json($this->emptyMarketDataResponse());
+            }
+
+            return response()->json([
+                'ok' => true,
+                ...$this->marketPayload($request),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('cotations.market-data failed', [
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace' => $exception->getTraceAsString(),
+            ]);
+
+            return response()->json($this->emptyMarketDataResponse());
+        }
     }
 
     public function updateSettings(Request $request): RedirectResponse
@@ -97,7 +173,11 @@ class CotationController extends Controller
             'custom_cereals.*.name' => ['required_with:custom_cereals', 'string', 'max:80'],
             'custom_cereals.*.base_product_code' => ['required_with:custom_cereals', Rule::in(['ECO', 'EBM', 'EMA'])],
             'custom_cereals.*.sort_order' => ['nullable', 'integer', 'min:100', 'max:9999'],
+            'cereal_order' => ['nullable', 'array', 'max:100'],
+            'cereal_order.*' => ['string', 'max:16'],
             'transport_grid' => ['nullable', 'array'],
+            'transport_grid.title' => ['nullable', 'string', 'max:120'],
+            'transport_grid.first_column_label' => ['nullable', 'string', 'max:80'],
             'transport_grid.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.columns' => ['nullable', 'array', 'max:12'],
             'transport_grid.columns.*.id' => ['required_with:transport_grid.columns', 'string', 'max:80'],
@@ -110,27 +190,23 @@ class CotationController extends Controller
             'transport_grid.rows.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.cells' => ['nullable', 'array'],
             'transport_grid.cells.*.text' => ['nullable', 'string', 'max:120'],
-            'fuel_grid' => ['nullable', 'array'],
-            'fuel_grid.vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'fuel_grid.sections' => ['nullable', 'array', 'max:10'],
-            'fuel_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.sections.*.label' => ['nullable', 'string', 'max:120'],
-            'fuel_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
-            'fuel_grid.sections.*.rows.*.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.sections.*.rows.*.tranche' => ['nullable', 'string', 'max:120'],
-            'fuel_grid.sections.*.rows.*.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'fuel_grid.sections.*.rows.*.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
-            'fuel_grid.sections.*.rows.*.text' => ['nullable', 'string', 'max:120'],
-            'fuel_grid.gnr_tax' => ['nullable', 'array'],
-            'fuel_grid.gnr_tax.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'fuel_grid.gnr_tax.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'fuel_grid.gazole' => ['nullable', 'array'],
-            'fuel_grid.gazole.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.gazole.tranche' => ['nullable', 'string', 'max:120'],
-            'fuel_grid.gazole.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'fuel_grid.gazole.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'fuel_grid.gazole.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
-            'fuel_grid.gazole.text' => ['nullable', 'string', 'max:120'],
+            'transport_grid.sections' => ['nullable', 'array', 'max:20'],
+            'transport_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.title' => ['nullable', 'string', 'max:120'],
+            'transport_grid.sections.*.first_column_label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.reference_key' => ['nullable', 'string', 'max:180'],
+            'transport_grid.sections.*.columns' => ['nullable', 'array', 'max:12'],
+            'transport_grid.sections.*.columns.*.id' => ['required_with:transport_grid.sections.*.columns', 'string', 'max:80'],
+            'transport_grid.sections.*.columns.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.columns.*.reference_key' => ['nullable', 'string', 'max:180'],
+            'transport_grid.sections.*.columns.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
+            'transport_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
+            'transport_grid.sections.*.rows.*.id' => ['required_with:transport_grid.sections.*.rows', 'string', 'max:80'],
+            'transport_grid.sections.*.rows.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.rows.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
+            'transport_grid.sections.*.cells' => ['nullable', 'array'],
+            'transport_grid.sections.*.cells.*.text' => ['nullable', 'string', 'max:120'],
+            ...$this->fuelGridValidationRules(),
         ]);
 
         $before = $settings->mapWithKeys(fn (CotationSetting $setting): array => [
@@ -174,15 +250,16 @@ class CotationController extends Controller
 
         $deletedIds = array_values(array_unique(array_map('intval', $validated['deleted_manual_price_ids'] ?? [])));
         $customCerealChanges = $this->updateCustomCereals($validated['custom_cereals'] ?? [], $request);
+        $cerealOrderChange = $this->updateCerealOrder($validated['cereal_order'] ?? null, $request);
         $transportGridChange = $this->updateTransportGrid($validated['transport_grid'] ?? null, $request, $transportGridBefore);
-        $fuelGridChange = $this->updateFuelGrid($validated['fuel_grid'] ?? null, $request, $fuelGridBefore);
+        $fuelGridChange = null;
         $manualRows = collect($validated['manual_prices'] ?? [])
             ->reject(fn (array $row): bool => isset($row['manual_id']) && in_array((int) $row['manual_id'], $deletedIds, true))
             ->values()
             ->all();
         $manualDeletes = $this->deleteManualPrices($deletedIds);
         $manualChanges = $this->updateManualPrices($manualRows, $request);
-        $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $transportGridChange !== null || $fuelGridChange !== null;
+        $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
 
         $this->auditLogService->log([
             'action' => $hasManualChanges ? 'update_cotation_settings_and_manual_prices' : 'update_cotation_settings',
@@ -196,12 +273,31 @@ class CotationController extends Controller
                 'manual_prices' => $manualChanges,
                 'deleted_manual_prices' => $manualDeletes,
                 'custom_cereals' => $customCerealChanges,
+                'cereal_order' => $cerealOrderChange,
                 'transport_grid' => $transportGridChange,
                 'fuel_grid' => $fuelGridChange,
             ],
         ]);
 
         return back()->with('status', 'Cotations settings updated.');
+    }
+
+    public function updateFuelSettings(Request $request): RedirectResponse
+    {
+        $validated = $request->validate($this->fuelGridValidationRules(required: true));
+        $before = $this->fuelGridConfig();
+        $fuelGridChange = $this->updateFuelGrid($validated['fuel_grid'] ?? null, $request, $before);
+
+        $this->auditLogService->log([
+            'action' => 'update_cotation_fuel_settings',
+            'module' => 'cotations',
+            'description' => 'Mise à jour des prix carburant',
+            'payload' => [
+                'fuel_grid' => $fuelGridChange,
+            ],
+        ]);
+
+        return back()->with('status', 'Cotations fuel settings updated.');
     }
 
     /**
@@ -213,7 +309,13 @@ class CotationController extends Controller
         $lastRefresh = $this->marketService->lastRefresh();
         $access = app(AccessManager::class);
         $user = $request?->user();
-        $canManage = (bool) ($user && $access->can($user, 'cotations.manage'));
+        $canManage = (bool) ($user && $access->can($user, 'cotations.cereals.edit'));
+        $cerealOrder = $this->cerealOrderConfig();
+        $groups = $this->applyCerealOrder($this->marketService->latestGroups(
+            (int) ($displaySettings['harvest_left_year'] ?? now()->year),
+            (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
+            $canManage,
+        ), $cerealOrder);
 
         return [
             'source' => 'database',
@@ -230,11 +332,8 @@ class CotationController extends Controller
                 'left' => $displaySettings['harvest_left_year'] ?? now()->year,
                 'right' => $displaySettings['harvest_right_year'] ?? now()->year + 1,
             ],
-            'groups' => $this->marketService->latestGroups(
-                (int) ($displaySettings['harvest_left_year'] ?? now()->year),
-                (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
-                $canManage,
-            ),
+            'groups' => $groups,
+            'cereal_order' => $this->normalizeCerealOrder($cerealOrder, $groups),
             'options' => $this->marketService->marketOptions(
                 (int) ($displaySettings['harvest_left_year'] ?? now()->year),
                 (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
@@ -244,11 +343,79 @@ class CotationController extends Controller
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function safeMarketPayload(?Request $request = null): array
+    {
+        try {
+            return $this->marketPayload($request);
+        } catch (Throwable) {
+            return $this->emptyMarketPayload();
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyMarketPayload(): array
+    {
+        return [
+            'source' => 'database',
+            'source_url' => CotationMarketService::EURONEXT_URL,
+            'fetched_at' => null,
+            'last_refresh' => null,
+            'harvest_years' => [
+                'left' => now()->year,
+                'right' => now()->year + 1,
+            ],
+            'groups' => [],
+            'cereal_order' => [],
+            'options' => [],
+            'custom_cereals' => [],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyMarketDataResponse(): array
+    {
+        $year = now()->year;
+
+        return [
+            'ok' => true,
+            'groups' => [],
+            'leftYear' => $year,
+            'rightYear' => $year + 1,
+            'availableYears' => [$year, $year + 1],
+            'manualRows' => [],
+            'customCereals' => [],
+            'custom_cereals' => [],
+            'cereal_order' => [],
+            'lastRefresh' => null,
+            'last_refresh' => null,
+            'fetched_at' => null,
+            'harvest_years' => [
+                'left' => $year,
+                'right' => $year + 1,
+            ],
+            'options' => [],
+        ];
+    }
+
+    /**
      * @return array<string, int>
      */
     private function displaySettings(): array
     {
         $currentYear = (int) now(config('app.timezone', 'Europe/Paris'))->format('Y');
+        if (! Schema::hasTable('cotation_settings')) {
+            return [
+                'harvest_left_year' => $currentYear,
+                'harvest_right_year' => $currentYear + 1,
+            ];
+        }
+
         $values = CotationSetting::query()
             ->where('section', 'display')
             ->pluck('value', 'key')
@@ -265,16 +432,27 @@ class CotationController extends Controller
      */
     private function manualSettings(): array
     {
+        if (! Schema::hasTable('cotation_settings')) {
+            return [];
+        }
+
         return CotationSetting::query()
-            ->with('updatedBy:id,name,first_name,last_name')
+            ->select(['id', 'section', 'key', 'label', 'value', 'unit', 'note', 'sort_order', 'updated_at'])
             ->whereIn('section', ['transport', 'fuel', 'display'])
             ->orderBy('section')
             ->orderBy('sort_order')
             ->get()
             ->groupBy('section')
             ->map(fn ($rows) => $rows->map(fn (CotationSetting $setting): array => [
-                ...$this->settingSnapshot($setting),
-                'updated_by_name' => $this->userLabel($setting->updatedBy),
+                'id' => (int) $setting->id,
+                'section' => (string) $setting->section,
+                'key' => (string) $setting->key,
+                'label' => (string) $setting->label,
+                'value' => $setting->value !== null ? (float) $setting->value : null,
+                'unit' => $setting->unit,
+                'note' => $setting->note,
+                'sort_order' => (int) $setting->sort_order,
+                'updated_by_name' => null,
                 'updated_at' => $setting->updated_at?->toIso8601String(),
             ])->values()->all())
             ->all();
@@ -285,8 +463,12 @@ class CotationController extends Controller
      */
     private function transportGridConfig(): array
     {
-        $setting = CotationSetting::query()->where('key', 'transport_grid_config')->first();
-        $decoded = $setting?->note ? json_decode($setting->note, true) : null;
+        if (! Schema::hasTable('cotation_settings')) {
+            return $this->normalizeTransportGrid([]);
+        }
+
+        $note = CotationSetting::query()->where('key', 'transport_grid_config')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
         $config = is_array($decoded) ? $decoded : [];
 
         return $this->normalizeTransportGrid($config);
@@ -297,11 +479,82 @@ class CotationController extends Controller
      */
     private function fuelGridConfig(): array
     {
-        $setting = CotationSetting::query()->where('key', 'fuel_grid_config')->first();
-        $decoded = $setting?->note ? json_decode($setting->note, true) : null;
+        if (! Schema::hasTable('cotation_settings')) {
+            return $this->normalizeFuelGrid([]);
+        }
+
+        $note = CotationSetting::query()->where('key', 'fuel_grid_config')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
         $config = is_array($decoded) ? $decoded : [];
 
         return $this->normalizeFuelGrid($config);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function cerealOrderConfig(): array
+    {
+        if (! Schema::hasTable('cotation_settings')) {
+            return [];
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_display_order')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+
+        return $this->normalizeCerealOrder(is_array($decoded) ? $decoded : []);
+    }
+
+    /**
+     * @param  array<int, mixed>  $order
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, string>
+     */
+    private function normalizeCerealOrder(array $order, array $groups = []): array
+    {
+        $knownCodes = collect($groups)
+            ->pluck('code')
+            ->filter()
+            ->map(fn (mixed $code): string => (string) $code)
+            ->values()
+            ->all();
+        $knownLookup = array_fill_keys($knownCodes, true);
+        $normalized = collect($order)
+            ->map(fn (mixed $code): string => trim((string) $code))
+            ->filter(fn (string $code): bool => $code !== '' && ($knownCodes === [] || isset($knownLookup[$code])))
+            ->unique()
+            ->values()
+            ->all();
+
+        foreach ($knownCodes as $code) {
+            if (! in_array($code, $normalized, true)) {
+                $normalized[] = $code;
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<int, string>  $order
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyCerealOrder(array $groups, array $order): array
+    {
+        $normalizedOrder = $this->normalizeCerealOrder($order, $groups);
+        if ($normalizedOrder === []) {
+            return $groups;
+        }
+
+        $orderIndex = array_flip($normalizedOrder);
+        usort($groups, static function (array $left, array $right) use ($orderIndex): int {
+            return (($orderIndex[$left['code'] ?? ''] ?? 9999) <=> ($orderIndex[$right['code'] ?? ''] ?? 9999))
+                ?: (($left['sort'] ?? 999) <=> ($right['sort'] ?? 999))
+                ?: strcmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+        });
+
+        return array_values($groups);
     }
 
     /**
@@ -327,6 +580,37 @@ class CotationController extends Controller
         ])->save();
 
         $after = $this->transportGridConfig();
+
+        return $before !== $after ? [
+            'before' => $before,
+            'after' => $after,
+        ] : null;
+    }
+
+    /**
+     * @param  array<int, string>|null  $order
+     * @return array<string, mixed>|null
+     */
+    private function updateCerealOrder(?array $order, Request $request): ?array
+    {
+        if ($order === null || ! Schema::hasTable('cotation_settings')) {
+            return null;
+        }
+
+        $before = $this->cerealOrderConfig();
+        $normalized = $this->normalizeCerealOrder($order);
+        $setting = CotationSetting::query()->firstOrNew(['key' => 'cereal_display_order']);
+        $setting->forceFill([
+            'section' => 'display',
+            'label' => 'Ordre des céréales',
+            'unit' => null,
+            'value' => null,
+            'note' => json_encode($normalized, JSON_UNESCAPED_UNICODE),
+            'sort_order' => 30,
+            'updated_by' => $request->user()?->id,
+        ])->save();
+
+        $after = $this->cerealOrderConfig();
 
         return $before !== $after ? [
             'before' => $before,
@@ -365,11 +649,67 @@ class CotationController extends Controller
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function fuelGridValidationRules(bool $required = false): array
+    {
+        return [
+            'fuel_grid' => [$required ? 'required' : 'nullable', 'array'],
+            'fuel_grid.vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'fuel_grid.sections' => ['nullable', 'array', 'max:10'],
+            'fuel_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
+            'fuel_grid.sections.*.label' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
+            'fuel_grid.sections.*.rows.*.id' => ['nullable', 'string', 'max:80'],
+            'fuel_grid.sections.*.rows.*.tranche' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.rows.*.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'fuel_grid.sections.*.rows.*.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
+            'fuel_grid.sections.*.rows.*.text' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gnr_tax' => ['nullable', 'array'],
+            'fuel_grid.gnr_tax.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'fuel_grid.gnr_tax.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'fuel_grid.gazole' => ['nullable', 'array'],
+            'fuel_grid.gazole.id' => ['nullable', 'string', 'max:80'],
+            'fuel_grid.gazole.label' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gazole.tranche' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gazole.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'fuel_grid.gazole.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'fuel_grid.gazole.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
+            'fuel_grid.gazole.text' => ['nullable', 'string', 'max:120'],
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $config
      * @return array<string, mixed>
      */
     private function normalizeTransportGrid(array $config): array
     {
+        $rawSections = collect($config['sections'] ?? [])
+            ->filter(fn ($section): bool => is_array($section))
+            ->take(20)
+            ->values()
+            ->all();
+        $sections = collect($rawSections !== [] ? $rawSections : [$config])
+            ->map(fn (array $section, int $index): array => $this->normalizeTransportSection($section, $index))
+            ->values()
+            ->all();
+        $firstSection = $sections[0] ?? $this->normalizeTransportSection([], 0);
+
+        return [
+            ...$firstSection,
+            'sections' => $sections,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function normalizeTransportSection(array $config, int $sectionIndex): array
+    {
+        $title = trim((string) ($config['title'] ?? ''));
+        $firstColumnLabel = trim((string) ($config['first_column_label'] ?? ''));
         $columns = collect($config['columns'] ?? [])
             ->filter(fn ($row): bool => is_array($row))
             ->take(12)
@@ -409,6 +749,9 @@ class CotationController extends Controller
             ->all();
 
         return [
+            'id' => trim((string) ($config['id'] ?? '')) ?: 'transport_'.($sectionIndex + 1),
+            'title' => $title !== '' ? $title : 'PRIX DES TRANSPORTS',
+            'first_column_label' => $firstColumnLabel !== '' ? $firstColumnLabel : 'TRANSPORT',
             'reference_key' => trim((string) ($config['reference_key'] ?? '')),
             'columns' => $columns,
             'rows' => $rows,
@@ -471,6 +814,7 @@ class CotationController extends Controller
             ],
             'gazole' => [
                 'id' => trim((string) ($gazole['id'] ?? '')) ?: 'gazole',
+                'label' => trim((string) ($gazole['label'] ?? '')) ?: 'GAZOLE',
                 'tranche' => trim((string) ($gazole['tranche'] ?? '')) ?: 'GAZOLE',
                 'ttc' => $this->nullableDecimal($gazole['ttc'] ?? $gazole['ht'] ?? null),
                 'gap' => $this->nullableDecimal($gazole['gap'] ?? null) ?? 0.0,
@@ -594,6 +938,10 @@ class CotationController extends Controller
      */
     private function updateCustomCereals(array $rows, Request $request): array
     {
+        if (! Schema::hasTable('cotation_custom_cereals')) {
+            return [];
+        }
+
         if ($rows === []) {
             return [];
         }
@@ -646,7 +994,12 @@ class CotationController extends Controller
      */
     private function customCerealsPayload(): array
     {
+        if (! Schema::hasTable('cotation_custom_cereals')) {
+            return [];
+        }
+
         return CotationCustomCereal::query()
+            ->select(['id', 'code', 'name', 'base_product_code', 'sort_order'])
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get()
