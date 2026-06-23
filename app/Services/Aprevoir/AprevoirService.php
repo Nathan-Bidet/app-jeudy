@@ -344,6 +344,12 @@ class AprevoirService
         $leftAssignee = is_array($left['assignee'] ?? null) ? $left['assignee'] : [];
         $rightAssignee = is_array($right['assignee'] ?? null) ? $right['assignee'] : [];
 
+        $leftTypePriority = $this->assigneeTypePriority($leftAssignee);
+        $rightTypePriority = $this->assigneeTypePriority($rightAssignee);
+        if ($leftTypePriority !== $rightTypePriority) {
+            return $leftTypePriority <=> $rightTypePriority;
+        }
+
         $leftBucket = $this->assigneeBucket($leftAssignee);
         $rightBucket = $this->assigneeBucket($rightAssignee);
         if ($leftBucket !== $rightBucket) {
@@ -366,6 +372,24 @@ class AprevoirService
         }
 
         return ((int) ($leftAssignee['id'] ?? 0)) <=> ((int) ($rightAssignee['id'] ?? 0));
+    }
+
+    /**
+     * Priorité de tri par type d'assignataire, appliquée entre la date et le
+     * bucket existant : Transporteurs, puis Personnels Jeudy, puis Dépôts,
+     * puis tous les autres cas (chauffeur libre, sans assignataire...) qui
+     * conservent ensuite leur ordre relatif actuel via assigneeBucket().
+     *
+     * @param  array<string,mixed>  $assignee
+     */
+    private function assigneeTypePriority(array $assignee): int
+    {
+        return match ((string) ($assignee['type'] ?? '')) {
+            'transporter' => 0,
+            'user' => 1,
+            'depot' => 2,
+            default => 3,
+        };
     }
 
     /**

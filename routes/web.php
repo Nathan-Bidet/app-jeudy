@@ -180,6 +180,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/cotations/market-data', [CotationController::class, 'marketData'])
         ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
         ->name('cotations.market-data');
+    Route::get('/cotations/export-pdf', [CotationController::class, 'exportPdf'])
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->name('cotations.export-pdf');
     Route::put('/cotations/settings', [CotationController::class, 'updateSettings'])
         ->middleware('sector.access:cotations.cereals.edit')
         ->middleware('throttle:admin-sensitive')

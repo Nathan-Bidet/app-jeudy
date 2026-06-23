@@ -1,7 +1,28 @@
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, useForm } from '@inertiajs/react';
-import { ChevronRight, Fuel, GripVertical, Pencil, RefreshCw, Save, Settings2, Trash2, Truck, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import {
+    AlignCenter,
+    AlignJustify,
+    AlignLeft,
+    AlignRight,
+    Bold,
+    ChevronRight,
+    FileDown,
+    Fuel,
+    GripVertical,
+    Info,
+    Italic,
+    Pencil,
+    RefreshCw,
+    Save,
+    Settings2,
+    Strikethrough,
+    Trash2,
+    Truck,
+    Underline,
+    X,
+} from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const BASE_CEREALS = [
     { code: 'ECO', name: 'Colza' },
@@ -20,8 +41,8 @@ const COTATION_HARVEST_TITLE_CLASS = 'border-b border-[var(--app-border)] bg-[#F
 const TRANSPORT_HEADER_LABEL_CLASS = 'text-sm font-black leading-5';
 const TRANSPORT_HEADER_INPUT_CLASS = 'text-sm font-black leading-5';
 
-function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3' }) {
-    const [isOpen, setIsOpen] = useState(false);
+function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3', defaultOpen = false }) {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
 
     return (
         <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
@@ -83,6 +104,178 @@ function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, a
                     {children}
                 </div>
             ) : null}
+        </section>
+    );
+}
+
+const RICH_TEXT_FONT_SIZES = [
+    { label: 'Petit', px: 12 },
+    { label: 'Normal', px: 14 },
+    { label: 'Moyen', px: 18 },
+    { label: 'Grand', px: 24 },
+    { label: 'Très grand', px: 32 },
+];
+
+function ToolbarButton({ icon: Icon, label, onClick }) {
+    return (
+        <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onClick}
+            aria-label={label}
+            title={label}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-soft)]"
+        >
+            <Icon className="h-4 w-4" strokeWidth={2.3} />
+        </button>
+    );
+}
+
+function RichTextEditor({ value, onChange }) {
+    const editorRef = useRef(null);
+    const selectionRangeRef = useRef(null);
+    const initializedRef = useRef(false);
+
+    useEffect(() => {
+        if (!initializedRef.current && editorRef.current) {
+            editorRef.current.innerHTML = value || '';
+            initializedRef.current = true;
+        }
+    }, [value]);
+
+    const saveSelection = () => {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) {
+            selectionRangeRef.current = selection.getRangeAt(0).cloneRange();
+        }
+    };
+
+    const restoreSelection = () => {
+        editorRef.current?.focus();
+        const selection = window.getSelection();
+        if (!selection || !selectionRangeRef.current) return;
+        selection.removeAllRanges();
+        selection.addRange(selectionRangeRef.current);
+    };
+
+    const emitChange = () => {
+        onChange(editorRef.current?.innerHTML || '');
+    };
+
+    const runCommand = (command, arg = null) => {
+        restoreSelection();
+        document.execCommand(command, false, arg);
+        saveSelection();
+        emitChange();
+    };
+
+    const applyFontSize = (px) => {
+        restoreSelection();
+        document.execCommand('fontSize', false, '7');
+        editorRef.current?.querySelectorAll('font[size="7"]').forEach((node) => {
+            const span = document.createElement('span');
+            span.style.fontSize = `${px}px`;
+            span.innerHTML = node.innerHTML;
+            node.replaceWith(span);
+        });
+        saveSelection();
+        emitChange();
+    };
+
+    const applyColor = (command, color) => {
+        restoreSelection();
+        document.execCommand('styleWithCSS', false, true);
+        const applied = document.execCommand(command, false, color);
+        if (!applied && command === 'hiliteColor') {
+            document.execCommand('backColor', false, color);
+        }
+        saveSelection();
+        emitChange();
+    };
+
+    return (
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)]">
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--app-border)] p-2">
+                <ToolbarButton icon={Bold} label="Gras" onClick={() => runCommand('bold')} />
+                <ToolbarButton icon={Italic} label="Italique" onClick={() => runCommand('italic')} />
+                <ToolbarButton icon={Underline} label="Souligné" onClick={() => runCommand('underline')} />
+                <ToolbarButton icon={Strikethrough} label="Barré" onClick={() => runCommand('strikeThrough')} />
+                <span className="mx-1 h-6 w-px bg-[var(--app-border)]" />
+                <ToolbarButton icon={AlignLeft} label="Aligner à gauche" onClick={() => runCommand('justifyLeft')} />
+                <ToolbarButton icon={AlignCenter} label="Centrer" onClick={() => runCommand('justifyCenter')} />
+                <ToolbarButton icon={AlignRight} label="Aligner à droite" onClick={() => runCommand('justifyRight')} />
+                <ToolbarButton icon={AlignJustify} label="Justifier" onClick={() => runCommand('justifyFull')} />
+                <span className="mx-1 h-6 w-px bg-[var(--app-border)]" />
+                <select
+                    onMouseDown={saveSelection}
+                    onChange={(event) => applyFontSize(Number(event.target.value))}
+                    defaultValue=""
+                    aria-label="Taille du texte"
+                    className="h-9 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-sm font-semibold"
+                >
+                    <option value="" disabled>Taille</option>
+                    {RICH_TEXT_FONT_SIZES.map((size) => (
+                        <option key={size.px} value={size.px}>{size.label}</option>
+                    ))}
+                </select>
+                <label className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-xs font-semibold" title="Couleur du texte">
+                    Texte
+                    <input
+                        type="color"
+                        onMouseDown={saveSelection}
+                        onChange={(event) => applyColor('foreColor', event.target.value)}
+                        className="h-6 w-6 cursor-pointer border-0 bg-transparent p-0"
+                        aria-label="Couleur du texte"
+                    />
+                </label>
+                <label className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-xs font-semibold" title="Couleur de surlignage">
+                    Surlignage
+                    <input
+                        type="color"
+                        onMouseDown={saveSelection}
+                        onChange={(event) => applyColor('hiliteColor', event.target.value)}
+                        className="h-6 w-6 cursor-pointer border-0 bg-transparent p-0"
+                        aria-label="Couleur de surlignage"
+                    />
+                </label>
+            </div>
+            <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={emitChange}
+                onMouseUp={saveSelection}
+                onKeyUp={saveSelection}
+                className="min-h-[120px] w-full max-w-full min-w-0 p-3 text-sm leading-relaxed outline-none [overflow-wrap:anywhere]"
+            />
+        </div>
+    );
+}
+
+function CerealInfoSection({ canView, isEditing, html, onChange }) {
+    if (!canView) return null;
+
+    if (isEditing) {
+        return (
+            <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
+                <div className="mb-3 flex items-center gap-2">
+                    <Info className="h-5 w-5 text-[var(--brand-brown)]" strokeWidth={2.3} />
+                    <h2 className="text-lg font-black uppercase tracking-[0.04em]">Information</h2>
+                </div>
+                <RichTextEditor value={html} onChange={onChange} />
+            </section>
+        );
+    }
+
+    const isEmpty = !(html || '').replace(/<[^>]*>/g, '').trim();
+    if (isEmpty) return null;
+
+    return (
+        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
+            <div
+                className="text-sm leading-relaxed [overflow-wrap:anywhere]"
+                dangerouslySetInnerHTML={{ __html: html }}
+            />
         </section>
     );
 }
@@ -512,7 +705,7 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
     );
 }
 
-function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, dragHandle = null }) {
+function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, dragHandle = null, defaultOpen = false }) {
     const leftHarvest = group?.harvests?.left || {};
     const rightHarvest = group?.harvests?.right || {};
     const leftOptions = optionGroup?.harvests?.left?.rows || [];
@@ -547,7 +740,7 @@ function CerealCard({ group, canManage, form, setManualPrice, addManualRow, dele
     ) : null;
 
     return (
-        <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3">
+        <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3" defaultOpen={defaultOpen}>
             <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
                 <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} />
                 <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} />
@@ -1473,6 +1666,7 @@ export default function CotationsIndex({
     const [isEditing, setIsEditing] = useState(false);
     const [isFuelEditing, setIsFuelEditing] = useState(false);
     const [draggedCerealCode, setDraggedCerealCode] = useState(null);
+    const [lastAddedCerealCode, setLastAddedCerealCode] = useState(null);
     const canViewCereals = Boolean(permissions?.can_view_cereals);
     const canViewFuel = Boolean(permissions?.can_view_fuel);
     const canManage = Boolean(permissions?.can_manage);
@@ -1482,6 +1676,7 @@ export default function CotationsIndex({
         manual_prices: flattenMarketRows(initialMarketData?.groups || []),
         custom_cereals: flattenCustomCereals(initialMarketData?.custom_cereals || []),
         cereal_order: normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []),
+        cereal_info_html: initialMarketData?.cereal_info_html || '',
         transport_grid: normalizeTransportGrid(transportGrid),
         fuel_grid: normalizeFuelGrid(fuelGrid),
         deleted_manual_price_ids: [],
@@ -1497,6 +1692,7 @@ export default function CotationsIndex({
             form.setData('manual_prices', flattenMarketRows(initialMarketData?.groups || []));
             form.setData('custom_cereals', flattenCustomCereals(initialMarketData?.custom_cereals || []));
             form.setData('cereal_order', normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []));
+            form.setData('cereal_info_html', initialMarketData?.cereal_info_html || '');
         }
     }, [initialMarketData]);
 
@@ -1506,6 +1702,19 @@ export default function CotationsIndex({
             form.setData('fuel_grid', normalizeFuelGrid(fuelGrid));
         }
     }, [transportGrid, fuelGrid]);
+
+    useEffect(() => {
+        if (!lastAddedCerealCode) return undefined;
+
+        const timeout = window.setTimeout(() => {
+            document.querySelector(`[data-cereal-code="${lastAddedCerealCode}"]`)?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+        }, 50);
+
+        return () => window.clearTimeout(timeout);
+    }, [lastAddedCerealCode]);
 
     const fetchMarketData = async ({ initial = false } = {}) => {
         if (!canViewCereals || !routes.market_data) return;
@@ -1616,6 +1825,10 @@ export default function CotationsIndex({
         ]);
     };
 
+    const setCerealInfoHtml = (html) => {
+        form.setData('cereal_info_html', html);
+    };
+
     const setCustomCereal = (cereal, field, value) => {
         const key = cereal.form_key || cereal.code || cereal.id;
         form.setData('custom_cereals', (form.data.custom_cereals || []).map((item) => (
@@ -1633,13 +1846,14 @@ export default function CotationsIndex({
                 {
                     form_key: `custom-${now}`,
                     code,
-                    name: '',
+                    name: 'Nouvelle céréale',
                     base_product_code: 'EBM',
                     sort_order: 100 + (form.data.custom_cereals || []).length,
                 },
             ],
             cereal_order: [...(form.data.cereal_order || []), code],
         });
+        setLastAddedCerealCode(code);
     };
 
     const deleteManualRow = (row) => {
@@ -1671,6 +1885,7 @@ export default function CotationsIndex({
             manual_prices: flattenMarketRows(data?.groups || []),
             custom_cereals: flattenCustomCereals(data?.custom_cereals || []),
             cereal_order: normalizeCerealOrder(data?.cereal_order || [], data?.groups || []),
+            cereal_info_html: data?.cereal_info_html || '',
             transport_grid: normalizeTransportGrid(transportGrid),
             fuel_grid: normalizeFuelGrid(fuelGrid),
             deleted_manual_price_ids: [],
@@ -1681,10 +1896,12 @@ export default function CotationsIndex({
         resetDrafts();
         setIsFuelEditing(false);
         setIsEditing(true);
+        setLastAddedCerealCode(null);
     };
 
     const cancelEditing = () => {
         resetDrafts();
+        setLastAddedCerealCode(null);
         setIsEditing(false);
     };
 
@@ -1753,7 +1970,7 @@ export default function CotationsIndex({
             });
             const existingCodes = new Set(mergedGroups.map((group) => group.code));
             const customGroups = (form.data.custom_cereals || [])
-                .filter((cereal) => cereal.name && !existingCodes.has(cereal.code))
+                .filter((cereal) => !existingCodes.has(cereal.code))
                 .map((cereal) => ({
                     code: cereal.code,
                     name: cereal.name,
@@ -1845,6 +2062,17 @@ export default function CotationsIndex({
                         Actualiser
                     </button>
                 ) : null}
+                {canManage && routes.export_pdf ? (
+                    <a
+                        href={routes.export_pdf}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
+                    >
+                        <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
+                        Export PDF
+                    </a>
+                ) : null}
                 {canManage && !isEditing && !isFuelEditing ? (
                     <button
                         type="button"
@@ -1878,6 +2106,13 @@ export default function CotationsIndex({
 
                 {canViewCereals ? (
                     <>
+                        <CerealInfoSection
+                            canView={canViewCereals}
+                            isEditing={isEditing}
+                            html={form.data.cereal_info_html}
+                            onChange={setCerealInfoHtml}
+                        />
+
                         <HarvestSettings
                             rows={manualSettings.display || []}
                             canManage={isEditing}
@@ -1921,6 +2156,7 @@ export default function CotationsIndex({
                                             optionGroup={optionGroupsByCode[group.code]}
                                             customCereal={(form.data.custom_cereals || []).find((cereal) => cereal.code === group.code) || null}
                                             setCustomCereal={setCustomCereal}
+                                            defaultOpen={Boolean(group.code) && group.code === lastAddedCerealCode}
                                             dragHandle={isEditing ? (
                                                 <button
                                                     type="button"

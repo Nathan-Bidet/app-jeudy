@@ -8,6 +8,10 @@ use App\Models\CotationSetting;
 use App\Services\AuditLogService;
 use App\Services\Cotations\CotationMarketService;
 use App\Support\Access\AccessManager;
+use App\Support\Cotations\CerealInfoSanitizer;
+use App\Support\Cotations\CotationFuelCalculator;
+use App\Support\Cotations\CotationPdfFormatter;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -55,6 +59,7 @@ class CotationController extends Controller
                 'manualRows' => [],
                 'customCereals' => [],
                 'custom_cereals' => [],
+                'cereal_info_html' => $this->cerealInfoConfig(),
             ];
 
             $fuelGrid = $this->fuelGridConfig();
@@ -91,6 +96,7 @@ class CotationController extends Controller
                     'market_data' => route('cotations.market-data'),
                     'settings_update' => route('cotations.settings.update'),
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
+                    'export_pdf' => route('cotations.export-pdf'),
                     'admin' => route('admin.cotations.index'),
                 ],
             ]);
@@ -175,6 +181,7 @@ class CotationController extends Controller
             'custom_cereals.*.sort_order' => ['nullable', 'integer', 'min:100', 'max:9999'],
             'cereal_order' => ['nullable', 'array', 'max:100'],
             'cereal_order.*' => ['string', 'max:16'],
+            'cereal_info_html' => ['nullable', 'string', 'max:20000'],
             'transport_grid' => ['nullable', 'array'],
             'transport_grid.title' => ['nullable', 'string', 'max:120'],
             'transport_grid.first_column_label' => ['nullable', 'string', 'max:80'],
@@ -251,6 +258,7 @@ class CotationController extends Controller
         $deletedIds = array_values(array_unique(array_map('intval', $validated['deleted_manual_price_ids'] ?? [])));
         $customCerealChanges = $this->updateCustomCereals($validated['custom_cereals'] ?? [], $request);
         $cerealOrderChange = $this->updateCerealOrder($validated['cereal_order'] ?? null, $request);
+        $cerealInfoChange = $this->updateCerealInfo($validated['cereal_info_html'] ?? null, $request);
         $transportGridChange = $this->updateTransportGrid($validated['transport_grid'] ?? null, $request, $transportGridBefore);
         $fuelGridChange = null;
         $manualRows = collect($validated['manual_prices'] ?? [])
@@ -259,7 +267,7 @@ class CotationController extends Controller
             ->all();
         $manualDeletes = $this->deleteManualPrices($deletedIds);
         $manualChanges = $this->updateManualPrices($manualRows, $request);
-        $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
+        $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $cerealInfoChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
 
         $this->auditLogService->log([
             'action' => $hasManualChanges ? 'update_cotation_settings_and_manual_prices' : 'update_cotation_settings',
@@ -274,6 +282,7 @@ class CotationController extends Controller
                 'deleted_manual_prices' => $manualDeletes,
                 'custom_cereals' => $customCerealChanges,
                 'cereal_order' => $cerealOrderChange,
+                'cereal_info' => $cerealInfoChange,
                 'transport_grid' => $transportGridChange,
                 'fuel_grid' => $fuelGridChange,
             ],
@@ -298,6 +307,142 @@ class CotationController extends Controller
         ]);
 
         return back()->with('status', 'Cotations fuel settings updated.');
+    }
+
+    public function exportPdf(Request $request)
+    {
+        $access = app(AccessManager::class);
+        $user = $request->user();
+        abort_unless($user && $access->can($user, 'cotations.cereals.edit'), 403);
+
+        try {
+            $displaySettings = $this->displaySettings();
+            $leftYear = (int) ($displaySettings['harvest_left_year'] ?? now()->year);
+            $rightYear = (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1);
+
+            $cerealOrder = $this->cerealOrderConfig();
+            $groups = $this->applyCerealOrder(
+                $this->marketService->latestGroups($leftYear, $rightYear, false, false),
+                $cerealOrder,
+            );
+            $groups = array_values(array_filter($groups, static function (array $group): bool {
+                return count($group['harvests']['left']['rows'] ?? []) > 0
+                    || count($group['harvests']['right']['rows'] ?? []) > 0;
+            }));
+
+            $finalPriceByKey = [];
+            foreach ($groups as $group) {
+                foreach (['left', 'right'] as $bucket) {
+                    foreach ($group['harvests'][$bucket]['rows'] ?? [] as $row) {
+                        $finalPriceByKey[CotationPdfFormatter::referenceKey($row)] = $row['final_price'] ?? null;
+                    }
+                }
+            }
+
+            $viewData = [
+                'cerealHarvestTables' => $this->buildCerealHarvestTables($groups, ['left' => $leftYear, 'right' => $rightYear]),
+                'transportGrid' => $this->transportGridConfig(),
+                'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
+                'finalPriceByKey' => $finalPriceByKey,
+                'generatedAt' => now(),
+            ];
+
+            // Page 1 = céréales + transport (le transport garde sa mise en
+            // forme normale, jamais resserrée), page 2 = carburant : 2 pages
+            // au total dans le cas standard. On ne resserre que la grille
+            // céréales (densité 0 -> 2) pour qu'elle tienne sur une seule
+            // page ; si malgré tout le contenu déborde (beaucoup de
+            // céréales/transport), on garde simplement le rendu le plus
+            // compact obtenu et le surplus se reporte naturellement sur une
+            // page supplémentaire.
+            $pdf = null;
+            $bestPageCount = null;
+            foreach ([0, 1, 2] as $density) {
+                $candidate = Pdf::loadView('cotations.pdf', [...$viewData, 'cerealDensity' => $density])
+                    ->setPaper('a4', 'landscape');
+                $candidate->render();
+                $pageCount = $candidate->getDomPDF()->getCanvas()->get_page_count();
+
+                if ($bestPageCount === null || $pageCount < $bestPageCount) {
+                    $pdf = $candidate;
+                    $bestPageCount = $pageCount;
+                }
+
+                if ($pageCount <= 2) {
+                    break;
+                }
+            }
+
+            return $pdf->download('cotations-'.now()->format('Y-m-d-His').'.pdf');
+        } catch (Throwable $exception) {
+            Log::error('cotations.export-pdf failed', [
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace' => $exception->getTraceAsString(),
+                'user_id' => $user?->id,
+            ]);
+
+            return response('Erreur export PDF : '.$exception->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Pré-calcule, pour la page céréales du PDF, un tableau croisé par récolte
+     * où chaque échéance devient une colonne (regroupées par céréale), avec
+     * uniquement 3 lignes de données (Matif/Base/Prix final). La vue Blade
+     * n'a plus qu'à boucler sur des données déjà aplaties, sans
+     * déréférencement d'array ni ternaire complexe dans le template.
+     *
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<string, int>  $harvestYears
+     * @return array<string, array<string, mixed>>
+     */
+    private function buildCerealHarvestTables(array $groups, array $harvestYears): array
+    {
+        $tables = [];
+        $stubWidth = 6;
+
+        foreach (['left', 'right'] as $bucket) {
+            $cerealGroups = [];
+
+            foreach ($groups as $group) {
+                $sourceRows = $group['harvests'][$bucket]['rows'] ?? [];
+                if ($sourceRows === []) {
+                    continue;
+                }
+
+                $columns = [];
+                foreach ($sourceRows as $row) {
+                    $columns[] = [
+                        'label' => (string) ($row['label'] ?: 'Échéance'),
+                        'matif' => CotationPdfFormatter::price($row['matif'] ?? null),
+                        'margin' => CotationPdfFormatter::margin($row['margin'] ?? null),
+                        'final_price' => CotationPdfFormatter::price($row['final_price'] ?? null),
+                    ];
+                }
+
+                $cerealGroups[] = [
+                    'name' => (string) ($group['name'] ?? 'Céréale'),
+                    'columns' => $columns,
+                ];
+            }
+
+            $totalColumns = 0;
+            foreach ($cerealGroups as $cerealGroup) {
+                $totalColumns += count($cerealGroup['columns']);
+            }
+
+            $tables[$bucket] = [
+                'year' => $harvestYears[$bucket] ?? '',
+                'cereal_groups' => $cerealGroups,
+                'stub_width' => $stubWidth,
+                'column_width' => $totalColumns > 0 ? (100 - $stubWidth) / $totalColumns : 0,
+                'has_data' => $totalColumns > 0,
+            ];
+        }
+
+        return $tables;
     }
 
     /**
@@ -339,6 +484,7 @@ class CotationController extends Controller
                 (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
             ),
             'custom_cereals' => $this->customCerealsPayload(),
+            'cereal_info_html' => $this->cerealInfoConfig(),
         ];
     }
 
@@ -372,6 +518,7 @@ class CotationController extends Controller
             'cereal_order' => [],
             'options' => [],
             'custom_cereals' => [],
+            'cereal_info_html' => '',
         ];
     }
 
@@ -392,6 +539,7 @@ class CotationController extends Controller
             'customCereals' => [],
             'custom_cereals' => [],
             'cereal_order' => [],
+            'cereal_info_html' => '',
             'lastRefresh' => null,
             'last_refresh' => null,
             'fetched_at' => null,
@@ -611,6 +759,45 @@ class CotationController extends Controller
         ])->save();
 
         $after = $this->cerealOrderConfig();
+
+        return $before !== $after ? [
+            'before' => $before,
+            'after' => $after,
+        ] : null;
+    }
+
+    private function cerealInfoConfig(): string
+    {
+        if (! Schema::hasTable('cotation_settings')) {
+            return '';
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_info_html')->value('note');
+
+        return CerealInfoSanitizer::sanitize($note);
+    }
+
+    private function updateCerealInfo(?string $html, Request $request): ?array
+    {
+        if ($html === null || ! Schema::hasTable('cotation_settings')) {
+            return null;
+        }
+
+        $before = $this->cerealInfoConfig();
+        $sanitized = CerealInfoSanitizer::sanitize($html);
+
+        $setting = CotationSetting::query()->firstOrNew(['key' => 'cereal_info_html']);
+        $setting->forceFill([
+            'section' => 'cereal_info',
+            'label' => 'Information cotations céréales',
+            'value' => null,
+            'unit' => null,
+            'note' => $sanitized !== '' ? $sanitized : null,
+            'sort_order' => 5,
+            'updated_by' => $request->user()?->id,
+        ])->save();
+
+        $after = $this->cerealInfoConfig();
 
         return $before !== $after ? [
             'before' => $before,
