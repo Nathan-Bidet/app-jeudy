@@ -70,6 +70,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::patch('/a-prevoir/tasks/{task}/position', [AprevoirController::class, 'updatePosition'])
         ->middleware('sector.access:a_prevoir.update')
         ->name('a_prevoir.tasks.position');
+    Route::patch('/a-prevoir/groups/position', [AprevoirController::class, 'updateGroupOrder'])
+        ->middleware('sector.access:a_prevoir.update')
+        ->name('a_prevoir.groups.position');
     Route::get('/a-prevoir/tasks-data', [AprevoirController::class, 'tasksData'])
         ->middleware('sector.access:a_prevoir.view')
         ->name('a_prevoir.tasks.data');
@@ -92,6 +95,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::patch('/engrais/tasks/{task}/position', [EngraisController::class, 'updatePosition'])
         ->middleware('sector.access:engrais.update')
         ->name('engrais.tasks.position');
+    Route::patch('/engrais/groups/position', [EngraisController::class, 'updateGroupOrder'])
+        ->middleware('sector.access:engrais.update')
+        ->name('engrais.groups.position');
     Route::get('/engrais/tasks-data', [EngraisController::class, 'tasksData'])
         ->middleware('sector.access:engrais.view')
         ->name('engrais.tasks.data');
