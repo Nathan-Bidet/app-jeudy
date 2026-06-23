@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\SectorController;
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Admin\AprevoirImportController;
+use App\Http\Controllers\Admin\CotationAccessController;
 use App\Http\Controllers\Admin\EntitiesController;
 use App\Http\Controllers\Admin\EntityFileController;
 use App\Http\Controllers\Admin\LeaveSettingsController;
@@ -46,6 +47,15 @@ Route::middleware(['auth', 'verified', 'twofactor'])->prefix('admin')->name('adm
     Route::get('/logs', [LogsController::class, 'index'])
         ->middleware('sector.access:admin.logs.view')
         ->name('logs.index');
+
+    Route::get('/cotations', [CotationAccessController::class, 'index'])
+        ->middleware('sector.access:cotations.admin')
+        ->name('cotations.index');
+
+    Route::put('/cotations', [CotationAccessController::class, 'update'])
+        ->middleware('sector.access:cotations.admin')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.update');
 
     Route::get('/aprevoir-import', [AprevoirImportController::class, 'index'])
         ->name('aprevoir-import.index');

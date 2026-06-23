@@ -16,6 +16,8 @@ const STATUS_MESSAGE_MAP = {
     'User account updated.': 'Compte enregistré.',
     'User access scope updated.': 'Rôle et secteur enregistrés.',
     'User exceptions updated.': 'Exceptions enregistrées.',
+    'Cotations settings updated.': 'Prix Cotations enregistrés.',
+    'Cotations permissions updated.': 'Droits Cotations enregistrés.',
     'verification-link-sent': 'Lien envoyé.',
     'Two-factor authentication is now active.': '2FA activé.',
     'Scan the new QR code to complete your TOTP reset.': 'Nouveau QR code généré.',

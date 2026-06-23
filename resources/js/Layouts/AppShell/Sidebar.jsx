@@ -24,6 +24,7 @@ export default function Sidebar({ mobileOpen, onClose }) {
     const canViewSectors = Boolean(auth?.permissions?.admin_sectors_view);
     const canViewEntities = Boolean(auth?.permissions?.admin_entities_view);
     const canViewLogs = Boolean(auth?.permissions?.admin_logs_view);
+    const canAdminCotations = Boolean(isAdmin || auth?.permissions?.cotations_admin);
 
     const items = [
         ...(canViewUsers
@@ -37,6 +38,9 @@ export default function Sidebar({ mobileOpen, onClose }) {
             : []),
         ...(canViewLogs
             ? [{ href: route('admin.logs.index'), label: 'Logs', active: route().current('admin.logs.*') }]
+            : []),
+        ...(canAdminCotations
+            ? [{ href: route('admin.cotations.index'), label: 'Cotations', active: route().current('admin.cotations.*') }]
             : []),
         ...(isAdmin
             ? [{ href: route('admin.leaves.index'), label: 'Congés', active: route().current('admin.leaves.*') }]

@@ -6,7 +6,7 @@ use App\Models\AccessException;
 use App\Models\SectorPermission;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
+use Throwable;
 
 class AccessManager
 {
@@ -22,7 +22,7 @@ class AccessManager
 
     public function can(User $user, string $ability, ?int $targetSectorId = null): bool
     {
-        if ($user->hasRole('admin')) {
+        if ($this->userHasRole($user, 'admin')) {
             return true;
         }
 
@@ -46,7 +46,7 @@ class AccessManager
             return false;
         }
 
-        $hasRolePermission = $user->can($ability);
+        $hasRolePermission = $this->userCan($user, $ability);
 
         if (! $this->sectorHasDefaults((int) $effectiveSectorId)) {
             // Fallback backward-compatible: if no sector defaults are configured,
@@ -119,28 +119,19 @@ class AccessManager
      */
     private function resolveOverrides(User $user, string $ability, int $sectorId): array
     {
-        $matched = AccessException::query()
+        $baseQuery = AccessException::query()
             ->where('user_id', $user->id)
             ->where('ability', $ability)
             ->where(function (Builder $query) use ($sectorId): void {
                 $query
                     ->whereNull('sector_id')
                     ->orWhere('sector_id', $sectorId);
-            })
-            ->get();
+            });
 
         return [
-            'allow' => $this->containsEffect($matched, 'allow'),
-            'deny' => $this->containsEffect($matched, 'deny'),
+            'allow' => (clone $baseQuery)->where('effect', 'allow')->exists(),
+            'deny' => (clone $baseQuery)->where('effect', 'deny')->exists(),
         ];
-    }
-
-    /**
-     * @param  Collection<int, AccessException>  $exceptions
-     */
-    private function containsEffect(Collection $exceptions, string $effect): bool
-    {
-        return $exceptions->contains(static fn (AccessException $exception): bool => $exception->effect === $effect);
     }
 
     private function sectorHasDefaults(int $sectorId): bool
@@ -170,5 +161,23 @@ class AccessManager
 
         $this->sectorAbilityCache[$sectorId] = array_fill_keys($abilities, true);
         $this->sectorHasDefaultsCache[$sectorId] = $abilities !== [];
+    }
+
+    private function userHasRole(User $user, string $role): bool
+    {
+        try {
+            return (bool) $user->hasRole($role);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function userCan(User $user, string $ability): bool
+    {
+        try {
+            return (bool) $user->can($ability);
+        } catch (Throwable) {
+            return false;
+        }
     }
 }

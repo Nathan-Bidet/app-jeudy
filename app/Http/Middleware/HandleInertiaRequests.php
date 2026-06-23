@@ -40,7 +40,13 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => [
                 'user' => $user ? [
-                    ...$user->toArray(),
+                    'id' => (int) $user->id,
+                    'name' => (string) $user->name,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => (string) $user->email,
+                    'email_verified_at' => $user->email_verified_at?->toIso8601String(),
+                    'sector_id' => $user->sector_id ? (int) $user->sector_id : null,
                     'photo_url' => $this->photoUrl($user->photo_path),
                 ] : null,
                 'is_admin' => (bool) $user?->hasRole('admin'),
@@ -64,6 +70,23 @@ class HandleInertiaRequests extends Middleware
                     'calendar_event_manage' => (bool) ($user && $accessManager->can($user, 'calendar.event.manage')),
                     'calendar_category_manage' => (bool) ($user && $accessManager->can($user, 'calendar.category.manage')),
                     'calendar_feed_manage' => (bool) ($user && $accessManager->can($user, 'calendar.feed.manage')),
+                    'cotations_view' => (bool) ($user && (
+                        $accessManager->can($user, 'cotations.cereals.view')
+                        || $accessManager->can($user, 'cotations.cereals.edit')
+                        || $accessManager->can($user, 'cotations.fuel.view')
+                        || $accessManager->can($user, 'cotations.fuel.edit')
+                    )),
+                    'cotations_cereals_view' => (bool) ($user && (
+                        $accessManager->can($user, 'cotations.cereals.view')
+                        || $accessManager->can($user, 'cotations.cereals.edit')
+                    )),
+                    'cotations_cereals_edit' => (bool) ($user && $accessManager->can($user, 'cotations.cereals.edit')),
+                    'cotations_fuel_view' => (bool) ($user && (
+                        $accessManager->can($user, 'cotations.fuel.view')
+                        || $accessManager->can($user, 'cotations.fuel.edit')
+                    )),
+                    'cotations_fuel_edit' => (bool) ($user && $accessManager->can($user, 'cotations.fuel.edit')),
+                    'cotations_admin' => (bool) ($user && $accessManager->can($user, 'cotations.admin')),
                     'hours_view' => (bool) ($user && $accessManager->can($user, 'heures.view')),
                     'hours_create' => (bool) ($user && $accessManager->can($user, 'heures.create')),
                     'admin_users_view' => (bool) ($user && ($accessManager->can($user, 'admin.users.view') || $accessManager->can($user, 'admin.users.manage'))),

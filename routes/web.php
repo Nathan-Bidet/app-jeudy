@@ -7,6 +7,7 @@ use App\Http\Controllers\CalendarCategoryController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\CalendarEventController;
 use App\Http\Controllers\CalendarFeedController;
+use App\Http\Controllers\CotationController;
 use App\Http\Controllers\FormattingRuleController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\HourSheetController;
@@ -173,6 +174,23 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/calendar', [CalendarController::class, 'index'])
         ->middleware('sector.access:calendar.view')
         ->name('calendar.index');
+    Route::get('/cotations', [CotationController::class, 'index'])
+        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit|cotations.fuel.view|cotations.fuel.edit')
+        ->name('cotations.index');
+    Route::get('/cotations/market-data', [CotationController::class, 'marketData'])
+        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
+        ->name('cotations.market-data');
+    Route::get('/cotations/export-pdf', [CotationController::class, 'exportPdf'])
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->name('cotations.export-pdf');
+    Route::put('/cotations/settings', [CotationController::class, 'updateSettings'])
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.settings.update');
+    Route::put('/cotations/fuel-settings', [CotationController::class, 'updateFuelSettings'])
+        ->middleware('sector.access:cotations.fuel.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.fuel-settings.update');
     Route::get('/calendar/leaves/export', [CalendarController::class, 'exportLeavesCsv'])
         ->middleware('sector.access:calendar.view')
         ->middleware('throttle:calendar-export')
