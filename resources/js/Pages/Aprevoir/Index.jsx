@@ -169,13 +169,35 @@ function assigneeBucket(assignee = {}) {
     return 2;
 }
 
+function assigneeTypePriority(assignee = {}) {
+    const type = String(assignee?.type || '');
+    if (type === 'transporter') return 0;
+    if (type === 'user') return 1;
+    if (type === 'depot') return 2;
+    return 3;
+}
+
+// Miroir JS de AprevoirService::compareGroups() (PHP), utilisé uniquement
+// pour fusionner localement les groupes pointés/non pointés en vue "Tous".
+// Doit rester synchronisé avec le PHP : ordre manuel (drag-and-drop de
+// groupes) > type d'assignataire > bucket > display_order > nom > id.
 function compareGroupsForDisplay(left, right) {
     const leftDate = String(left?.date || '');
     const rightDate = String(right?.date || '');
     if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
 
+    const leftOrder = toNullableInt(left?.manual_order);
+    const rightOrder = toNullableInt(right?.manual_order);
+    if (leftOrder !== null && rightOrder !== null) return leftOrder - rightOrder;
+    if (leftOrder !== null) return -1;
+    if (rightOrder !== null) return 1;
+
     const leftAssignee = left?.assignee || {};
     const rightAssignee = right?.assignee || {};
+
+    const leftTypePriority = assigneeTypePriority(leftAssignee);
+    const rightTypePriority = assigneeTypePriority(rightAssignee);
+    if (leftTypePriority !== rightTypePriority) return leftTypePriority - rightTypePriority;
 
     const leftBucket = assigneeBucket(leftAssignee);
     const rightBucket = assigneeBucket(rightAssignee);
@@ -940,6 +962,7 @@ export default function AprevoirIndex({
         destroy: moduleConfig?.routes?.destroy || 'a_prevoir.tasks.destroy',
         point: moduleConfig?.routes?.point || 'a_prevoir.tasks.point',
         position: moduleConfig?.routes?.position || 'a_prevoir.tasks.position',
+        groupPosition: moduleConfig?.routes?.group_position || route('a_prevoir.groups.position'),
         data: moduleConfig?.routes?.data || 'a_prevoir.tasks.data',
     };
     const realtimeChannel = moduleConfig?.realtime_channel || null;
@@ -1838,6 +1861,34 @@ export default function AprevoirIndex({
         );
     };
 
+    const buildReorderedGroupsForDate = (dateGroups, draggedKey, targetKey, position = 'before') => {
+        const from = dateGroups.findIndex((g) => g.key === draggedKey);
+        const to = dateGroups.findIndex((g) => g.key === targetKey);
+        if (from === -1 || to === -1 || draggedKey === targetKey) return dateGroups;
+
+        const nextGroups = [...dateGroups];
+        const [moved] = nextGroups.splice(from, 1);
+        const targetIndex = nextGroups.findIndex((g) => g.key === targetKey);
+        if (targetIndex === -1) return dateGroups;
+        const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+        nextGroups.splice(insertIndex, 0, moved);
+        return nextGroups;
+    };
+
+    const reorderGroupsForDate = (allGroups, date, draggedKey, targetKey, position = 'before') => {
+        const dateGroups = allGroups.filter((g) => g.date === date);
+        const reordered = buildReorderedGroupsForDate(dateGroups, draggedKey, targetKey, position);
+        if (reordered === dateGroups) return allGroups;
+
+        let cursor = 0;
+        return allGroups.map((g) => {
+            if (g.date !== date) return g;
+            const next = reordered[cursor];
+            cursor += 1;
+            return next;
+        });
+    };
+
     const buildReorderedRows = (rows, draggedId, targetId, position = 'before') => {
         const from = rows.findIndex((row) => Number(row.id) === Number(draggedId));
         const to = rows.findIndex((row) => Number(row.id) === Number(targetId));
@@ -1869,11 +1920,24 @@ export default function AprevoirIndex({
     const onDragStartTask = (event, group, task) => {
         if (!permissions?.can_update) return;
         setDragState({
+            mode: 'task',
             groupKey: group.key,
             taskId: task.id,
             date: group.date,
             assigneeType: group.assignee?.type,
             assigneeId: group.assignee?.id,
+        });
+        setDropPreview(null);
+        event.dataTransfer.effectAllowed = 'move';
+    };
+
+    const onDragStartGroup = (event, group) => {
+        if (!permissions?.can_update) return;
+        event.stopPropagation();
+        setDragState({
+            mode: 'group',
+            groupKey: group.key,
+            date: group.date,
         });
         setDropPreview(null);
         event.dataTransfer.effectAllowed = 'move';
@@ -1886,6 +1950,36 @@ export default function AprevoirIndex({
 
     const onDragOverTask = (event, group, targetTask) => {
         if (!dragState) return;
+
+        if (dragState.mode === 'group') {
+            if (dragState.date !== group.date || dragState.groupKey === group.key) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+
+            const groupTasks = group.tasks || [];
+            const taskIndex = groupTasks.findIndex((t) => Number(t.id) === Number(targetTask.id));
+            if (taskIndex === -1 || groupTasks.length === 0) return;
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            const fraction = rect.height > 0 ? Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1) : 0;
+            const overallFraction = (taskIndex + fraction) / groupTasks.length;
+            const position = overallFraction < 0.5 ? 'before' : 'after';
+
+            setDropPreview((prev) => {
+                const next = { mode: 'group', date: group.date, targetGroupKey: group.key, position };
+                if (
+                    prev
+                    && prev.mode === 'group'
+                    && prev.targetGroupKey === next.targetGroupKey
+                    && prev.position === next.position
+                ) {
+                    return prev;
+                }
+                return next;
+            });
+            return;
+        }
+
         if (dragState.groupKey !== group.key) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = 'move';
@@ -1896,6 +1990,7 @@ export default function AprevoirIndex({
 
         setDropPreview((prev) => {
             const next = {
+                mode: 'task',
                 groupKey: group.key,
                 targetTaskId: targetTask.id,
                 position,
@@ -1903,6 +1998,7 @@ export default function AprevoirIndex({
 
             if (
                 prev
+                && prev.mode !== 'group'
                 && prev.groupKey === next.groupKey
                 && prev.targetTaskId === next.targetTaskId
                 && prev.position === next.position
@@ -1917,6 +2013,48 @@ export default function AprevoirIndex({
     const onDropTask = (event, group, targetTask) => {
         event.preventDefault();
         if (!dragState) return;
+
+        if (dragState.mode === 'group') {
+            if (dragState.date !== group.date || dragState.groupKey === group.key) {
+                setDragState(null);
+                setDropPreview(null);
+                return;
+            }
+
+            let position = 'before';
+            if (dropPreview && dropPreview.mode === 'group' && dropPreview.targetGroupKey === group.key) {
+                position = dropPreview.position;
+            } else {
+                const groupTasks = group.tasks || [];
+                const taskIndex = groupTasks.findIndex((t) => Number(t.id) === Number(targetTask.id));
+                const rect = event.currentTarget?.getBoundingClientRect?.();
+                if (taskIndex !== -1 && groupTasks.length > 0 && rect && typeof event.clientY === 'number') {
+                    const fraction = rect.height > 0 ? Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1) : 0;
+                    const overallFraction = (taskIndex + fraction) / groupTasks.length;
+                    position = overallFraction < 0.5 ? 'before' : 'after';
+                }
+            }
+
+            const reorderedAll = reorderGroupsForDate(localGroups, dragState.date, dragState.groupKey, group.key, position);
+            if (reorderedAll !== localGroups) {
+                setLocalGroups(reorderedAll);
+
+                const orderedGroupKeys = reorderedAll
+                    .filter((g) => g.date === dragState.date)
+                    .map((g) => g.key);
+
+                router.patch(
+                    moduleRoutes.groupPosition,
+                    { date: dragState.date, ordered_group_keys: orderedGroupKeys },
+                    { preserveScroll: true, preserveState: true },
+                );
+            }
+
+            setDragState(null);
+            setDropPreview(null);
+            return;
+        }
+
         if (dragState.groupKey !== group.key) {
             setDragState(null);
             setDropPreview(null);
@@ -1933,6 +2071,7 @@ export default function AprevoirIndex({
             ? (event.clientY >= rect.top + (rect.height / 2) ? 'after' : 'before')
             : 'before';
         const dropPosition = dropPreview
+            && dropPreview.mode !== 'group'
             && dropPreview.groupKey === group.key
             && Number(dropPreview.targetTaskId) === Number(targetTask.id)
             ? dropPreview.position
@@ -2027,6 +2166,7 @@ export default function AprevoirIndex({
                     onDeleteTask={setDeleteTask}
                     onTogglePoint={togglePoint}
                     onDragStartTask={onDragStartTask}
+                    onDragStartGroup={onDragStartGroup}
                     onDragEndTask={onDragEndTask}
                     onDragOverTask={onDragOverTask}
                     onDropTask={onDropTask}

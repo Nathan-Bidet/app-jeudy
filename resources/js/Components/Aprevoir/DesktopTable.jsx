@@ -3,7 +3,7 @@ import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
 import { BoursagriIndicatorCell, DirectIndicatorCell, IndicatorsInline, PointedIndicatorCell } from '@/Components/Aprevoir/TaskStateIndicators';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
-import { BookOpen, Check, Circle, Copy, Filter, GripVertical, Pencil, Search, Trash2 } from 'lucide-react';
+import { BookOpen, Check, Circle, Copy, Filter, GripHorizontal, GripVertical, Pencil, Search, Trash2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 function compactBookButton(task) {
@@ -248,6 +248,7 @@ function TaskDataRow({
     highlighted = false,
     saving = false,
     dropPosition = null,
+    isFirstRowOfGroup = false,
     canUpdate,
     canDelete,
     canPoint,
@@ -256,6 +257,7 @@ function TaskDataRow({
     onDeleteTask,
     onTogglePoint,
     onDragStartTask,
+    onDragStartGroup,
     onDragEndTask,
     onDragOverTask,
     onDropTask,
@@ -419,17 +421,30 @@ function TaskDataRow({
                 </div>
             </td>
             <td className="px-2 py-3 text-center">
-                {canUpdate ? (
-                    <span
-                        draggable
-                        onDragStart={(event) => onDragStartTask?.(event, group, task)}
-                        onDragEnd={() => onDragEndTask?.()}
-                        title="Glisser-déposer"
-                        className="inline-flex h-7 w-7 cursor-grab items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)] active:cursor-grabbing"
-                    >
-                        <GripVertical className="h-4 w-4" strokeWidth={2} />
-                    </span>
-                ) : null}
+                <div className="flex flex-col items-center gap-1">
+                    {canUpdate && isFirstRowOfGroup ? (
+                        <span
+                            draggable
+                            onDragStart={(event) => onDragStartGroup?.(event, group)}
+                            onDragEnd={() => onDragEndTask?.()}
+                            title="Déplacer tout le groupe (même date uniquement)"
+                            className="inline-flex h-7 w-7 cursor-grab items-center justify-center rounded-md border border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-light)] text-[var(--color-black)] active:cursor-grabbing"
+                        >
+                            <GripHorizontal className="h-4 w-4" strokeWidth={2} />
+                        </span>
+                    ) : null}
+                    {canUpdate ? (
+                        <span
+                            draggable
+                            onDragStart={(event) => onDragStartTask?.(event, group, task)}
+                            onDragEnd={() => onDragEndTask?.()}
+                            title="Glisser-déposer la tâche"
+                            className="inline-flex h-7 w-7 cursor-grab items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)] active:cursor-grabbing"
+                        >
+                            <GripVertical className="h-4 w-4" strokeWidth={2} />
+                        </span>
+                    ) : null}
+                </div>
             </td>
         </tr>
     );
@@ -457,6 +472,7 @@ export default function DesktopTable({
     onDeleteTask,
     onTogglePoint,
     onDragStartTask,
+    onDragStartGroup,
     onDragEndTask,
     onDragOverTask,
     onDropTask,
@@ -1209,22 +1225,43 @@ export default function DesktopTable({
                             </tr>
                         ) : (
                             displayRows.map(({ group, task }) => {
-                                const isDropTarget = Boolean(
+                                const groupTasks = group.tasks || [];
+                                const isFirstRowOfGroup = groupTasks.length > 0 && Number(groupTasks[0]?.id) === Number(task?.id);
+                                const isLastRowOfGroup = groupTasks.length > 0 && Number(groupTasks[groupTasks.length - 1]?.id) === Number(task?.id);
+
+                                const isTaskDropTarget = Boolean(
                                     dropPreview
+                                    && dropPreview.mode !== 'group'
                                     && String(dropPreview.groupKey) === String(group.key)
                                     && Number(dropPreview.targetTaskId) === Number(task?.id),
                                 );
-                                const dropPosition = isDropTarget ? dropPreview.position : null;
+                                const isGroupDropTarget = Boolean(
+                                    dropPreview
+                                    && dropPreview.mode === 'group'
+                                    && String(dropPreview.targetGroupKey) === String(group.key),
+                                );
+
+                                let dropPosition = isTaskDropTarget ? dropPreview.position : null;
+                                let showIndicatorBefore = dropPosition === 'before';
+                                let showIndicatorAfter = dropPosition === 'after';
+
+                                if (isGroupDropTarget && dropPreview.position === 'before' && isFirstRowOfGroup) {
+                                    showIndicatorBefore = true;
+                                }
+                                if (isGroupDropTarget && dropPreview.position === 'after' && isLastRowOfGroup) {
+                                    showIndicatorAfter = true;
+                                }
 
                                 return (
                                     <Fragment key={task.id}>
-                                        {dropPosition === 'before' ? <DropIndicatorRow /> : null}
+                                        {showIndicatorBefore ? <DropIndicatorRow /> : null}
                                         <TaskDataRow
                                             group={group}
                                             task={task}
                                             placeResolver={depotPlaceMap}
                                             highlighted={Number(highlightedTaskId || 0) === Number(task?.id || 0)}
                                             saving={Boolean(savingTaskIds?.[task?.id])}
+                                            isFirstRowOfGroup={isFirstRowOfGroup}
                                             canUpdate={canUpdate}
                                             canDelete={canDelete}
                                             canPoint={canPoint}
@@ -1233,13 +1270,14 @@ export default function DesktopTable({
                                             onDeleteTask={onDeleteTask}
                                             onTogglePoint={onTogglePoint}
                                             onDragStartTask={onDragStartTask}
+                                            onDragStartGroup={onDragStartGroup}
                                             onDragEndTask={onDragEndTask}
                                             onDragOverTask={onDragOverTask}
                                             onDropTask={onDropTask}
                                             onOpenAssigneeContact={setAssigneeContact}
                                             dropPosition={dropPosition}
                                         />
-                                        {dropPosition === 'after' ? <DropIndicatorRow /> : null}
+                                        {showIndicatorAfter ? <DropIndicatorRow /> : null}
                                     </Fragment>
                                 );
                             })

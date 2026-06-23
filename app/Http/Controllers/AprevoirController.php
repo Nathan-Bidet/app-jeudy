@@ -7,6 +7,7 @@ use App\Events\AprevoirTaskUpdated;
 use App\Models\AprevoirTask;
 use App\Models\Depot;
 use App\Models\EngraisTask;
+use App\Models\TaskGroupOrder;
 use App\Models\Transporter;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -98,6 +99,7 @@ class AprevoirController extends Controller
                     'destroy' => $config['route_prefix'].'.tasks.destroy',
                     'point' => $config['route_prefix'].'.tasks.point',
                     'position' => $config['route_prefix'].'.tasks.position',
+                    'group_position' => route($config['route_prefix'].'.groups.position'),
                     'data' => $config['route_prefix'].'.tasks.data',
                 ],
             ],
@@ -378,6 +380,65 @@ class AprevoirController extends Controller
         }
 
         return back()->with('status', $config['title'].' tasks reordered.');
+    }
+
+    /**
+     * Réordonnancement manuel d'un ou plusieurs groupes (chauffeur, dépôt,
+     * transporteur) entre eux, pour une date donnée uniquement. Ne touche
+     * jamais à `position` (ordre des tâches à l'intérieur d'un groupe).
+     */
+    public function updateGroupOrder(Request $request): RedirectResponse
+    {
+        $config = $this->moduleConfig($request);
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+            'ordered_group_keys' => ['required', 'array', 'min:2'],
+            'ordered_group_keys.*' => ['string', 'distinct'],
+        ]);
+
+        $date = (string) $validated['date'];
+        $orderedKeys = array_values($validated['ordered_group_keys']);
+
+        $actualKeys = $config['service']->groupKeysForDate($date);
+        $sortedActual = $actualKeys;
+        $sortedOrdered = $orderedKeys;
+        sort($sortedActual);
+        sort($sortedOrdered);
+
+        if ($sortedActual !== $sortedOrdered) {
+            return back()->withErrors([
+                'ordered_group_keys' => 'Réordonnancement invalide: la sélection doit correspondre exactement aux groupes de cette date.',
+            ]);
+        }
+
+        DB::transaction(function () use ($config, $date, $orderedKeys, $request): void {
+            TaskGroupOrder::query()
+                ->where('module', $config['key'])
+                ->whereDate('date', $date)
+                ->delete();
+
+            foreach ($orderedKeys as $sortOrder => $groupKey) {
+                TaskGroupOrder::query()->create([
+                    'module' => $config['key'],
+                    'date' => $date,
+                    'group_key' => $groupKey,
+                    'sort_order' => $sortOrder,
+                    'updated_by_user_id' => $request->user()?->id,
+                ]);
+            }
+        });
+
+        $this->auditLogService->log([
+            'action' => $config['actions']['reorder_groups'],
+            'module' => $config['log_module'],
+            'description' => 'Réordonnancement des groupes '.$config['title'].' du '.$date,
+            'payload' => [
+                'date' => $date,
+                'ordered_group_keys' => $orderedKeys,
+            ],
+        ]);
+
+        return back()->with('status', $config['title'].' groups reordered.');
     }
 
     /**
@@ -827,6 +888,7 @@ class AprevoirController extends Controller
                     'delete' => 'delete_engrais_task',
                     'point' => 'point_engrais_task',
                     'reorder' => 'reorder_engrais_task',
+                    'reorder_groups' => 'reorder_engrais_groups',
                 ],
             ];
         }
@@ -848,6 +910,7 @@ class AprevoirController extends Controller
                 'delete' => 'delete_task',
                 'point' => 'point_task',
                 'reorder' => 'reorder_task',
+                'reorder_groups' => 'reorder_task_groups',
             ],
         ];
     }

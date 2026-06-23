@@ -4,6 +4,7 @@ namespace App\Services\Aprevoir;
 
 use App\Models\AprevoirTask;
 use App\Models\FormattingRule;
+use App\Models\TaskGroupOrder;
 use App\Models\Transporter;
 use App\Models\User;
 use App\Services\FormattingRuleService;
@@ -87,7 +88,14 @@ class AprevoirService
         }
 
         $sortedGroups = array_values($groups);
-        usort($sortedGroups, fn (array $left, array $right): int => $this->compareGroups($left, $right));
+        $groupOrderOverrides = $this->groupOrderOverrides(array_unique(array_column($sortedGroups, 'date')));
+
+        foreach ($sortedGroups as &$group) {
+            $group['manual_order'] = $groupOrderOverrides[$group['date']][$group['key']] ?? null;
+        }
+        unset($group);
+
+        usort($sortedGroups, fn (array $left, array $right): int => $this->compareGroups($left, $right, $groupOrderOverrides));
 
         return [
             'groups' => $sortedGroups,
@@ -220,6 +228,56 @@ class AprevoirService
         }
     }
 
+    /**
+     * Clés de groupe (date|type|id) réellement présentes pour une date donnée,
+     * utilisé par le contrôleur pour valider un réordonnancement manuel de
+     * groupes avant de l'enregistrer.
+     *
+     * @return array<int, string>
+     */
+    public function groupKeysForDate(string $date): array
+    {
+        $taskModelClass = $this->taskModelClass();
+
+        return $taskModelClass::query()
+            ->whereDate('date', $date)
+            ->get(['id', 'date', 'assignee_type', 'assignee_id', 'assignee_label_free'])
+            ->map(fn (Model $task): string => $this->groupKey($task))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string|null>  $dates
+     * @return array<string, array<string, int>>  [date => [group_key => sort_order]]
+     */
+    private function groupOrderOverrides(array $dates): array
+    {
+        $dates = array_values(array_filter($dates));
+        if ($dates === []) {
+            return [];
+        }
+
+        $overrides = [];
+
+        TaskGroupOrder::query()
+            ->where('module', $this->visibilityScopeModule())
+            ->whereIn('date', $dates)
+            ->get(['date', 'group_key', 'sort_order'])
+            ->each(function (TaskGroupOrder $row) use (&$overrides): void {
+                $date = $row->date?->toDateString();
+                if ($date === null) {
+                    return;
+                }
+
+                $overrides[$date] ??= [];
+                $overrides[$date][$row->group_key] = (int) $row->sort_order;
+            });
+
+        return $overrides;
+    }
+
     private function groupKey(Model $task): string
     {
         if ($task->assignee_type === 'free') {
@@ -331,14 +389,33 @@ class AprevoirService
     /**
      * @param  array<string,mixed>  $left
      * @param  array<string,mixed>  $right
+     * @param  array<string, array<string, int>>  $overrides  [date => [group_key => sort_order]]
      */
-    private function compareGroups(array $left, array $right): int
+    private function compareGroups(array $left, array $right, array $overrides = []): int
     {
         $leftDate = (string) ($left['date'] ?? '');
         $rightDate = (string) ($right['date'] ?? '');
         $dateCompare = strcmp($leftDate, $rightDate);
         if ($dateCompare !== 0) {
             return $dateCompare;
+        }
+
+        // Un ordre manuel (glisser-déposer de groupes entiers) défini pour
+        // cette date prime sur le tri automatique ci-dessous, exactement
+        // comme `position` prime sur le tri par défaut des tâches.
+        $dateOverrides = $overrides[$leftDate] ?? [];
+        if ($dateOverrides !== []) {
+            $leftOverride = $dateOverrides[(string) ($left['key'] ?? '')] ?? null;
+            $rightOverride = $dateOverrides[(string) ($right['key'] ?? '')] ?? null;
+            if ($leftOverride !== null && $rightOverride !== null) {
+                return $leftOverride <=> $rightOverride;
+            }
+            if ($leftOverride !== null) {
+                return -1;
+            }
+            if ($rightOverride !== null) {
+                return 1;
+            }
         }
 
         $leftAssignee = is_array($left['assignee'] ?? null) ? $left['assignee'] : [];
