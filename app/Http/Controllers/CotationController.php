@@ -434,7 +434,7 @@ class CotationController extends Controller
     {
         $access = app(AccessManager::class);
         $user = $request->user();
-        abort_unless($user && $access->can($user, 'cotations.cereals.edit'), 403);
+        abort_unless($user && $access->can($user, 'cotations.fuel.edit'), 403);
 
         try {
             $pdf = Pdf::loadView('cotations.fuel-pdf', [
