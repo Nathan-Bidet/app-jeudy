@@ -28,6 +28,7 @@ class CotationAccessController extends Controller
         'cotations.cereals.edit',
         'cotations.fuel.view',
         'cotations.fuel.edit',
+        'cotations.fuel.history.view',
         'cotations.admin',
     ];
 

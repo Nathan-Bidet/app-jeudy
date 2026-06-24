@@ -193,6 +193,7 @@ export default function AdminCotationsIndex({
                     <strong className="text-[var(--app-text)]">Voir</strong> donne accès à la page Cotations.
                     {' '}<strong className="text-[var(--app-text)]">Modifier céréales/transports</strong> autorise les cotations et le transport.
                     {' '}<strong className="text-[var(--app-text)]">Modifier carburant</strong> autorise uniquement le bloc Prix carburant.
+                    {' '}<strong className="text-[var(--app-text)]">Historique carburant</strong> autorise à consulter les anciennes versions des prix carburant.
                     {' '}<strong className="text-[var(--app-text)]">Administrer</strong> autorise cet écran de droits.
                 </div>
 
