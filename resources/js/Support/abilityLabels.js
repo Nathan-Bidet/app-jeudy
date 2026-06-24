@@ -43,6 +43,7 @@ const ABILITY_LABELS = {
     'cotations.cereals.edit': 'Cotations - Modifier céréales',
     'cotations.fuel.view': 'Cotations - Voir carburant',
     'cotations.fuel.edit': 'Cotations - Modifier carburant',
+    'cotations.fuel.history.view': 'Cotations - Historique carburant',
     'cotations.admin': 'Cotations - Administrer',
     'heures.view': 'Heures - Voir',
     'heures.create': 'Heures - Créer ses heures',

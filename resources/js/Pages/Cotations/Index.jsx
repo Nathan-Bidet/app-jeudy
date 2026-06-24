@@ -6,14 +6,17 @@ import {
     AlignLeft,
     AlignRight,
     Bold,
+    ChevronLeft,
     ChevronRight,
     FileDown,
     Fuel,
     GripVertical,
+    History,
     Info,
     Italic,
     Pencil,
     RefreshCw,
+    RotateCcw,
     Save,
     Settings2,
     Strikethrough,
@@ -1109,6 +1112,17 @@ function FuelGridSection({
     onCancelEditing,
     onSave,
     processing = false,
+    canViewHistory = false,
+    isViewingHistory = false,
+    historyVersion = null,
+    historyHasOlder = false,
+    historyHasNewer = false,
+    historyLoading = false,
+    historyError = '',
+    onOpenHistory,
+    onCloseHistory,
+    onShowOlderHistory,
+    onShowNewerHistory,
 }) {
     const sections = grid.sections || [];
     const vatRate = parseDecimal(grid.vat_rate) ?? 20;
@@ -1494,43 +1508,100 @@ function FuelGridSection({
         </tr>
     ) : null;
 
-    const fuelActions = canEdit ? (
-        canManage ? (
-            <div className="flex flex-wrap gap-2">
-                <button
-                    type="button"
-                    onClick={onCancelEditing}
-                    disabled={processing}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
-                >
-                    <X className="h-3.5 w-3.5" strokeWidth={2.3} />
-                    Annuler
-                </button>
-                <button
-                    type="button"
-                    onClick={onSave}
-                    disabled={processing}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--color-black)] disabled:opacity-60"
-                >
-                    <Save className="h-3.5 w-3.5" strokeWidth={2.3} />
-                    Enregistrer
-                </button>
-            </div>
-        ) : (
+    const fuelActions = isViewingHistory ? (
+        <div className="flex flex-wrap items-center gap-2">
             <button
                 type="button"
-                onClick={onStartEditing}
-                disabled={processing}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+                onClick={onShowOlderHistory}
+                disabled={!historyHasOlder}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-40"
             >
-                <Pencil className="h-3.5 w-3.5" strokeWidth={2.3} />
-                Modifier le carburant
+                <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2.3} />
+                Plus ancienne
             </button>
-        )
-    ) : null;
+            <button
+                type="button"
+                onClick={onCloseHistory}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--color-black)]"
+            >
+                <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.3} />
+                Présent
+            </button>
+            <button
+                type="button"
+                onClick={onShowNewerHistory}
+                disabled={!historyHasNewer}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-40"
+            >
+                Plus récente
+                <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.3} />
+            </button>
+        </div>
+    ) : canEdit && canManage ? (
+        <div className="flex flex-wrap gap-2">
+            <button
+                type="button"
+                onClick={onCancelEditing}
+                disabled={processing}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+            >
+                <X className="h-3.5 w-3.5" strokeWidth={2.3} />
+                Annuler
+            </button>
+            <button
+                type="button"
+                onClick={onSave}
+                disabled={processing}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--color-black)] disabled:opacity-60"
+            >
+                <Save className="h-3.5 w-3.5" strokeWidth={2.3} />
+                Enregistrer
+            </button>
+        </div>
+    ) : (
+        <div className="flex flex-wrap gap-2">
+            {canEdit ? (
+                <button
+                    type="button"
+                    onClick={onStartEditing}
+                    disabled={processing}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+                >
+                    <Pencil className="h-3.5 w-3.5" strokeWidth={2.3} />
+                    Modifier le carburant
+                </button>
+            ) : null}
+            {canViewHistory ? (
+                <button
+                    type="button"
+                    onClick={onOpenHistory}
+                    disabled={historyLoading}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+                >
+                    <History className="h-3.5 w-3.5" strokeWidth={2.3} />
+                    {historyLoading ? 'Chargement...' : 'Historique'}
+                </button>
+            ) : null}
+        </div>
+    );
 
     return (
         <CollapsibleSection title="Prix carburant" icon={Fuel} actions={fuelActions}>
+            {isViewingHistory ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-light)] px-3 py-2 text-xs font-black uppercase tracking-[0.06em] text-[var(--color-black)]">
+                    <History className="h-4 w-4" strokeWidth={2.3} />
+                    <span>
+                        Version historique du {formatDateTime(historyVersion?.created_at)}
+                        {historyVersion?.created_by_name ? ` par ${historyVersion.created_by_name}` : ''}
+                    </span>
+                </div>
+            ) : null}
+            {historyError ? (
+                <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                    {historyError}
+                </div>
+            ) : null}
+
             {canManage ? (
                 <label className="mb-3 block max-w-[12rem]">
                     <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">TVA (%)</span>
@@ -1671,6 +1742,11 @@ export default function CotationsIndex({
     const canViewFuel = Boolean(permissions?.can_view_fuel);
     const canManage = Boolean(permissions?.can_manage);
     const canManageFuel = Boolean(permissions?.can_manage_fuel);
+    const canViewFuelHistory = Boolean(permissions?.can_view_fuel_history);
+    const [fuelHistoryVersions, setFuelHistoryVersions] = useState([]);
+    const [fuelHistoryLoading, setFuelHistoryLoading] = useState(false);
+    const [fuelHistoryError, setFuelHistoryError] = useState('');
+    const [fuelHistoryIndex, setFuelHistoryIndex] = useState(null);
     const form = useForm({
         settings: flattenSettings(manualSettings),
         manual_prices: flattenMarketRows(initialMarketData?.groups || []),
@@ -1920,6 +1996,7 @@ export default function CotationsIndex({
         resetDrafts();
         setIsEditing(false);
         setIsFuelEditing(true);
+        setFuelHistoryIndex(null);
     };
 
     const cancelFuelEditing = () => {
@@ -1933,6 +2010,61 @@ export default function CotationsIndex({
             onSuccess: () => setIsFuelEditing(false),
         });
     };
+
+    const openFuelHistory = async () => {
+        if (!canViewFuelHistory || !routes.fuel_history) return;
+
+        setIsFuelEditing(false);
+        setFuelHistoryLoading(true);
+        setFuelHistoryError('');
+
+        try {
+            const response = await fetch(routes.fuel_history, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error('Impossible de charger l\'historique du carburant.');
+            }
+
+            const versions = data?.versions || [];
+            setFuelHistoryVersions(versions);
+            setFuelHistoryIndex(versions.length ? 0 : null);
+            if (!versions.length) {
+                setFuelHistoryError('Aucune version historique disponible.');
+            }
+        } catch (exception) {
+            setFuelHistoryError(exception?.message || 'Impossible de charger l\'historique du carburant.');
+        } finally {
+            setFuelHistoryLoading(false);
+        }
+    };
+
+    const closeFuelHistory = () => {
+        setFuelHistoryIndex(null);
+        setFuelHistoryError('');
+    };
+
+    const showOlderFuelVersion = () => {
+        setFuelHistoryIndex((current) => {
+            if (current === null) return fuelHistoryVersions.length ? 0 : null;
+            return Math.min(current + 1, fuelHistoryVersions.length - 1);
+        });
+    };
+
+    const showNewerFuelVersion = () => {
+        setFuelHistoryIndex((current) => {
+            if (current === null) return null;
+            if (current <= 0) return null;
+            return current - 1;
+        });
+    };
+
+    const isViewingFuelHistory = fuelHistoryIndex !== null && Boolean(fuelHistoryVersions[fuelHistoryIndex]);
+    const activeFuelHistoryVersion = isViewingFuelHistory ? fuelHistoryVersions[fuelHistoryIndex] : null;
+    const displayedFuelGrid = activeFuelHistoryVersion ? activeFuelHistoryVersion.fuel_grid : form.data.fuel_grid;
 
     const moveCereal = (sourceCode, targetCode) => {
         if (!sourceCode || !targetCode || sourceCode === targetCode) return;
@@ -2201,14 +2333,25 @@ export default function CotationsIndex({
 
                 {canViewFuel ? (
                     <FuelGridSection
-                        grid={form.data.fuel_grid}
-                        canManage={isFuelEditing}
-                        canEdit={canManageFuel && !isEditing}
+                        grid={displayedFuelGrid}
+                        canManage={isFuelEditing && !isViewingFuelHistory}
+                        canEdit={canManageFuel && !isEditing && !isViewingFuelHistory}
                         setFuelGrid={setFuelGrid}
                         onStartEditing={startFuelEditing}
                         onCancelEditing={cancelFuelEditing}
                         onSave={saveFuelSettings}
                         processing={form.processing}
+                        canViewHistory={canViewFuelHistory}
+                        isViewingHistory={isViewingFuelHistory}
+                        historyVersion={activeFuelHistoryVersion}
+                        historyHasOlder={fuelHistoryIndex !== null && fuelHistoryIndex < fuelHistoryVersions.length - 1}
+                        historyHasNewer={fuelHistoryIndex !== null}
+                        historyLoading={fuelHistoryLoading}
+                        historyError={fuelHistoryError}
+                        onOpenHistory={openFuelHistory}
+                        onCloseHistory={closeFuelHistory}
+                        onShowOlderHistory={showOlderFuelVersion}
+                        onShowNewerHistory={showNewerFuelVersion}
                     />
                 ) : null}
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CotationCustomCereal;
+use App\Models\CotationFuelPriceHistory;
 use App\Models\CotationManualPrice;
 use App\Models\CotationSetting;
 use App\Services\AuditLogService;
@@ -39,6 +40,7 @@ class CotationController extends Controller
             $canEditFuel = (bool) ($user && $access->can($user, 'cotations.fuel.edit'));
             $canViewCereals = (bool) ($user && ($access->can($user, 'cotations.cereals.view') || $canEditCereals));
             $canViewFuel = (bool) ($user && ($access->can($user, 'cotations.fuel.view') || $canEditFuel));
+            $canViewFuelHistory = (bool) ($user && $access->can($user, 'cotations.fuel.history.view'));
             $canAdmin = (bool) ($user && $access->can($user, 'cotations.admin'));
 
             $marketData = [
@@ -90,12 +92,14 @@ class CotationController extends Controller
                     'can_view_fuel' => $canViewFuel,
                     'can_manage' => $canEditCereals,
                     'can_manage_fuel' => $canEditFuel,
+                    'can_view_fuel_history' => $canViewFuelHistory,
                     'can_admin' => $canAdmin,
                 ],
                 'routes' => [
                     'market_data' => route('cotations.market-data'),
                     'settings_update' => route('cotations.settings.update'),
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
+                    'fuel_history' => route('cotations.fuel-history'),
                     'export_pdf' => route('cotations.export-pdf'),
                     'admin' => route('admin.cotations.index'),
                 ],
@@ -307,6 +311,38 @@ class CotationController extends Controller
         ]);
 
         return back()->with('status', 'Cotations fuel settings updated.');
+    }
+
+    /**
+     * Liste des versions historiques de la grille carburant (lecture seule),
+     * la plus récente en premier. N'affecte jamais la configuration courante
+     * ni l'export PDF, qui continuent d'utiliser fuelGridConfig().
+     */
+    public function fuelHistory(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $access = app(AccessManager::class);
+
+        if (! $user || ! $access->can($user, 'cotations.fuel.history.view')) {
+            return response()->json(['versions' => []], 403);
+        }
+
+        $versions = CotationFuelPriceHistory::query()
+            ->with('createdBy:id,name,first_name,last_name')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get()
+            ->map(fn (CotationFuelPriceHistory $entry): array => [
+                'id' => $entry->id,
+                'created_at' => $entry->created_at?->toIso8601String(),
+                'created_by_name' => $this->userLabel($entry->createdBy),
+                'fuel_grid' => $this->normalizeFuelGrid($entry->fuel_grid ?? []),
+            ])
+            ->values()
+            ->all();
+
+        return response()->json(['versions' => $versions]);
     }
 
     public function exportPdf(Request $request)
@@ -829,10 +865,19 @@ class CotationController extends Controller
 
         $after = $this->fuelGridConfig();
 
-        return $before !== $after ? [
+        if ($before === $after) {
+            return null;
+        }
+
+        CotationFuelPriceHistory::query()->create([
+            'fuel_grid' => $after,
+            'created_by_user_id' => $request->user()?->id,
+        ]);
+
+        return [
             'before' => $before,
             'after' => $after,
-        ] : null;
+        ];
     }
 
     /**
