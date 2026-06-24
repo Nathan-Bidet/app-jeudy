@@ -2363,7 +2363,7 @@ export default function CotationsIndex({
                         onCloseHistory={closeFuelHistory}
                         onShowOlderHistory={showOlderFuelVersion}
                         onShowNewerHistory={showNewerFuelVersion}
-                        canExportPdf={canManage && Boolean(routes.export_fuel_pdf)}
+                        canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
                         exportPdfUrl={routes.export_fuel_pdf}
                     />
                 ) : null}
