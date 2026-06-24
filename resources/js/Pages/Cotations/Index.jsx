@@ -1123,6 +1123,8 @@ function FuelGridSection({
     onCloseHistory,
     onShowOlderHistory,
     onShowNewerHistory,
+    canExportPdf = false,
+    exportPdfUrl = '',
 }) {
     const sections = grid.sections || [];
     const vatRate = parseDecimal(grid.vat_rate) ?? 20;
@@ -1581,6 +1583,16 @@ function FuelGridSection({
                     <History className="h-3.5 w-3.5" strokeWidth={2.3} />
                     {historyLoading ? 'Chargement...' : 'Historique'}
                 </button>
+            ) : null}
+            {canExportPdf ? (
+                <a
+                    href={exportPdfUrl}
+                    download
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
+                >
+                    <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
+                    Export PDF
+                </a>
             ) : null}
         </div>
     );
@@ -2351,6 +2363,8 @@ export default function CotationsIndex({
                         onCloseHistory={closeFuelHistory}
                         onShowOlderHistory={showOlderFuelVersion}
                         onShowNewerHistory={showNewerFuelVersion}
+                        canExportPdf={canManage && Boolean(routes.export_fuel_pdf)}
+                        exportPdfUrl={routes.export_fuel_pdf}
                     />
                 ) : null}
 
