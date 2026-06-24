@@ -101,6 +101,7 @@ class CotationController extends Controller
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
                     'fuel_history' => route('cotations.fuel-history'),
                     'export_pdf' => route('cotations.export-pdf'),
+                    'export_fuel_pdf' => route('cotations.export-fuel-pdf'),
                     'admin' => route('admin.cotations.index'),
                 ],
             ]);
@@ -412,6 +413,38 @@ class CotationController extends Controller
             return $pdf->download('cotations-'.now()->format('Y-m-d-His').'.pdf');
         } catch (Throwable $exception) {
             Log::error('cotations.export-pdf failed', [
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'trace' => $exception->getTraceAsString(),
+                'user_id' => $user?->id,
+            ]);
+
+            return response('Erreur export PDF : '.$exception->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Export PDF dédié, contenant uniquement la page carburant. Réutilise la
+     * même vue partielle (cotations.partials.fuel-page) que l'export complet
+     * pour garantir un rendu strictement identique, sans dupliquer la mise
+     * en forme ni les calculs.
+     */
+    public function exportFuelPdf(Request $request)
+    {
+        $access = app(AccessManager::class);
+        $user = $request->user();
+        abort_unless($user && $access->can($user, 'cotations.cereals.edit'), 403);
+
+        try {
+            $pdf = Pdf::loadView('cotations.fuel-pdf', [
+                'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
+                'generatedAt' => now(),
+            ])->setPaper('a4', 'landscape');
+
+            return $pdf->download('prix-carburant-'.now()->format('Y-m-d-His').'.pdf');
+        } catch (Throwable $exception) {
+            Log::error('cotations.export-fuel-pdf failed', [
                 'message' => $exception->getMessage(),
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),

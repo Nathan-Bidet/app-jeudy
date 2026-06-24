@@ -189,6 +189,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/cotations/export-pdf', [CotationController::class, 'exportPdf'])
         ->middleware('sector.access:cotations.cereals.edit')
         ->name('cotations.export-pdf');
+    Route::get('/cotations/export-fuel-pdf', [CotationController::class, 'exportFuelPdf'])
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->name('cotations.export-fuel-pdf');
     Route::get('/cotations/fuel-history', [CotationController::class, 'fuelHistory'])
         ->middleware('sector.access:cotations.fuel.history.view')
         ->name('cotations.fuel-history');
