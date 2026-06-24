@@ -271,7 +271,15 @@ class CotationController extends Controller
             ->values()
             ->all();
         $manualDeletes = $this->deleteManualPrices($deletedIds);
-        $manualChanges = $this->updateManualPrices($manualRows, $request);
+        // Le formulaire soumet manual_prices avec le product_name capturé au
+        // chargement de l'édition : si une céréale personnalisée vient juste
+        // d'être renommée dans la même requête (updateCustomCereals ci-dessus),
+        // ce champ est encore l'ancien nom. On force le nom à jour ici pour
+        // que cette sauvegarde n'écrase pas le renommage qui vient d'être fait.
+        $customCerealNamesByCode = Schema::hasTable('cotation_custom_cereals')
+            ? CotationCustomCereal::query()->pluck('name', 'code')->all()
+            : [];
+        $manualChanges = $this->updateManualPrices($manualRows, $request, $customCerealNamesByCode);
         $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $cerealInfoChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
 
         $this->auditLogService->log([
@@ -1130,9 +1138,10 @@ class CotationController extends Controller
 
     /**
      * @param  array<int, array<string, mixed>>  $rows
+     * @param  array<string, string>  $customCerealNamesByCode
      * @return array<int, array<string, mixed>>
      */
-    private function updateManualPrices(array $rows, Request $request): array
+    private function updateManualPrices(array $rows, Request $request, array $customCerealNamesByCode = []): array
     {
         if ($rows === []) {
             return [];
@@ -1142,6 +1151,8 @@ class CotationController extends Controller
 
         foreach ($rows as $row) {
             $lineType = ($row['line_type'] ?? '') === 'matif' ? 'matif' : 'custom';
+            $productCode = mb_strtoupper(trim((string) $row['product_code']), 'UTF-8');
+            $productName = $customCerealNamesByCode[$productCode] ?? trim((string) $row['product_name']);
             $maturityMonth = array_key_exists('maturity_month', $row) && $row['maturity_month'] !== null && $row['maturity_month'] !== ''
                 ? (int) $row['maturity_month']
                 : null;
@@ -1169,8 +1180,8 @@ class CotationController extends Controller
                 'identity_hash' => $manual->identity_hash ?: $identityHash,
                 'market_identity_hash' => $marketIdentityHash,
                 'line_type' => $lineType,
-                'product_code' => mb_strtoupper(trim((string) $row['product_code']), 'UTF-8'),
-                'product_name' => trim((string) $row['product_name']),
+                'product_code' => $productCode,
+                'product_name' => $productName,
                 'product_sort' => (int) ($row['product_sort'] ?? 999),
                 'contract_code' => $lineType === 'matif' ? (trim((string) ($row['contract_code'] ?? '')) ?: null) : null,
                 'display_label' => $displayLabel ?: null,
@@ -1233,6 +1244,7 @@ class CotationController extends Controller
             }
 
             $before = $cereal->exists ? $this->customCerealSnapshot($cereal) : null;
+            $previousName = $before['name'] ?? null;
 
             $cereal->forceFill([
                 'name' => $name,
@@ -1240,6 +1252,23 @@ class CotationController extends Controller
                 'sort_order' => (int) ($row['sort_order'] ?? 100 + $index),
                 'updated_by' => $request->user()?->id,
             ])->save();
+
+            if ($previousName !== null && $previousName !== $name) {
+                // La céréale personnalisée a été renommée : product_name est
+                // dénormalisé sur chaque échéance déjà enregistrée, donc on
+                // resynchronise toutes les lignes existantes via product_code
+                // (clé stable, jamais modifiée par un renommage).
+                $updated = CotationManualPrice::query()
+                    ->where('product_code', $cereal->code)
+                    ->update(['product_name' => $name]);
+
+                Log::info('custom cereal product_name sync', [
+                    'code' => $cereal->code,
+                    'previous_name' => $previousName,
+                    'name' => $name,
+                    'updated_rows' => $updated,
+                ]);
+            }
 
             $after = $this->customCerealSnapshot($cereal->refresh());
 

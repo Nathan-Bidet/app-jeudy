@@ -147,6 +147,14 @@ class CotationMarketService
         $configuredRows = [];
         $groups = [];
 
+        // Source de vérité pour le nom affiché d'une céréale personnalisée :
+        // cotation_custom_cereals.name prime toujours sur le product_name
+        // dénormalisé dans cotation_manual_prices (qui peut être en retard
+        // d'une synchronisation après un renommage).
+        $customCerealNameByCode = collect($this->customCereals())
+            ->pluck('name', 'code')
+            ->all();
+
         if (Schema::hasTable('cotation_manual_prices')) {
             CotationManualPrice::query()
                 ->select([
@@ -225,9 +233,10 @@ class CotationMarketService
 
         foreach ($configuredRows as $row) {
             $productKey = $row['product_code'];
+            $displayName = $customCerealNameByCode[$productKey] ?? $row['product_name'];
             $groups[$productKey] ??= [
                 'code' => $row['product_code'],
-                'name' => $row['product_name'],
+                'name' => $displayName,
                 'sort' => $row['product_sort'],
                 'harvests' => [
                     'left' => ['year' => $leftHarvestYear, 'rows' => []],
@@ -248,7 +257,7 @@ class CotationMarketService
                 'display_label' => $row['display_label'],
                 'maturity_label' => $row['label'],
                 'product_code' => $row['product_code'],
-                'product_name' => $row['product_name'],
+                'product_name' => $displayName,
                 'product_sort' => $row['product_sort'],
                 'maturity_month' => $row['maturity_month'],
                 'maturity_year' => $row['maturity_year'],
