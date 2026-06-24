@@ -2197,8 +2197,7 @@ export default function CotationsIndex({
                 {canManage && routes.export_pdf ? (
                     <a
                         href={routes.export_pdf}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        download
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
                     >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
