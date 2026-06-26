@@ -103,6 +103,7 @@ class NotificationController extends Controller
     {
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
+        $announcementId = $notification->data['announcement_id'] ?? null;
 
         return [
             'id' => (string) $notification->id,
@@ -114,13 +115,14 @@ class NotificationController extends Controller
             ],
             'requester_label' => $notification->data['requester_label'] ?? null,
             'leave_request_id' => $leaveRequestId,
-            'url' => $this->notificationUrl($type, $leaveRequestId),
+            'announcement_id' => $announcementId,
+            'url' => $this->notificationUrl($type, $leaveRequestId, $announcementId),
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
     }
 
-    private function notificationUrl(string $type, mixed $leaveRequestId): ?string
+    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null): ?string
     {
         $leaveTypes = [
             'leave_request_submitted',
@@ -141,6 +143,12 @@ class NotificationController extends Controller
 
         if ($type === 'hours_missing_entry_reminder' && Route::has('hours.index')) {
             return route('hours.index');
+        }
+
+        if ($type === 'announcement' && Route::has('annonces.index')) {
+            return $announcementId
+                ? route('annonces.index', ['highlight' => $announcementId])
+                : route('annonces.index');
         }
 
         return null;

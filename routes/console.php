@@ -24,3 +24,8 @@ Schedule::command('cotations:refresh')
     ->everyMinute()
     ->withoutOverlapping()
     ->timezone(config('app.timezone', 'Europe/Paris'));
+
+Schedule::command('annonces:send-scheduled')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->timezone(config('app.timezone', 'Europe/Paris'));

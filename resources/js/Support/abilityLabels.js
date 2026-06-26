@@ -56,6 +56,9 @@ const ABILITY_LABELS = {
     'admin.logs.view': 'Administration Logs - Voir',
     'admin.entities.view': 'Administration Entités - Voir',
     'admin.entities.manage': 'Administration Entités - Gérer',
+    'annonces.view': 'Annonces - Voir',
+    'annonces.create': 'Annonces - Créer et envoyer',
+    'annonces.manage': 'Annonces - Gérer toutes les annonces',
 };
 
 function titleCaseWord(word) {

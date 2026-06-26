@@ -93,6 +93,13 @@ class HandleInertiaRequests extends Middleware
                     'admin_sectors_view' => (bool) ($user && ($accessManager->can($user, 'admin.sectors.view') || $accessManager->can($user, 'admin.sectors.manage'))),
                     'admin_entities_view' => (bool) ($user && ($accessManager->can($user, 'admin.entities.view') || $accessManager->can($user, 'admin.entities.manage'))),
                     'admin_logs_view' => (bool) ($user && $accessManager->can($user, 'admin.logs.view')),
+                    'annonces_view' => (bool) ($user && (
+                        $accessManager->can($user, 'annonces.view')
+                        || $accessManager->can($user, 'annonces.create')
+                        || $accessManager->can($user, 'annonces.manage')
+                    )),
+                    'annonces_create' => (bool) ($user && $accessManager->can($user, 'annonces.create')),
+                    'annonces_manage' => (bool) ($user && $accessManager->can($user, 'annonces.manage')),
                 ],
             ],
             'hours_reminder' => function () use ($user, $accessManager): array {
@@ -170,6 +177,7 @@ class HandleInertiaRequests extends Middleware
     {
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
+        $announcementId = $notification->data['announcement_id'] ?? null;
 
         return [
             'id' => (string) $notification->id,
@@ -181,13 +189,14 @@ class HandleInertiaRequests extends Middleware
             ],
             'requester_label' => $notification->data['requester_label'] ?? null,
             'leave_request_id' => $leaveRequestId,
-            'url' => $this->notificationUrl($type, $leaveRequestId),
+            'announcement_id' => $announcementId,
+            'url' => $this->notificationUrl($type, $leaveRequestId, $announcementId),
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
     }
 
-    private function notificationUrl(string $type, mixed $leaveRequestId): ?string
+    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null): ?string
     {
         $leaveTypes = [
             'leave_request_submitted',
@@ -208,6 +217,12 @@ class HandleInertiaRequests extends Middleware
 
         if ($type === 'hours_missing_entry_reminder' && Route::has('hours.index')) {
             return route('hours.index');
+        }
+
+        if ($type === 'announcement' && Route::has('annonces.index')) {
+            return $announcementId
+                ? route('annonces.index', ['highlight' => $announcementId])
+                : route('annonces.index');
         }
 
         return null;

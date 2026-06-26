@@ -21,6 +21,7 @@ export default function UserMenu({ user, isAdmin, permissions = {}, primaryNavIt
                 || permissions?.admin_entities_view
                 || permissions?.admin_logs_view
                 || permissions?.cotations_admin
+                || permissions?.annonces_manage
             ),
         [isAdmin, permissions],
     );
@@ -31,6 +32,7 @@ export default function UserMenu({ user, isAdmin, permissions = {}, primaryNavIt
         if (permissions?.admin_sectors_view) return route('admin.sectors.index');
         if (permissions?.admin_logs_view) return route('admin.logs.index');
         if (permissions?.cotations_admin) return route('admin.cotations.index');
+        if (permissions?.annonces_manage) return route('admin.annonces.index');
         if (isAdmin) return route('admin.users.index');
 
         return null;

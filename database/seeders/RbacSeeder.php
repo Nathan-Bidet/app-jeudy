@@ -77,6 +77,9 @@ class RbacSeeder extends Seeder
             'admin.logs.view',
             'admin.entities.view',
             'admin.entities.manage',
+            'annonces.view',
+            'annonces.create',
+            'annonces.manage',
         ];
 
         foreach ($permissions as $permission) {

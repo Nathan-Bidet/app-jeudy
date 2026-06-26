@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\SectorController;
 use App\Http\Controllers\Admin\UserManagementController;
+use App\Http\Controllers\Admin\AnnonceAccessController;
 use App\Http\Controllers\Admin\AprevoirImportController;
 use App\Http\Controllers\Admin\CotationAccessController;
 use App\Http\Controllers\Admin\EntitiesController;
@@ -56,6 +57,15 @@ Route::middleware(['auth', 'verified', 'twofactor'])->prefix('admin')->name('adm
         ->middleware('sector.access:cotations.admin')
         ->middleware('throttle:admin-sensitive')
         ->name('cotations.update');
+
+    Route::get('/annonces', [AnnonceAccessController::class, 'index'])
+        ->middleware('sector.access:annonces.manage')
+        ->name('annonces.index');
+
+    Route::put('/annonces', [AnnonceAccessController::class, 'update'])
+        ->middleware('sector.access:annonces.manage')
+        ->middleware('throttle:admin-sensitive')
+        ->name('annonces.update');
 
     Route::get('/aprevoir-import', [AprevoirImportController::class, 'index'])
         ->name('aprevoir-import.index');

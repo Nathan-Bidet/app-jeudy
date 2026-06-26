@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AprevoirController;
 use App\Http\Controllers\ArchiveController;
 use App\Http\Controllers\CalendarCategoryController;
@@ -203,6 +204,31 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->middleware('sector.access:cotations.fuel.edit')
         ->middleware('throttle:admin-sensitive')
         ->name('cotations.fuel-settings.update');
+
+    Route::get('/annonces', [AnnouncementController::class, 'index'])
+        ->middleware('sector.access:annonces.view|annonces.create|annonces.manage')
+        ->name('annonces.index');
+    Route::post('/annonces', [AnnouncementController::class, 'store'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.store');
+    Route::put('/annonces/{announcement}', [AnnouncementController::class, 'update'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.update');
+    Route::delete('/annonces/{announcement}', [AnnouncementController::class, 'destroy'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.destroy');
+    Route::post('/annonces/{announcement}/duplicate', [AnnouncementController::class, 'duplicate'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.duplicate');
+    Route::post('/annonces/groups', [AnnouncementController::class, 'storeGroup'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.groups.store');
+    Route::put('/annonces/groups/{group}', [AnnouncementController::class, 'updateGroup'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.groups.update');
+    Route::delete('/annonces/groups/{group}', [AnnouncementController::class, 'destroyGroup'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.groups.destroy');
     Route::get('/calendar/leaves/export', [CalendarController::class, 'exportLeavesCsv'])
         ->middleware('sector.access:calendar.view')
         ->middleware('throttle:calendar-export')

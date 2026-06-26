@@ -15,6 +15,7 @@ import {
     FileText,
     Home,
     ListTodo,
+    Megaphone,
     Menu,
     MoonStar,
     Search,
@@ -168,6 +169,8 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
         : Boolean(permissions?.task_archive_view || permissions?.['task.archive.view']);
     const canCalendarView = Boolean(isAdmin || permissions?.calendar_view || permissions?.['calendar.view']);
     const canCotationsView = Boolean(isAdmin || permissions?.cotations_view || permissions?.['cotations.view']);
+    const canAnnoncesView = Boolean(isAdmin || permissions?.annonces_view || permissions?.['annonces.view']);
+    const canAdminAnnonces = Boolean(isAdmin || permissions?.annonces_manage || permissions?.['annonces.manage']);
 
     const tasksChildren = [
         safeHasRoute('ldt.index') && (permissions?.ldt_view ?? true) ? {
@@ -307,6 +310,13 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             icon: BookUser,
             active: safeCurrent('directory.*'),
         },
+        safeHasRoute('annonces.index') && canAnnoncesView && {
+            key: 'annonces',
+            label: 'Annonces',
+            href: safeHref('annonces.index'),
+            icon: Megaphone,
+            active: safeCurrent('annonces.*'),
+        },
         canAdminUsers && {
             key: 'admin-users',
             label: 'Utilisateurs',
@@ -348,6 +358,13 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             href: safeHref('admin.cotations.index'),
             icon: FileText,
             active: safeCurrent('admin.cotations.*'),
+        },
+        canAdminAnnonces && {
+            key: 'admin-annonces',
+            label: 'Droits Annonces',
+            href: safeHref('admin.annonces.index'),
+            icon: Megaphone,
+            active: safeCurrent('admin.annonces.*'),
         },
         {
             key: 'crm',
