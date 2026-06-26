@@ -28,6 +28,7 @@ class RbacSeeder extends Seeder
             'a_prevoir.update',
             'a_prevoir.delete',
             'a_prevoir.point',
+            'a_prevoir.partial_point',
             'a_prevoir.export',
             'a_prevoir.sms',
             'engrais.view',

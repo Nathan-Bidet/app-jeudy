@@ -68,6 +68,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::patch('/a-prevoir/tasks/{task}/point', [AprevoirController::class, 'point'])
         ->middleware('sector.access:a_prevoir.point')
         ->name('a_prevoir.tasks.point');
+    Route::patch('/a-prevoir/tasks/{task}/partial-point', [AprevoirController::class, 'partialPoint'])
+        ->middleware('sector.access:a_prevoir.partial_point')
+        ->name('a_prevoir.tasks.partial-point');
     Route::patch('/a-prevoir/tasks/{task}/position', [AprevoirController::class, 'updatePosition'])
         ->middleware('sector.access:a_prevoir.update')
         ->name('a_prevoir.tasks.position');

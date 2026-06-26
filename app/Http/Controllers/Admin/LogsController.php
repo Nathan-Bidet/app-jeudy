@@ -183,6 +183,18 @@ class LogsController extends Controller
             }
         }
 
+        if ($log->action === 'partial_point_task' && is_array($payload)) {
+            if (array_key_exists('before_partially_pointed', $payload) && array_key_exists('after_partially_pointed', $payload)) {
+                $segments[] = sprintf(
+                    'Etat: %s → %s',
+                    ((bool) $payload['before_partially_pointed']) ? 'partiel' : 'non partiel',
+                    ((bool) $payload['after_partially_pointed']) ? 'partiel' : 'non partiel',
+                );
+            } elseif (array_key_exists('partially_pointed', $payload)) {
+                $segments[] = (bool) $payload['partially_pointed'] ? 'Etat: partiel' : 'Etat: non partiel';
+            }
+        }
+
         if ($changes !== []) {
             $segments[] = 'Champs modifiés: '.implode(', ', array_map(
                 static fn (array $change): string => $change['label'],
@@ -322,6 +334,7 @@ class LogsController extends Controller
             'date' => 'Date',
             'fin_date' => 'Date de fin',
             'pointed' => 'Pointé',
+            'partially_pointed' => 'Pointage partiel',
             'assignee_type' => 'Type affectation',
             'assignee_id' => 'Affectation',
             'vehicle_id' => 'Camion',
@@ -361,6 +374,7 @@ class LogsController extends Controller
             'update_task' => 'Mise à jour de tâche',
             'delete_task' => 'Suppression de tâche',
             'point_task' => 'Pointage de tâche',
+            'partial_point_task' => 'Pointage partiel de tâche',
             'reorder_task' => 'Réordonnancement de tâches',
             'create_engrais_task' => 'Création de tâche Engrais',
             'update_engrais_task' => 'Mise à jour de tâche Engrais',

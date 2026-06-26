@@ -48,7 +48,7 @@ class AprevoirController extends Controller
             'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
             'only_boursagri' => ['nullable', 'boolean'],
             'boursagri_contract_number' => ['nullable', 'string', 'max:100'],
-            'pointed_filter' => ['nullable', Rule::in(['all', 'pointed', 'unpointed'])],
+            'pointed_filter' => ['nullable', Rule::in(['all', 'pointed', 'unpointed', 'partial'])],
             'color_filter' => ['nullable', Rule::in(['all', 'colored', 'unstyled'])],
             'focus_task_id' => ['nullable', 'integer'],
         ]);
@@ -85,6 +85,9 @@ class AprevoirController extends Controller
                 'can_update' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.update') : false,
                 'can_delete' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.delete') : false,
                 'can_point' => $request->user() ? app(AccessManager::class)->can($request->user(), $config['permission_prefix'].'.point') : false,
+                'can_partial_point' => $config['key'] === 'a_prevoir' && $request->user()
+                    ? app(AccessManager::class)->can($request->user(), 'a_prevoir.partial_point')
+                    : false,
             ],
             'focus_task_id' => ! empty($validated['focus_task_id']) ? (int) $validated['focus_task_id'] : null,
             'moduleConfig' => [
@@ -98,6 +101,7 @@ class AprevoirController extends Controller
                     'update' => $config['route_prefix'].'.tasks.update',
                     'destroy' => $config['route_prefix'].'.tasks.destroy',
                     'point' => $config['route_prefix'].'.tasks.point',
+                    'partial_point' => $config['route_prefix'] === 'a_prevoir' ? 'a_prevoir.tasks.partial-point' : null,
                     'position' => $config['route_prefix'].'.tasks.position',
                     'group_position' => route($config['route_prefix'].'.groups.position'),
                     'data' => $config['route_prefix'].'.tasks.data',
@@ -120,7 +124,7 @@ class AprevoirController extends Controller
             'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
             'only_boursagri' => ['nullable', 'boolean'],
             'boursagri_contract_number' => ['nullable', 'string', 'max:100'],
-            'pointed_filter' => ['nullable', Rule::in(['all', 'pointed', 'unpointed'])],
+            'pointed_filter' => ['nullable', Rule::in(['all', 'pointed', 'unpointed', 'partial'])],
             'color_filter' => ['nullable', Rule::in(['all', 'colored', 'unstyled'])],
         ]);
 
@@ -248,6 +252,11 @@ class AprevoirController extends Controller
             'pointed' => $pointed,
             'pointed_at' => $pointed ? now() : null,
             'pointed_by_user_id' => $pointed ? $request->user()?->id : null,
+            ...($config['key'] === 'a_prevoir' ? [
+                'partially_pointed' => false,
+                'partially_pointed_at' => null,
+                'partially_pointed_by_user_id' => null,
+            ] : []),
             'updated_by_user_id' => $request->user()?->id,
         ])->save();
 
@@ -292,6 +301,67 @@ class AprevoirController extends Controller
         }
 
         return back()->with('status', $config['title'].' task pointed updated.');
+    }
+
+    public function partialPoint(Request $request, AprevoirTask $task): RedirectResponse
+    {
+        $beforeGroup = $this->taskSnapshot($task);
+        $beforeAudit = $this->auditSnapshot($task);
+        $validated = $request->validate([
+            'partially_pointed' => ['required', 'boolean'],
+        ]);
+
+        $partiallyPointed = (bool) $validated['partially_pointed'];
+
+        $task->forceFill([
+            'pointed' => false,
+            'pointed_at' => null,
+            'pointed_by_user_id' => null,
+            'partially_pointed' => $partiallyPointed,
+            'partially_pointed_at' => $partiallyPointed ? now() : null,
+            'partially_pointed_by_user_id' => $partiallyPointed ? $request->user()?->id : null,
+            'updated_by_user_id' => $request->user()?->id,
+        ])->save();
+
+        $afterGroup = $this->taskSnapshot($task);
+        $afterAudit = $this->auditSnapshot($task);
+        $beforePartial = (bool) ($beforeAudit['partially_pointed'] ?? false);
+        $afterPartial = (bool) ($afterAudit['partially_pointed'] ?? false);
+
+        $this->auditLogService->log([
+            'action' => 'partial_point_task',
+            'module' => 'a_prevoir',
+            'description' => sprintf(
+                'Pointage partiel tâche #%d (%s → %s)',
+                (int) $task->id,
+                $beforePartial ? 'partiel' : 'non partiel',
+                $afterPartial ? 'partiel' : 'non partiel'
+            ),
+            'payload' => [
+                'task_id' => $task->id,
+                'partially_pointed' => $partiallyPointed,
+                'before_partially_pointed' => $beforePartial,
+                'after_partially_pointed' => $afterPartial,
+                'before' => $beforeAudit,
+                'after' => $afterAudit,
+            ],
+        ]);
+
+        AprevoirTaskChanged::dispatch(
+            'partial_pointed',
+            $task->id,
+            $beforeGroup,
+            $afterGroup,
+            ['partially_pointed' => $partiallyPointed],
+        );
+        $this->broadcastTaskUpdate(
+            'partial_pointed',
+            $task->id,
+            $afterGroup,
+            $request->input('client_mutation_id')
+        );
+
+        return back()->with('status', 'À Prévoir task partially pointed updated.');
     }
 
     public function updatePosition(Request $request, mixed $task): RedirectResponse
@@ -841,6 +911,7 @@ class AprevoirController extends Controller
             'is_boursagri' => (bool) $task->is_boursagri,
             'boursagri_contract_number' => $task->boursagri_contract_number,
             'pointed' => (bool) $task->pointed,
+            'partially_pointed' => (bool) ($task->partially_pointed ?? false),
             'position' => (int) ($task->position ?? 0),
         ];
     }

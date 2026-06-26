@@ -49,6 +49,7 @@ export default function TaskRow({
     canUpdate = false,
     canDelete = false,
     canPoint = false,
+    canPartialPoint = false,
     draggable = false,
     onDragStart,
     onDragOver,
@@ -57,8 +58,10 @@ export default function TaskRow({
     onDuplicate,
     onDelete,
     onTogglePoint,
+    onTogglePartialPoint,
 }) {
     const customStyle = adaptiveTaskStyle(task?.style || {});
+    const isPartiallyPointed = task?.partially_pointed === true || task?.partially_pointed === 1 || task?.partially_pointed === '1' || task?.partially_pointed === 'true';
 
     return (
         <div
@@ -152,6 +155,22 @@ export default function TaskRow({
                     ) : null}
                     {bookButton(task)}
 
+                    {canPartialPoint ? (
+                        <button
+                            type="button"
+                            onClick={() => onTogglePartialPoint?.(task, !isPartiallyPointed)}
+                            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${
+                                isPartiallyPointed
+                                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                                    : 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)]'
+                            }`}
+                            title={isPartiallyPointed ? 'Retirer le pointage partiel' : 'Pointer partiellement'}
+                        >
+                            <Circle className="h-3.5 w-3.5" strokeWidth={2.2} />
+                            <span>{isPartiallyPointed ? 'Partiel' : 'Partiel'}</span>
+                        </button>
+                    ) : null}
+
                     {canPoint ? (
                         <button
                             type="button"
@@ -214,6 +233,11 @@ export default function TaskRow({
             {task.pointed && (task.pointed_at_label || task.pointed_by) ? (
                 <div className="mt-2 text-[11px] text-[var(--app-muted)]">
                     Pointé {task.pointed_at_label ? `le ${task.pointed_at_label}` : ''}{task.pointed_by ? ` par ${task.pointed_by}` : ''}
+                </div>
+            ) : null}
+            {isPartiallyPointed && (task.partially_pointed_at_label || task.partially_pointed_by) ? (
+                <div className="mt-2 text-[11px] text-[var(--app-muted)]">
+                    Partiel {task.partially_pointed_at_label ? `le ${task.partially_pointed_at_label}` : ''}{task.partially_pointed_by ? ` par ${task.partially_pointed_by}` : ''}
                 </div>
             ) : null}
         </div>

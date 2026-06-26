@@ -252,10 +252,12 @@ function TaskDataRow({
     canUpdate,
     canDelete,
     canPoint,
+    canPartialPoint,
     onEditTask,
     onDuplicateTask,
     onDeleteTask,
     onTogglePoint,
+    onTogglePartialPoint,
     onDragStartTask,
     onDragStartGroup,
     onDragEndTask,
@@ -264,6 +266,7 @@ function TaskDataRow({
     onOpenAssigneeContact,
 }) {
     const isPointed = task?.pointed === true || task?.pointed === 1 || task?.pointed === '1' || task?.pointed === 'true';
+    const isPartiallyPointed = task?.partially_pointed === true || task?.partially_pointed === 1 || task?.partially_pointed === '1' || task?.partially_pointed === 'true';
 
     const rowBoxShadow = [];
     if (highlighted) {
@@ -388,6 +391,15 @@ function TaskDataRow({
                                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--brand-yellow-dark)] border-t-transparent" />
                             </span>
                         ) : null}
+                        {canPartialPoint ? (
+                            <ActionIconButton
+                                onClick={() => onTogglePartialPoint?.(task, !isPartiallyPointed)}
+                                title={isPartiallyPointed ? 'Retirer le pointage partiel' : 'Pointer partiellement'}
+                                active={isPartiallyPointed}
+                            >
+                                <Circle className="h-3.5 w-3.5" strokeWidth={2.2} />
+                            </ActionIconButton>
+                        ) : null}
                         {canPoint ? (
                             <ActionIconButton
                                 onClick={() => onTogglePoint?.(task, !isPointed)}
@@ -456,6 +468,9 @@ export default function DesktopTable({
     pointedGroupsLoaded = false,
     pointedGroupsLoading = false,
     pointedGroupsError = false,
+    partialGroupsLoaded = false,
+    partialGroupsLoading = false,
+    partialGroupsError = false,
     depotPlaceMap = {},
     highlightedTaskId = null,
     focusTaskId = null,
@@ -467,10 +482,12 @@ export default function DesktopTable({
     canUpdate = false,
     canDelete = false,
     canPoint = false,
+    canPartialPoint = false,
     onEditTask,
     onDuplicateTask,
     onDeleteTask,
     onTogglePoint,
+    onTogglePartialPoint,
     onDragStartTask,
     onDragStartGroup,
     onDragEndTask,
@@ -516,7 +533,7 @@ export default function DesktopTable({
     const [taskColorFilter, setTaskColorFilter] = useState('');
     const [showTaskColorMenu, setShowTaskColorMenu] = useState(false);
     const [commentTextFilter, setCommentTextFilter] = useState('');
-    const [xFilterMode, setXFilterMode] = useState('no'); // all|yes|no
+    const [xFilterMode, setXFilterMode] = useState('no'); // all|yes|partial|no
     const [dFilterMode, setDFilterMode] = useState('all'); // all|yes|no
     const [bFilterMode, setBFilterMode] = useState('all'); // all|yes|no
     const [bContractTextFilter, setBContractTextFilter] = useState('');
@@ -540,6 +557,10 @@ export default function DesktopTable({
         const normalized = String(pointedFilter || 'unpointed');
         if (normalized === 'pointed') {
             setXFilterMode('yes');
+            return;
+        }
+        if (normalized === 'partial') {
+            setXFilterMode('partial');
             return;
         }
         if (normalized === 'all') {
@@ -704,8 +725,10 @@ export default function DesktopTable({
         const contractNeedle = normalize(bContractTextFilter).trim();
         const taskMatchesXdb = (task) => {
             const isPointed = isPointedValue(task?.pointed);
+            const isPartiallyPointed = isPointedValue(task?.partially_pointed);
             if (xFilterMode === 'yes' && !isPointed) return false;
-            if (xFilterMode === 'no' && isPointed) return false;
+            if (xFilterMode === 'partial' && (isPointed || !isPartiallyPointed)) return false;
+            if (xFilterMode === 'no' && (isPointed || isPartiallyPointed)) return false;
 
             if (dFilterMode === 'yes' && !task?.is_direct) return false;
             if (dFilterMode === 'no' && task?.is_direct) return false;
@@ -810,10 +833,13 @@ export default function DesktopTable({
     }, [filteredGroups, bFilterMode, bContractSort]);
 
     const awaitingPointedDataForPointed = (pointedFilter === 'pointed') && !pointedGroupsLoaded;
-    const awaitingPointedDataForAll = (pointedFilter === 'all') && !pointedGroupsLoaded;
+    const awaitingPointedDataForPartial = (pointedFilter === 'partial') && !partialGroupsLoaded;
+    const awaitingPointedDataForAll = (pointedFilter === 'all') && (!pointedGroupsLoaded || !partialGroupsLoaded);
     const prefetchMessage = pointedGroupsLoading
         ? 'Chargement des tâches pointées...'
-        : 'Préchargement des tâches pointées...';
+        : partialGroupsLoading
+            ? 'Chargement des tâches partielles...'
+            : 'Préchargement des tâches pointées...';
 
     useLayoutEffect(() => {
         const wrapper = wrapperRef.current;
@@ -1058,7 +1084,7 @@ export default function DesktopTable({
     const applyPointedFilterFromXMode = (nextMode) => {
         const nextPointedFilter = nextMode === 'yes'
             ? 'pointed'
-            : (nextMode === 'no' ? 'unpointed' : 'all');
+            : (nextMode === 'partial' ? 'partial' : (nextMode === 'no' ? 'unpointed' : 'all'));
         markScrollAfterFilterChange({ closePopover: true });
         onPointedFilterChange?.(nextPointedFilter);
     };
@@ -1070,9 +1096,9 @@ export default function DesktopTable({
                     {prefetchMessage}
                 </div>
             ) : null}
-            {pointedGroupsError && pointedFilter !== 'unpointed' ? (
+            {(pointedGroupsError || partialGroupsError) && pointedFilter !== 'unpointed' ? (
                 <div className="mb-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-                    Impossible de charger les tâches pointées.
+                    Impossible de charger toutes les tâches filtrées.
                 </div>
             ) : null}
             <div className="overflow-visible rounded-xl border border-[var(--app-border)]">
@@ -1218,7 +1244,7 @@ export default function DesktopTable({
                                     colSpan={12}
                                     className="px-4 py-6 text-center text-sm text-[var(--app-muted)]"
                                 >
-                                    {awaitingPointedDataForPointed
+                                    {awaitingPointedDataForPointed || awaitingPointedDataForPartial
                                         ? prefetchMessage
                                         : 'Aucune tâche pour les filtres sélectionnés.'}
                                 </td>
@@ -1265,10 +1291,12 @@ export default function DesktopTable({
                                             canUpdate={canUpdate}
                                             canDelete={canDelete}
                                             canPoint={canPoint}
+                                            canPartialPoint={canPartialPoint}
                                             onEditTask={onEditTask}
                                             onDuplicateTask={onDuplicateTask}
                                             onDeleteTask={onDeleteTask}
                                             onTogglePoint={onTogglePoint}
+                                            onTogglePartialPoint={onTogglePartialPoint}
                                             onDragStartTask={onDragStartTask}
                                             onDragStartGroup={onDragStartGroup}
                                             onDragEndTask={onDragEndTask}
@@ -1724,12 +1752,17 @@ export default function DesktopTable({
                                     <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">
                                         {code}
                                     </div>
-                                    <div className="grid grid-cols-3 gap-1.5">
-                                        {[
+                                    <div className={`grid gap-1.5 ${code === 'X' ? 'grid-cols-4' : 'grid-cols-3'}`}>
+                                        {(code === 'X' ? [
+                                            ['all', 'Tous'],
+                                            ['yes', yesLabel],
+                                            ['partial', 'Partiel'],
+                                            ['no', noLabel],
+                                        ] : [
                                             ['all', 'Tous'],
                                             ['yes', yesLabel],
                                             ['no', noLabel],
-                                        ].map(([value, pillLabel]) => (
+                                        ]).map(([value, pillLabel]) => (
                                             <button
                                                 key={`${code}-${value}`}
                                                 type="button"

@@ -277,15 +277,43 @@ function updateTaskPointedState(task, pointed) {
         pointed_at: pointed ? task?.pointed_at ?? null : null,
         pointed_at_label: pointed ? task?.pointed_at_label ?? null : null,
         pointed_by: pointed ? task?.pointed_by ?? null : null,
+        partially_pointed: false,
+        partially_pointed_at: null,
+        partially_pointed_at_label: null,
+        partially_pointed_by: null,
     };
 }
 
-function applyPointOverrideToGroups(groups, sourceGroup, task, pointed, targetPointedState) {
-    const updatedTask = updateTaskPointedState(task, pointed);
-    if (Boolean(pointed) !== Boolean(targetPointedState)) {
+function updateTaskPartialPointedState(task, partiallyPointed) {
+    return {
+        ...task,
+        pointed: false,
+        pointed_at: null,
+        pointed_at_label: null,
+        pointed_by: null,
+        partially_pointed: Boolean(partiallyPointed),
+        partially_pointed_at: partiallyPointed ? task?.partially_pointed_at ?? null : null,
+        partially_pointed_at_label: partiallyPointed ? task?.partially_pointed_at_label ?? null : null,
+        partially_pointed_by: partiallyPointed ? task?.partially_pointed_by ?? null : null,
+    };
+}
+
+function taskMatchesPointedState(task, targetState) {
+    const pointed = isPointedValue(task?.pointed);
+    const partiallyPointed = isPointedValue(task?.partially_pointed);
+
+    if (targetState === 'pointed') return pointed;
+    if (targetState === 'partial') return !pointed && partiallyPointed;
+    if (targetState === 'unpointed') return !pointed && !partiallyPointed;
+
+    return true;
+}
+
+function applyTaskStateOverrideToGroups(groups, sourceGroup, task, targetState) {
+    if (!taskMatchesPointedState(task, targetState)) {
         return removeTaskFromGroups(groups, task.id);
     }
-    return upsertTaskInGroups(groups, sourceGroup, updatedTask);
+    return upsertTaskInGroups(groups, sourceGroup, task);
 }
 
 function normalizeTaskFormPayload(data) {
@@ -787,6 +815,7 @@ function MobileFiltersModal({
                     >
                         <option value="all">Tous</option>
                         <option value="pointed">Pointés</option>
+                        <option value="partial">Partiel</option>
                         <option value="unpointed">Non pointés</option>
                     </select>
                 </div>
@@ -961,6 +990,7 @@ export default function AprevoirIndex({
         update: moduleConfig?.routes?.update || 'a_prevoir.tasks.update',
         destroy: moduleConfig?.routes?.destroy || 'a_prevoir.tasks.destroy',
         point: moduleConfig?.routes?.point || 'a_prevoir.tasks.point',
+        partialPoint: moduleConfig?.routes?.partial_point || 'a_prevoir.tasks.partial-point',
         position: moduleConfig?.routes?.position || 'a_prevoir.tasks.position',
         groupPosition: moduleConfig?.routes?.group_position || route('a_prevoir.groups.position'),
         data: moduleConfig?.routes?.data || 'a_prevoir.tasks.data',
@@ -972,6 +1002,10 @@ export default function AprevoirIndex({
     const [pointedGroupsLoaded, setPointedGroupsLoaded] = useState(false);
     const [pointedGroupsLoading, setPointedGroupsLoading] = useState(false);
     const [pointedGroupsError, setPointedGroupsError] = useState(false);
+    const [partialGroups, setPartialGroups] = useState(null);
+    const [partialGroupsLoaded, setPartialGroupsLoaded] = useState(false);
+    const [partialGroupsLoading, setPartialGroupsLoading] = useState(false);
+    const [partialGroupsError, setPartialGroupsError] = useState(false);
     const [pointedRefreshTick, setPointedRefreshTick] = useState(0);
     const [localGroups, setLocalGroups] = useState(groups);
     const [modalOpen, setModalOpen] = useState(false);
@@ -1128,12 +1162,11 @@ export default function AprevoirIndex({
             let nextPointedGroups = Array.isArray(response?.data?.groups) ? response.data.groups : [];
             pointOverridesRef.current.forEach((override) => {
                 if (override.filterKey !== prefetchFilterKey) return;
-                nextPointedGroups = applyPointOverrideToGroups(
+                nextPointedGroups = applyTaskStateOverrideToGroups(
                     nextPointedGroups,
                     override.group,
                     override.task,
-                    override.pointed,
-                    true,
+                    'pointed',
                 );
             });
             setPointedGroups(nextPointedGroups);
@@ -1147,6 +1180,46 @@ export default function AprevoirIndex({
             setPointedGroupsLoaded(false);
         }).finally(() => {
             if (cancelled) return;
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [prefetchBaseFilters, prefetchFilterKey, pointedRefreshTick]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setPartialGroupsLoaded(false);
+        setPartialGroupsLoading(true);
+        setPartialGroupsError(false);
+        setPartialGroups(null);
+
+        window.axios.get(route(moduleRoutes.data), {
+            params: {
+                ...prefetchBaseFilters,
+                pointed_filter: 'partial',
+            },
+        }).then((response) => {
+            if (cancelled) return;
+            let nextPartialGroups = Array.isArray(response?.data?.groups) ? response.data.groups : [];
+            pointOverridesRef.current.forEach((override) => {
+                if (override.filterKey !== prefetchFilterKey) return;
+                nextPartialGroups = applyTaskStateOverrideToGroups(
+                    nextPartialGroups,
+                    override.group,
+                    override.task,
+                    'partial',
+                );
+            });
+            setPartialGroups(nextPartialGroups);
+            setPartialGroupsLoaded(true);
+            setPartialGroupsLoading(false);
+            setPartialGroupsError(false);
+        }).catch(() => {
+            if (cancelled) return;
+            setPartialGroupsError(true);
+            setPartialGroupsLoading(false);
+            setPartialGroupsLoaded(false);
         });
 
         return () => {
@@ -1180,6 +1253,9 @@ export default function AprevoirIndex({
         if (pointedGroupsLoaded) {
             pushGroups(pointedGroups || []);
         }
+        if (partialGroupsLoaded) {
+            pushGroups(partialGroups || []);
+        }
 
         return Array.from(map.values())
             .map((group) => ({
@@ -1192,7 +1268,7 @@ export default function AprevoirIndex({
                 }),
             }))
             .sort(compareGroupsForDisplay);
-    }, [unpointedGroups, pointedGroups, pointedGroupsLoaded]);
+    }, [unpointedGroups, pointedGroups, pointedGroupsLoaded, partialGroups, partialGroupsLoaded]);
 
     useEffect(() => {
         const mode = filterState.pointed_filter || 'unpointed';
@@ -1200,12 +1276,16 @@ export default function AprevoirIndex({
             setLocalGroups(pointedGroupsLoaded ? (pointedGroups || []) : []);
             return;
         }
+        if (mode === 'partial') {
+            setLocalGroups(partialGroupsLoaded ? (partialGroups || []) : []);
+            return;
+        }
         if (mode === 'all') {
             setLocalGroups(mergedAllGroups);
             return;
         }
         setLocalGroups(unpointedGroups);
-    }, [filterState.pointed_filter, unpointedGroups, pointedGroups, pointedGroupsLoaded, mergedAllGroups]);
+    }, [filterState.pointed_filter, unpointedGroups, pointedGroups, pointedGroupsLoaded, partialGroups, partialGroupsLoaded, mergedAllGroups]);
 
     useEffect(() => {
         if (!pendingScrollToTableRef.current) {
@@ -1372,7 +1452,7 @@ export default function AprevoirIndex({
     };
 
     const applyPointedFilterFromDesktop = (nextPointedFilter) => {
-        const normalized = ['all', 'pointed', 'unpointed'].includes(String(nextPointedFilter))
+        const normalized = ['all', 'pointed', 'partial', 'unpointed'].includes(String(nextPointedFilter))
             ? String(nextPointedFilter)
             : 'unpointed';
 
@@ -1428,7 +1508,8 @@ export default function AprevoirIndex({
         const sourceGroup =
             findTaskGroup(localGroups, task.id)
             || findTaskGroup(unpointedGroups, task.id)
-            || findTaskGroup(pointedGroups, task.id);
+            || findTaskGroup(pointedGroups, task.id)
+            || findTaskGroup(partialGroups, task.id);
         const templateTask = sourceGroup ? buildFormTaskFromRow(task, sourceGroup) : task;
 
         setTaskModalMode('create');
@@ -1791,10 +1872,15 @@ export default function AprevoirIndex({
         const sourceGroup =
             findTaskGroup(localGroups, taskId)
             || findTaskGroup(unpointedGroups, taskId)
-            || findTaskGroup(pointedGroups, taskId);
+            || findTaskGroup(pointedGroups, taskId)
+            || findTaskGroup(partialGroups, taskId);
         if (!sourceGroup) return;
 
-        const previousTask = updateTaskPointedState(task, previousPointed);
+        const previousTask = {
+            ...task,
+            pointed: previousPointed,
+            partially_pointed: isPointedValue(task?.partially_pointed),
+        };
         const nextTask = updateTaskPointedState(task, nextPointed);
         const mutationId =
             typeof crypto !== 'undefined' && crypto.randomUUID
@@ -1811,10 +1897,13 @@ export default function AprevoirIndex({
         pendingMutationIdsRef.current.add(mutationId);
         setSavingTaskIds((prev) => ({ ...prev, [taskId]: true }));
         setUnpointedGroups((prev) =>
-            applyPointOverrideToGroups(prev, sourceGroup, nextTask, nextPointed, false),
+            applyTaskStateOverrideToGroups(prev, sourceGroup, nextTask, 'unpointed'),
         );
         setPointedGroups((prev) =>
-            applyPointOverrideToGroups(prev, sourceGroup, nextTask, nextPointed, true),
+            applyTaskStateOverrideToGroups(prev, sourceGroup, nextTask, 'pointed'),
+        );
+        setPartialGroups((prev) =>
+            applyTaskStateOverrideToGroups(prev, sourceGroup, nextTask, 'partial'),
         );
 
         router.patch(
@@ -1830,16 +1919,109 @@ export default function AprevoirIndex({
                     pointOverridesRef.current.delete(taskId);
                     pendingMutationIdsRef.current.delete(mutationId);
                     setUnpointedGroups((prev) =>
-                        applyPointOverrideToGroups(prev, sourceGroup, previousTask, previousPointed, false),
+                        applyTaskStateOverrideToGroups(prev, sourceGroup, previousTask, 'unpointed'),
                     );
                     setPointedGroups((prev) =>
-                        applyPointOverrideToGroups(prev, sourceGroup, previousTask, previousPointed, true),
+                        applyTaskStateOverrideToGroups(prev, sourceGroup, previousTask, 'pointed'),
+                    );
+                    setPartialGroups((prev) =>
+                        applyTaskStateOverrideToGroups(prev, sourceGroup, previousTask, 'partial'),
                     );
                     window.dispatchEvent(
                         new CustomEvent('app:toast', {
                             detail: {
                                 type: 'error',
                                 message: "Échec du pointage. L'état précédent a été restauré.",
+                            },
+                        }),
+                    );
+                },
+                onFinish: () => {
+                    setSavingTaskIds((prev) => {
+                        const next = { ...prev };
+                        delete next[taskId];
+                        return next;
+                    });
+                    window.setTimeout(() => {
+                        pendingMutationIdsRef.current.delete(mutationId);
+                        if (pointOverridesRef.current.get(taskId)?.mutationId === mutationId) {
+                            pointOverridesRef.current.delete(taskId);
+                        }
+                    }, 10000);
+                },
+            },
+        );
+    };
+
+    const togglePartialPoint = (task, partiallyPointed) => {
+        const taskId = Number(task?.id || 0);
+        if (!taskId || savingTaskIds[taskId]) return;
+
+        const nextPartial = Boolean(partiallyPointed);
+        const previousTask = {
+            ...task,
+            pointed: isPointedValue(task?.pointed),
+            partially_pointed: isPointedValue(task?.partially_pointed),
+        };
+        if (nextPartial === isPointedValue(previousTask.partially_pointed) && !isPointedValue(previousTask.pointed)) return;
+
+        const sourceGroup =
+            findTaskGroup(localGroups, taskId)
+            || findTaskGroup(unpointedGroups, taskId)
+            || findTaskGroup(pointedGroups, taskId)
+            || findTaskGroup(partialGroups, taskId);
+        if (!sourceGroup) return;
+
+        const nextTask = updateTaskPartialPointedState(task, nextPartial);
+        const mutationId =
+            typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+        pointOverridesRef.current.set(taskId, {
+            group: sourceGroup,
+            task: nextTask,
+            filterKey: prefetchFilterKey,
+            mutationId,
+        });
+        pendingMutationIdsRef.current.add(mutationId);
+        setSavingTaskIds((prev) => ({ ...prev, [taskId]: true }));
+        setUnpointedGroups((prev) =>
+            applyTaskStateOverrideToGroups(prev, sourceGroup, nextTask, 'unpointed'),
+        );
+        setPointedGroups((prev) =>
+            applyTaskStateOverrideToGroups(prev, sourceGroup, nextTask, 'pointed'),
+        );
+        setPartialGroups((prev) =>
+            applyTaskStateOverrideToGroups(prev, sourceGroup, nextTask, 'partial'),
+        );
+
+        router.patch(
+            route(moduleRoutes.partialPoint, taskId),
+            {
+                partially_pointed: nextPartial,
+                client_mutation_id: mutationId,
+            },
+            {
+                preserveScroll: true,
+                preserveState: true,
+                onError: () => {
+                    pointOverridesRef.current.delete(taskId);
+                    pendingMutationIdsRef.current.delete(mutationId);
+                    setUnpointedGroups((prev) =>
+                        applyTaskStateOverrideToGroups(prev, sourceGroup, previousTask, 'unpointed'),
+                    );
+                    setPointedGroups((prev) =>
+                        applyTaskStateOverrideToGroups(prev, sourceGroup, previousTask, 'pointed'),
+                    );
+                    setPartialGroups((prev) =>
+                        applyTaskStateOverrideToGroups(prev, sourceGroup, previousTask, 'partial'),
+                    );
+                    window.dispatchEvent(
+                        new CustomEvent('app:toast', {
+                            detail: {
+                                type: 'error',
+                                message: "Échec du pointage partiel. L'état précédent a été restauré.",
                             },
                         }),
                     );
@@ -2151,6 +2333,9 @@ export default function AprevoirIndex({
                     pointedGroupsLoaded={pointedGroupsLoaded}
                     pointedGroupsLoading={pointedGroupsLoading}
                     pointedGroupsError={pointedGroupsError}
+                    partialGroupsLoaded={partialGroupsLoaded}
+                    partialGroupsLoading={partialGroupsLoading}
+                    partialGroupsError={partialGroupsError}
                     depotPlaceMap={reference?.depot_place_map || {}}
                     highlightedTaskId={highlightedTaskId}
                     focusTaskId={focus_task_id}
@@ -2161,10 +2346,12 @@ export default function AprevoirIndex({
                     canUpdate={Boolean(permissions?.can_update)}
                     canDelete={Boolean(permissions?.can_delete)}
                     canPoint={Boolean(permissions?.can_point)}
+                    canPartialPoint={Boolean(permissions?.can_partial_point)}
                     onEditTask={openEdit}
                     onDuplicateTask={openDuplicate}
                     onDeleteTask={setDeleteTask}
                     onTogglePoint={togglePoint}
+                    onTogglePartialPoint={togglePartialPoint}
                     onDragStartTask={onDragStartTask}
                     onDragStartGroup={onDragStartGroup}
                     onDragEndTask={onDragEndTask}
@@ -2194,11 +2381,13 @@ export default function AprevoirIndex({
                                 canUpdate={Boolean(permissions?.can_update)}
                                 canDelete={Boolean(permissions?.can_delete)}
                                 canPoint={Boolean(permissions?.can_point)}
+                                canPartialPoint={Boolean(permissions?.can_partial_point)}
                                 onCreateInGroup={openCreate}
                                 onEditTask={openEdit}
                                 onDuplicateTask={openDuplicate}
                                 onDeleteTask={setDeleteTask}
                                 onTogglePoint={togglePoint}
+                                onTogglePartialPoint={togglePartialPoint}
                                 onDragStartTask={onDragStartTask}
                                 onDragOverTask={onDragOverTask}
                                 onDropTask={onDropTask}

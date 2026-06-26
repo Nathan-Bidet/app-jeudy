@@ -10,11 +10,13 @@ export default function GroupCard({
     canUpdate = false,
     canDelete = false,
     canPoint = false,
+    canPartialPoint = false,
     onCreateInGroup,
     onEditTask,
     onDuplicateTask,
     onDeleteTask,
     onTogglePoint,
+    onTogglePartialPoint,
     onDragStartTask,
     onDragOverTask,
     onDropTask,
@@ -58,6 +60,7 @@ export default function GroupCard({
                         canUpdate={canUpdate}
                         canDelete={canDelete}
                         canPoint={canPoint}
+                        canPartialPoint={canPartialPoint}
                         onDragStart={(event, draggedTask) => onDragStartTask?.(event, group, draggedTask)}
                         onDragOver={(event, targetTask) => onDragOverTask?.(event, group, targetTask)}
                         onDrop={(event, targetTask) => onDropTask?.(event, group, targetTask)}
@@ -65,6 +68,7 @@ export default function GroupCard({
                         onDuplicate={onDuplicateTask}
                         onDelete={onDeleteTask}
                         onTogglePoint={onTogglePoint}
+                        onTogglePartialPoint={onTogglePartialPoint}
                     />
                 ))}
             </div>

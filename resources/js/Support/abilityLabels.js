@@ -7,6 +7,7 @@ const ABILITY_LABELS = {
     'a_prevoir.update': 'À Prévoir - Modifier',
     'a_prevoir.delete': 'À Prévoir - Supprimer',
     'a_prevoir.point': 'À Prévoir - Pointer',
+    'a_prevoir.partial_point': 'À Prévoir - Pointage partiel',
     'a_prevoir.export': 'À Prévoir - Exporter',
     'a_prevoir.sms': 'À Prévoir - SMS',
     'engrais.view': 'Engrais - Voir',

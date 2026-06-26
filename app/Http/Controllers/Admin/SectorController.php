@@ -50,6 +50,7 @@ class SectorController extends Controller
         'engrais.point',
         'engrais.export',
         'engrais.sms',
+        'a_prevoir.partial_point',
     ];
 
     public function __construct(private readonly AuditLogService $auditLogService)

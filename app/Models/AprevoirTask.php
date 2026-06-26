@@ -28,6 +28,9 @@ class AprevoirTask extends Model
         'pointed',
         'pointed_at',
         'pointed_by_user_id',
+        'partially_pointed',
+        'partially_pointed_at',
+        'partially_pointed_by_user_id',
         'position',
         'created_by_user_id',
         'updated_by_user_id',
@@ -43,12 +46,15 @@ class AprevoirTask extends Model
             'indicators' => 'array',
             'pointed' => 'boolean',
             'pointed_at' => 'datetime',
+            'partially_pointed' => 'boolean',
+            'partially_pointed_at' => 'datetime',
             'position' => 'integer',
             'vehicle_id' => 'integer',
             'remorque_id' => 'integer',
             'assignee_id' => 'integer',
             'assignee_label_free' => 'string',
             'pointed_by_user_id' => 'integer',
+            'partially_pointed_by_user_id' => 'integer',
             'created_by_user_id' => 'integer',
             'updated_by_user_id' => 'integer',
         ];
@@ -77,6 +83,11 @@ class AprevoirTask extends Model
     public function pointedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'pointed_by_user_id');
+    }
+
+    public function partiallyPointedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'partially_pointed_by_user_id');
     }
 
     public function assigneeUser(): BelongsTo

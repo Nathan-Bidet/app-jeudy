@@ -39,6 +39,7 @@ class AprevoirService
                 'createdBy:id,name,first_name,last_name',
                 'updatedBy:id,name,first_name,last_name',
                 'pointedBy:id,name,first_name,last_name',
+                'partiallyPointedBy:id,name,first_name,last_name',
             ]);
 
         if ($viewer) {
@@ -223,8 +224,10 @@ class AprevoirService
 
         if (($filters['pointed_filter'] ?? 'all') === 'pointed') {
             $query->where('pointed', true);
+        } elseif (($filters['pointed_filter'] ?? 'all') === 'partial') {
+            $query->where('pointed', false)->where('partially_pointed', true);
         } elseif (($filters['pointed_filter'] ?? 'all') === 'unpointed') {
-            $query->where('pointed', false);
+            $query->where('pointed', false)->where('partially_pointed', false);
         }
     }
 
@@ -524,6 +527,7 @@ class AprevoirService
         $createdName = $this->personName($task->createdBy);
         $updatedName = $this->personName($task->updatedBy);
         $pointedName = $this->personName($task->pointedBy);
+        $partiallyPointedName = $this->personName($task->partiallyPointedBy);
 
         $indicators = $this->publicIndicators($task->indicators);
         $isProjectedToLdt = $this->projectsToLdt();
@@ -560,6 +564,10 @@ class AprevoirService
             'pointed_at' => $task->pointed_at?->toIso8601String(),
             'pointed_at_label' => $task->pointed_at?->format('d/m/Y H:i'),
             'pointed_by' => $pointedName,
+            'partially_pointed' => (bool) $task->partially_pointed,
+            'partially_pointed_at' => $task->partially_pointed_at?->toIso8601String(),
+            'partially_pointed_at_label' => $task->partially_pointed_at?->format('d/m/Y H:i'),
+            'partially_pointed_by' => $partiallyPointedName,
             'position' => (int) $task->position,
             'created_by' => [
                 'name' => $createdName,
