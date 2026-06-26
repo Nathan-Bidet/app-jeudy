@@ -17,6 +17,7 @@ class HourSheet extends Model
         'total_minutes',
         'description',
         'is_not_worked',
+        'is_continuous_day',
         'has_breakfast_before_5',
         'has_lunch',
         'has_dinner_after_21',
@@ -26,6 +27,7 @@ class HourSheet extends Model
     protected $casts = [
         'work_date' => 'date',
         'is_not_worked' => 'boolean',
+        'is_continuous_day' => 'boolean',
         'has_breakfast_before_5' => 'boolean',
         'has_lunch' => 'boolean',
         'has_dinner_after_21' => 'boolean',

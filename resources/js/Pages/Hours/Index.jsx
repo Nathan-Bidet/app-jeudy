@@ -37,6 +37,13 @@ const TIME_FIELDS = [
 ];
 const MORNING_TIME_FIELDS = TIME_FIELDS.slice(0, 2);
 const AFTERNOON_TIME_FIELDS = TIME_FIELDS.slice(2);
+// Mode "journée continue / demi-journée" : une seule plage, réutilisant les
+// mêmes clés que morning_start/afternoon_end pour rester compatible avec la
+// sauvegarde (morning_end et afternoon_start restent vides côté serveur).
+const CONTINUOUS_TIME_FIELDS = [
+    { key: 'morning_start', label: 'Début' },
+    { key: 'afternoon_end', label: 'Fin' },
+];
 
 const CHECKBOX_FIELDS = [
     { key: 'has_breakfast_before_5', label: 'Casse-croûte (Avant 5h)' },
@@ -131,26 +138,59 @@ function timeToMinutes(timeValue) {
     return (hours * 60) + minutes;
 }
 
-function computeRangeDuration(start, end, label) {
+// allowOvernight (créneau "soir" uniquement) : si la fin est antérieure au
+// début, on considère qu'elle a lieu le lendemain (+24h) pour le calcul de la
+// durée uniquement, sans jamais modifier la date du jour ni créer d'heures
+// sur la journée suivante.
+function computeRangeDuration(start, end, label, allowOvernight = false) {
     if (!start || !end) {
         return { minutes: 0, error: null };
     }
 
     const startMinutes = timeToMinutes(start);
-    const endMinutes = timeToMinutes(end);
+    let endMinutes = timeToMinutes(end);
 
     if (startMinutes === null || endMinutes === null) {
         return { minutes: 0, error: null };
     }
 
     if (endMinutes < startMinutes) {
-        return {
-            minutes: 0,
-            error: `Plage ${label} invalide: arrivée avant départ.`,
-        };
+        if (!allowOvernight) {
+            return {
+                minutes: 0,
+                error: `Plage ${label} invalide: arrivée avant départ.`,
+            };
+        }
+
+        endMinutes += 24 * 60;
     }
 
     return { minutes: endMinutes - startMinutes, error: null };
+}
+
+// Calcule la durée totale d'une journée et ses éventuelles erreurs, en
+// tenant compte du mode "journée continue / demi-journée" (une seule plage
+// Début -> Fin) ou du mode classique (matin + soir séparés).
+function computeDayTotals(dayState, coverage) {
+    if (dayState?.is_continuous_day) {
+        const range = (coverage.morning || coverage.afternoon)
+            ? { minutes: 0, error: null }
+            : computeRangeDuration(dayState.morning_start, dayState.afternoon_end, 'journée continue', true);
+
+        return { totalMinutes: range.minutes, errors: [range.error].filter(Boolean) };
+    }
+
+    const morningRange = coverage.morning
+        ? { minutes: 0, error: null }
+        : computeRangeDuration(dayState?.morning_start, dayState?.morning_end, 'matin');
+    const eveningRange = coverage.afternoon
+        ? { minutes: 0, error: null }
+        : computeRangeDuration(dayState?.afternoon_start, dayState?.afternoon_end, 'soir', true);
+
+    return {
+        totalMinutes: morningRange.minutes + eveningRange.minutes,
+        errors: [morningRange.error, eveningRange.error].filter(Boolean),
+    };
 }
 
 function formatWorkedDuration(totalMinutes) {
@@ -167,6 +207,7 @@ function defaultDayState({ isFriday = false } = {}) {
         afternoon_end: isFriday ? '17:00' : '18:00',
         description: '',
         is_not_worked: false,
+        is_continuous_day: false,
         has_breakfast_before_5: false,
         has_lunch: false,
         has_dinner_after_21: false,
@@ -182,6 +223,7 @@ function nonWorkedDayState() {
         afternoon_end: '',
         description: '',
         is_not_worked: true,
+        is_continuous_day: false,
         has_breakfast_before_5: false,
         has_lunch: false,
         has_dinner_after_21: false,
@@ -324,6 +366,7 @@ export default function HoursIndex({
                 afternoon_end: normalizeTimeForSelect(existing.afternoon_end),
                 description: existing.description || '',
                 is_not_worked: Boolean(existing.is_not_worked),
+                is_continuous_day: Boolean(existing.is_continuous_day),
                 has_breakfast_before_5: Boolean(existing.has_breakfast_before_5),
                 has_lunch: Boolean(existing.has_lunch),
                 has_dinner_after_21: Boolean(existing.has_dinner_after_21),
@@ -440,6 +483,7 @@ export default function HoursIndex({
                 afternoon_end: normalizeTimeForSelect(existing.afternoon_end),
                 description: existing.description || '',
                 is_not_worked: Boolean(existing.is_not_worked),
+                is_continuous_day: Boolean(existing.is_continuous_day),
                 has_breakfast_before_5: Boolean(existing.has_breakfast_before_5),
                 has_lunch: Boolean(existing.has_lunch),
                 has_dinner_after_21: Boolean(existing.has_dinner_after_21),
@@ -502,12 +546,15 @@ export default function HoursIndex({
             return next;
         });
 
+        const isContinuousDay = Boolean(dayState.is_continuous_day) && !coverage.morning && !coverage.afternoon;
+
         router.post(route('hours.store'), {
             work_date: day.work_date,
             is_not_worked: Boolean(dayState.is_not_worked),
+            is_continuous_day: isContinuousDay,
             morning_start: coverage.morning ? null : (dayState.morning_start || null),
-            morning_end: coverage.morning ? null : (dayState.morning_end || null),
-            afternoon_start: coverage.afternoon ? null : (dayState.afternoon_start || null),
+            morning_end: (coverage.morning || isContinuousDay) ? null : (dayState.morning_end || null),
+            afternoon_start: (coverage.afternoon || isContinuousDay) ? null : (dayState.afternoon_start || null),
             afternoon_end: coverage.afternoon ? null : (dayState.afternoon_end || null),
             description: dayState.description || null,
             has_breakfast_before_5: Boolean(dayState.has_breakfast_before_5),
@@ -544,6 +591,7 @@ export default function HoursIndex({
         router.post(route('hours.store'), {
             work_date: day.work_date,
             is_not_worked: true,
+            is_continuous_day: false,
             morning_start: null,
             morning_end: null,
             afternoon_start: null,
@@ -575,14 +623,8 @@ export default function HoursIndex({
             return;
         }
 
-        const morningRange = coverage.morning
-            ? { minutes: 0, error: null }
-            : computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
-        const eveningRange = coverage.afternoon
-            ? { minutes: 0, error: null }
-            : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
-        const hasErrors = [morningRange.error, eveningRange.error].some(Boolean);
-        if (hasErrors) {
+        const { errors } = computeDayTotals(dayState, coverage);
+        if (errors.length > 0) {
             return;
         }
 
@@ -592,12 +634,15 @@ export default function HoursIndex({
             return next;
         });
 
+        const isContinuousDay = Boolean(dayState.is_continuous_day) && !coverage.morning && !coverage.afternoon;
+
         router.post(route('hours.store'), {
             work_date: workDate,
             is_not_worked: Boolean(dayState.is_not_worked),
+            is_continuous_day: isContinuousDay,
             morning_start: coverage.morning ? null : (dayState.morning_start || null),
-            morning_end: coverage.morning ? null : (dayState.morning_end || null),
-            afternoon_start: coverage.afternoon ? null : (dayState.afternoon_start || null),
+            morning_end: (coverage.morning || isContinuousDay) ? null : (dayState.morning_end || null),
+            afternoon_start: (coverage.afternoon || isContinuousDay) ? null : (dayState.afternoon_start || null),
             afternoon_end: coverage.afternoon ? null : (dayState.afternoon_end || null),
             description: dayState.description || null,
             has_breakfast_before_5: Boolean(dayState.has_breakfast_before_5),
@@ -715,14 +760,13 @@ export default function HoursIndex({
 
                                 const dayState = formState[day.id];
                                 const isNotWorked = Boolean(dayState.is_not_worked);
-                                const morningRange = coverage.morning
-                                    ? { minutes: 0, error: null }
-                                    : computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
-                                const eveningRange = coverage.afternoon
-                                    ? { minutes: 0, error: null }
-                                    : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
-                                const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
-                                const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
+                                const canUseContinuousDay = !coverage.morning && !coverage.afternoon;
+                                const isContinuousDay = canUseContinuousDay && Boolean(dayState.is_continuous_day);
+                                const { totalMinutes: totalWorkedMinutes, errors: rangeErrors } = computeDayTotals(
+                                    { ...dayState, is_continuous_day: isContinuousDay },
+                                    coverage,
+                                );
+                                const errorMessages = isNotWorked ? [] : rangeErrors;
                                 const descriptionMissing = !isNotWorked && !String(dayState.description || '').trim();
                                 const isSaving = savingDates.has(day.work_date);
 
@@ -733,6 +777,23 @@ export default function HoursIndex({
                                     >
                                         <h2 className="text-center text-lg font-semibold uppercase">{day.label}</h2>
 
+                                        {canUseContinuousDay && (
+                                            <button
+                                                type="button"
+                                                onClick={() => onToggleCheck(day.id, 'is_continuous_day')}
+                                                disabled={isNotWorked}
+                                                className="mt-3 flex items-center justify-center gap-3 text-left"
+                                            >
+                                                <span
+                                                    className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--app-border)] bg-white text-xs"
+                                                    aria-hidden="true"
+                                                >
+                                                    {dayState.is_continuous_day ? '✔️' : ''}
+                                                </span>
+                                                <span className="text-sm">Journée continue / Demi-journée</span>
+                                            </button>
+                                        )}
+
                                         {isNotWorked && (
                                             <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
                                                 Journée marquée comme non travaillée
@@ -740,50 +801,73 @@ export default function HoursIndex({
                                         )}
 
                                         <div className="mt-4 grid gap-3">
-                                            {coverage.morning ? (
-                                                <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
-                                                    Vous êtes en congé ce matin.
-                                                </p>
-                                            ) : MORNING_TIME_FIELDS.map((field) => (
-                                                <label key={field.key} className="grid gap-1 text-sm">
-                                                    <span className="font-medium">{field.label}</span>
-                                                    <select
-                                                        value={dayState[field.key]}
-                                                        onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
-                                                        disabled={isNotWorked}
-                                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
-                                                    >
-                                                        <option value="">--:--</option>
-                                                        {timeOptions.map((time) => (
-                                                            <option key={time} value={time}>
-                                                                {time}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </label>
-                                            ))}
-                                            {coverage.afternoon ? (
-                                                <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
-                                                    Vous êtes en congé cet après-midi.
-                                                </p>
-                                            ) : AFTERNOON_TIME_FIELDS.map((field) => (
-                                                <label key={field.key} className="grid gap-1 text-sm">
-                                                    <span className="font-medium">{field.label}</span>
-                                                    <select
-                                                        value={dayState[field.key]}
-                                                        onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
-                                                        disabled={isNotWorked}
-                                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
-                                                    >
-                                                        <option value="">--:--</option>
-                                                        {timeOptions.map((time) => (
-                                                            <option key={time} value={time}>
-                                                                {time}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </label>
-                                            ))}
+                                            {isContinuousDay ? (
+                                                CONTINUOUS_TIME_FIELDS.map((field) => (
+                                                    <label key={field.key} className="grid gap-1 text-sm">
+                                                        <span className="font-medium">{field.label}</span>
+                                                        <select
+                                                            value={dayState[field.key]}
+                                                            onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
+                                                            disabled={isNotWorked}
+                                                            className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                                        >
+                                                            <option value="">--:--</option>
+                                                            {timeOptions.map((time) => (
+                                                                <option key={time} value={time}>
+                                                                    {time}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </label>
+                                                ))
+                                            ) : (
+                                                <>
+                                                    {coverage.morning ? (
+                                                        <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                            Vous êtes en congé ce matin.
+                                                        </p>
+                                                    ) : MORNING_TIME_FIELDS.map((field) => (
+                                                        <label key={field.key} className="grid gap-1 text-sm">
+                                                            <span className="font-medium">{field.label}</span>
+                                                            <select
+                                                                value={dayState[field.key]}
+                                                                onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
+                                                                disabled={isNotWorked}
+                                                                className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                                            >
+                                                                <option value="">--:--</option>
+                                                                {timeOptions.map((time) => (
+                                                                    <option key={time} value={time}>
+                                                                        {time}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                    ))}
+                                                    {coverage.afternoon ? (
+                                                        <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                                            Vous êtes en congé cet après-midi.
+                                                        </p>
+                                                    ) : AFTERNOON_TIME_FIELDS.map((field) => (
+                                                        <label key={field.key} className="grid gap-1 text-sm">
+                                                            <span className="font-medium">{field.label}</span>
+                                                            <select
+                                                                value={dayState[field.key]}
+                                                                onChange={(event) => onTimeChange(day.id, field.key, event.target.value)}
+                                                                disabled={isNotWorked}
+                                                                className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                                            >
+                                                                <option value="">--:--</option>
+                                                                {timeOptions.map((time) => (
+                                                                    <option key={time} value={time}>
+                                                                        {time}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                    ))}
+                                                </>
+                                            )}
                                         </div>
 
                                         <div className="mt-4 text-center">
@@ -897,14 +981,13 @@ export default function HoursIndex({
                                             const dayState = inlineEditingByDate[sheet.work_date];
                                             const isNotWorked = Boolean(dayState.is_not_worked);
                                             const coverage = leaveCoverage(approvedLeavesByDate[sheet.work_date]);
-                                            const morningRange = coverage.morning
-                                                ? { minutes: 0, error: null }
-                                                : computeRangeDuration(dayState.morning_start, dayState.morning_end, 'matin');
-                                            const eveningRange = coverage.afternoon
-                                                ? { minutes: 0, error: null }
-                                                : computeRangeDuration(dayState.afternoon_start, dayState.afternoon_end, 'soir');
-                                            const totalWorkedMinutes = morningRange.minutes + eveningRange.minutes;
-                                            const errorMessages = isNotWorked ? [] : [morningRange.error, eveningRange.error].filter(Boolean);
+                                            const canUseContinuousDay = !coverage.morning && !coverage.afternoon;
+                                            const isContinuousDay = canUseContinuousDay && Boolean(dayState.is_continuous_day);
+                                            const { totalMinutes: totalWorkedMinutes, errors: inlineRangeErrors } = computeDayTotals(
+                                                { ...dayState, is_continuous_day: isContinuousDay },
+                                                coverage,
+                                            );
+                                            const errorMessages = isNotWorked ? [] : inlineRangeErrors;
                                             const descriptionMissing = !isNotWorked && !String(dayState.description || '').trim();
                                             const isSaving = savingDates.has(sheet.work_date);
 
@@ -927,6 +1010,23 @@ export default function HoursIndex({
                                                         </button>
                                                     </div>
 
+                                                    {canUseContinuousDay && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onInlineToggleCheck(sheet.work_date, 'is_continuous_day')}
+                                                            disabled={isNotWorked}
+                                                            className="mt-3 flex items-center justify-center gap-3 text-left"
+                                                        >
+                                                            <span
+                                                                className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--app-border)] bg-white text-xs"
+                                                                aria-hidden="true"
+                                                            >
+                                                                {dayState.is_continuous_day ? '✔️' : ''}
+                                                            </span>
+                                                            <span className="text-sm">Journée continue / Demi-journée</span>
+                                                        </button>
+                                                    )}
+
                                                     {isNotWorked && (
                                                         <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
                                                             Journée marquée comme non travaillée
@@ -934,6 +1034,27 @@ export default function HoursIndex({
                                                     )}
 
                                                     <div className="mt-4 grid gap-3">
+                                                        {isContinuousDay ? (
+                                                            CONTINUOUS_TIME_FIELDS.map((field) => (
+                                                                <label key={field.key} className="grid gap-1 text-sm">
+                                                                    <span className="font-medium">{field.label}</span>
+                                                                    <select
+                                                                        value={dayState[field.key]}
+                                                                        onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
+                                                                        disabled={isNotWorked}
+                                                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                                                    >
+                                                                        <option value="">--:--</option>
+                                                                        {timeOptions.map((time) => (
+                                                                            <option key={time} value={time}>
+                                                                                {time}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                </label>
+                                                            ))
+                                                        ) : (
+                                                        <>
                                                         {coverage.morning ? (
                                                             <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
                                                                 Vous êtes en congé ce matin.
@@ -978,6 +1099,8 @@ export default function HoursIndex({
                                                                 </select>
                                                             </label>
                                                         ))}
+                                                        </>
+                                                        )}
                                                     </div>
 
                                                     <div className="mt-4 text-center">
@@ -1073,22 +1196,22 @@ export default function HoursIndex({
                                                 ) : (
                                                     (() => {
                                                         const coverage = leaveCoverage(entry.leave);
+                                                        const isContinuousDay = Boolean(sheet.is_continuous_day) && !coverage.morning && !coverage.afternoon;
+                                                        const { totalMinutes: totalWorkedMinutes } = computeDayTotals(
+                                                            { ...sheet, is_continuous_day: isContinuousDay },
+                                                            coverage,
+                                                        );
                                                         const morningStart = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_start);
                                                         const morningEnd = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_end);
                                                         const afternoonStart = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_start);
                                                         const afternoonEnd = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_end);
-                                                        const morningRange = coverage.morning
-                                                            ? { minutes: 0 }
-                                                            : computeRangeDuration(sheet.morning_start, sheet.morning_end, 'matin');
-                                                        const afternoonRange = coverage.afternoon
-                                                            ? { minutes: 0 }
-                                                            : computeRangeDuration(sheet.afternoon_start, sheet.afternoon_end, 'soir');
-                                                        const totalWorkedMinutes = morningRange.minutes + afternoonRange.minutes;
-                                                        const hoursLabel = coverage.morning
-                                                            ? `Congé / Congé / ${afternoonStart} - ${afternoonEnd}`
-                                                            : coverage.afternoon
-                                                                ? `${morningStart} - ${morningEnd} / Congé / Congé`
-                                                                : `${morningStart} - ${morningEnd} / ${afternoonStart} - ${afternoonEnd}`;
+                                                        const hoursLabel = isContinuousDay
+                                                            ? `${formatHistoryTime(sheet.morning_start)} - ${formatHistoryTime(sheet.afternoon_end)} (journée continue)`
+                                                            : coverage.morning
+                                                                ? `Congé / Congé / ${afternoonStart} - ${afternoonEnd}`
+                                                                : coverage.afternoon
+                                                                    ? `${morningStart} - ${morningEnd} / Congé / Congé`
+                                                                    : `${morningStart} - ${morningEnd} / ${afternoonStart} - ${afternoonEnd}`;
 
                                                         return (
                                                     <>

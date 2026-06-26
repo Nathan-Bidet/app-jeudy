@@ -83,6 +83,7 @@ class HourSheetController extends Controller
             'afternoon_end' => ['nullable', 'date_format:H:i'],
             'description' => ['nullable', 'string', 'max:5000'],
             'is_not_worked' => ['nullable', 'boolean'],
+            'is_continuous_day' => ['nullable', 'boolean'],
             'has_breakfast_before_5' => ['nullable', 'boolean'],
             'has_lunch' => ['nullable', 'boolean'],
             'has_dinner_after_21' => ['nullable', 'boolean'],
@@ -126,21 +127,29 @@ class HourSheetController extends Controller
 
         $morningUnavailable = (bool) ($approvedLeave['morning'] ?? false);
         $afternoonUnavailable = (bool) ($approvedLeave['afternoon'] ?? false);
+        // Le mode "journée continue" n'a de sens que sur une journée classique
+        // (ni congé du matin, ni congé du soir) : on ignore sinon la case
+        // cochée pour ne jamais perturber la logique des congés existante.
+        $isContinuousDay = (bool) ($validated['is_continuous_day'] ?? false)
+            && ! $morningUnavailable
+            && ! $afternoonUnavailable;
+
         $morningStart = $isNotWorked || $morningUnavailable ? null : ($validated['morning_start'] ?? null);
-        $morningEnd = $isNotWorked || $morningUnavailable ? null : ($validated['morning_end'] ?? null);
-        $afternoonStart = $isNotWorked || $afternoonUnavailable ? null : ($validated['afternoon_start'] ?? null);
+        $morningEnd = $isNotWorked || $morningUnavailable || $isContinuousDay ? null : ($validated['morning_end'] ?? null);
+        $afternoonStart = $isNotWorked || $afternoonUnavailable || $isContinuousDay ? null : ($validated['afternoon_start'] ?? null);
         $afternoonEnd = $isNotWorked || $afternoonUnavailable ? null : ($validated['afternoon_end'] ?? null);
 
-        $morningMinutes = $isNotWorked ? 0 : $this->computeRangeMinutes(
-            $morningStart,
-            $morningEnd,
-            'matin'
-        );
-        $afternoonMinutes = $isNotWorked ? 0 : $this->computeRangeMinutes(
-            $afternoonStart,
-            $afternoonEnd,
-            'soir'
-        );
+        if ($isNotWorked) {
+            $totalMinutes = 0;
+        } elseif ($isContinuousDay) {
+            // Début = morning_start, Fin = afternoon_end : une seule plage,
+            // avec passage après minuit autorisé pour le calcul uniquement.
+            $totalMinutes = $this->computeRangeMinutes($morningStart, $afternoonEnd, 'journée continue', true);
+        } else {
+            $morningMinutes = $this->computeRangeMinutes($morningStart, $morningEnd, 'matin');
+            $afternoonMinutes = $this->computeRangeMinutes($afternoonStart, $afternoonEnd, 'soir', true);
+            $totalMinutes = $morningMinutes + $afternoonMinutes;
+        }
 
         $savedHourSheet = HourSheet::query()->updateOrCreate(
             [
@@ -152,9 +161,10 @@ class HourSheetController extends Controller
                 'morning_end' => $morningEnd,
                 'afternoon_start' => $afternoonStart,
                 'afternoon_end' => $afternoonEnd,
-                'total_minutes' => $morningMinutes + $afternoonMinutes,
+                'total_minutes' => $totalMinutes,
                 'description' => $description !== '' ? $description : null,
                 'is_not_worked' => $isNotWorked,
+                'is_continuous_day' => $isContinuousDay,
                 'has_breakfast_before_5' => $isNotWorked ? false : (bool) ($validated['has_breakfast_before_5'] ?? false),
                 'has_lunch' => $isNotWorked ? false : (bool) ($validated['has_lunch'] ?? false),
                 'has_dinner_after_21' => $isNotWorked ? false : (bool) ($validated['has_dinner_after_21'] ?? false),
@@ -345,15 +355,27 @@ class HourSheetController extends Controller
                         continue;
                     }
 
-                    $totalMinutes = ($morningOnLeave ? 0 : $this->computeRangeMinutes(
-                        $sheet->morning_start,
-                        $sheet->morning_end,
-                        'matin'
-                    )) + ($afternoonOnLeave ? 0 : $this->computeRangeMinutes(
-                        $sheet->afternoon_start,
-                        $sheet->afternoon_end,
-                        'soir'
-                    ));
+                    if ((bool) $sheet->is_continuous_day) {
+                        // Une seule plage Début (morning_start) -> Fin (afternoon_end) :
+                        // morning_end et afternoon_start sont vides pour ces journées.
+                        $totalMinutes = $this->computeRangeMinutes(
+                            $sheet->morning_start,
+                            $sheet->afternoon_end,
+                            'journée continue',
+                            true
+                        );
+                    } else {
+                        $totalMinutes = ($morningOnLeave ? 0 : $this->computeRangeMinutes(
+                            $sheet->morning_start,
+                            $sheet->morning_end,
+                            'matin'
+                        )) + ($afternoonOnLeave ? 0 : $this->computeRangeMinutes(
+                            $sheet->afternoon_start,
+                            $sheet->afternoon_end,
+                            'soir',
+                            true
+                        ));
+                    }
 
                     $writer->addRow(Row::fromValues([
                         $date?->format('d/m/Y'),
@@ -437,7 +459,14 @@ class HourSheetController extends Controller
         return response()->download($filePath, $downloadName)->deleteFileAfterSend(true);
     }
 
-    private function computeRangeMinutes(?string $start, ?string $end, string $label): int
+    /**
+     * @param  bool  $allowOvernight  Si true (créneau "soir" uniquement), une fin
+     *                                 antérieure au début est considérée comme le
+     *                                 lendemain (+24h) pour le calcul de la durée,
+     *                                 sans jamais modifier work_date ni créer de
+     *                                 données sur le jour suivant.
+     */
+    private function computeRangeMinutes(?string $start, ?string $end, string $label, bool $allowOvernight = false): int
     {
         if (! $start || ! $end) {
             return 0;
@@ -451,9 +480,13 @@ class HourSheetController extends Controller
         }
 
         if ($endMinutes < $startMinutes) {
-            throw ValidationException::withMessages([
-                'work_date' => sprintf('Plage %s invalide: arrivée avant départ.', $label),
-            ]);
+            if (! $allowOvernight) {
+                throw ValidationException::withMessages([
+                    'work_date' => sprintf('Plage %s invalide: arrivée avant départ.', $label),
+                ]);
+            }
+
+            $endMinutes += 1440;
         }
 
         return $endMinutes - $startMinutes;
@@ -551,6 +584,7 @@ class HourSheetController extends Controller
             'total_minutes' => (int) $hourSheet->total_minutes,
             'description' => $hourSheet->description,
             'is_not_worked' => (bool) $hourSheet->is_not_worked,
+            'is_continuous_day' => (bool) $hourSheet->is_continuous_day,
             'has_breakfast_before_5' => (bool) $hourSheet->has_breakfast_before_5,
             'has_lunch' => (bool) $hourSheet->has_lunch,
             'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
