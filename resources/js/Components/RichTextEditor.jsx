@@ -24,12 +24,10 @@ function ToolbarButton({ icon: Icon, label, onClick }) {
 export default function RichTextEditor({ value, onChange, placeholder = '', minHeightClassName = 'min-h-[140px]' }) {
     const editorRef = useRef(null);
     const selectionRangeRef = useRef(null);
-    const initializedRef = useRef(false);
 
     useEffect(() => {
-        if (!initializedRef.current && editorRef.current) {
+        if (editorRef.current && editorRef.current.innerHTML !== (value || '')) {
             editorRef.current.innerHTML = value || '';
-            initializedRef.current = true;
         }
     }, [value]);
 

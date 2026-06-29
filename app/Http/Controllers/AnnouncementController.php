@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Announcement;
 use App\Models\AnnouncementPoll;
+use App\Models\AnnouncementPollResponse;
 use App\Models\AnnouncementRecipientGroup;
 use App\Models\Sector;
 use App\Models\User;
@@ -38,35 +39,44 @@ class AnnouncementController extends Controller
         $canView = (bool) ($user && $access->can($user, 'annonces.view'));
         $canCreate = (bool) ($user && $access->can($user, 'annonces.create'));
         $canManage = (bool) ($user && $access->can($user, 'annonces.manage'));
+        $canAccessModule = $canView || $canCreate || $canManage;
 
         $validated = $request->validate([
             'open_draft' => ['nullable', 'integer'],
             'highlight' => ['nullable', 'integer'],
         ]);
+        $highlightId = ! empty($validated['highlight']) ? (int) $validated['highlight'] : null;
+        $highlightAnnouncement = $this->highlightAnnouncement($highlightId, $user, $canManage);
+
+        if (! $canAccessModule && ! $highlightAnnouncement) {
+            abort(403);
+        }
 
         $announcementsQuery = Announcement::query()
-            ->with(['creator:id,name,first_name,last_name', 'poll.options']);
+            ->with($this->announcementRelations());
 
-        if (! $canManage) {
+        if (! $canAccessModule) {
+            $announcementsQuery->whereRaw('1 = 0');
+        } elseif (! $canManage) {
             $announcementsQuery->where('created_by_user_id', $user?->id);
         }
 
         $announcements = $announcementsQuery
             ->orderByDesc('created_at')
             ->get()
-            ->map(fn (Announcement $announcement): array => $this->presentAnnouncement($announcement))
+            ->map(fn (Announcement $announcement): array => $this->presentAnnouncement($announcement, $user, $canManage))
             ->values()
             ->all();
 
         $openDraft = null;
-        if (! empty($validated['open_draft'])) {
+        if ($canAccessModule && ! empty($validated['open_draft'])) {
             $draft = Announcement::query()
-                ->with('poll.options')
+                ->with($this->announcementRelations())
                 ->whereKey((int) $validated['open_draft'])
                 ->first();
 
             if ($draft && ($canManage || (int) $draft->created_by_user_id === (int) $user?->id)) {
-                $openDraft = $this->presentAnnouncement($draft);
+                $openDraft = $this->presentAnnouncement($draft, $user, $canManage);
             }
         }
 
@@ -76,34 +86,36 @@ class AnnouncementController extends Controller
                 'can_create' => $canCreate,
                 'can_manage' => $canManage,
             ],
-            'sectors' => Sector::query()
+            'sectors' => $canAccessModule ? Sector::query()
                 ->orderBy('name')
                 ->get(['id', 'name'])
                 ->map(fn (Sector $sector): array => ['id' => $sector->id, 'name' => $sector->name])
                 ->values()
-                ->all(),
-            'users' => User::query()
+                ->all() : [],
+            'users' => $canAccessModule ? User::query()
                 ->where('is_active', true)
                 ->orderBy('name')
-                ->get(['id', 'name', 'first_name', 'last_name', 'sector_id', 'phone', 'mobile_phone'])
+                ->get(['id', 'name', 'first_name', 'last_name', 'sector_id', 'mobile_phone', 'directory_phones'])
                 ->map(fn (User $candidate): array => [
                     'id' => $candidate->id,
                     'name' => $this->userLabel($candidate),
                     'sector_id' => $candidate->sector_id,
-                    'phone' => $candidate->mobile_phone ?: $candidate->phone,
+                    'mobile_phone' => $candidate->mobile_phone,
+                    'directory_phones' => is_array($candidate->directory_phones) ? $candidate->directory_phones : [],
                 ])
                 ->values()
-                ->all(),
-            'recipientGroups' => AnnouncementRecipientGroup::query()
+                ->all() : [],
+            'recipientGroups' => $canAccessModule ? AnnouncementRecipientGroup::query()
                 ->when(! $canManage, fn ($query) => $query->where('created_by_user_id', $user?->id))
                 ->orderBy('name')
                 ->get()
                 ->map(fn (AnnouncementRecipientGroup $group): array => $this->presentGroup($group))
                 ->values()
-                ->all(),
+                ->all() : [],
             'announcements' => $announcements,
             'openDraft' => $openDraft,
-            'highlightId' => ! empty($validated['highlight']) ? (int) $validated['highlight'] : null,
+            'highlightId' => $highlightId,
+            'highlightAnnouncement' => $highlightAnnouncement,
         ]);
     }
 
@@ -179,9 +191,15 @@ class AnnouncementController extends Controller
 
         $announcement->loadMissing('poll.options');
 
+        if ($announcement->status !== Announcement::STATUS_SENT) {
+            return redirect()->route('annonces.index', ['open_draft' => $announcement->id])
+                ->with('success', 'Annonce ouverte.');
+        }
+
         $draft = DB::transaction(function () use ($announcement, $user): Announcement {
             $draft = Announcement::create([
                 'created_by_user_id' => $user->id,
+                'title' => $announcement->title,
                 'body_html' => $announcement->body_html,
                 'status' => Announcement::STATUS_DRAFT,
                 'sector_ids' => $announcement->sector_ids ?? [],
@@ -195,6 +213,7 @@ class AnnouncementController extends Controller
                 $poll = $draft->poll()->create([
                     'poll_type' => $announcement->poll->poll_type,
                     'allow_other' => $announcement->poll->allow_other,
+                    'other_label' => $announcement->poll->other_label,
                 ]);
 
                 foreach ($announcement->poll->options as $option) {
@@ -260,6 +279,66 @@ class AnnouncementController extends Controller
         return back()->with('success', 'Groupe de destinataires supprimé.');
     }
 
+    public function respondPoll(Request $request, Announcement $announcement): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 403);
+
+        $announcement->loadMissing(['poll.options']);
+        abort_unless($announcement->poll && $announcement->status === Announcement::STATUS_SENT, 404);
+        abort_unless($this->isAnnouncementRecipient($announcement, $user), 403);
+
+        $validated = $request->validate([
+            'selected_option_ids' => ['nullable', 'array'],
+            'selected_option_ids.*' => ['integer'],
+            'other_text' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $availableOptionIds = $announcement->poll->options->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $selectedOptionIds = array_values(array_intersect(
+            array_values(array_unique(array_map('intval', $validated['selected_option_ids'] ?? []))),
+            $availableOptionIds,
+        ));
+
+        if ($announcement->poll->poll_type === AnnouncementPoll::TYPE_SINGLE && count($selectedOptionIds) > 1) {
+            throw ValidationException::withMessages([
+                'selected_option_ids' => 'Sélectionnez une seule réponse.',
+            ]);
+        }
+
+        $otherText = trim((string) ($validated['other_text'] ?? ''));
+        if (! $announcement->poll->allow_other) {
+            $otherText = '';
+        }
+
+        if ($announcement->poll->poll_type === AnnouncementPoll::TYPE_SINGLE && $otherText !== '' && $selectedOptionIds !== []) {
+            throw ValidationException::withMessages([
+                'selected_option_ids' => 'Sélectionnez une seule réponse.',
+            ]);
+        }
+
+        if ($selectedOptionIds === [] && $otherText === '') {
+            throw ValidationException::withMessages([
+                'selected_option_ids' => 'Sélectionnez au moins une réponse.',
+            ]);
+        }
+
+        AnnouncementPollResponse::query()->updateOrCreate(
+            [
+                'announcement_poll_id' => $announcement->poll->id,
+                'user_id' => $user->id,
+            ],
+            [
+                'announcement_id' => $announcement->id,
+                'selected_option_ids' => $selectedOptionIds,
+                'other_text' => $otherText !== '' ? $otherText : null,
+                'responded_at' => now(),
+            ],
+        );
+
+        return back()->with('success', 'Votre réponse a été enregistrée.');
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -267,6 +346,7 @@ class AnnouncementController extends Controller
     {
         $validated = $request->validate([
             'mode' => ['required', Rule::in(['draft', 'send_now', 'schedule'])],
+            'title' => ['nullable', 'string', 'max:255'],
             'body_html' => ['nullable', 'string', 'max:20000'],
             'sector_ids' => ['nullable', 'array'],
             'sector_ids.*' => ['integer', 'exists:sectors,id'],
@@ -279,6 +359,7 @@ class AnnouncementController extends Controller
             'poll' => ['nullable', 'array'],
             'poll.poll_type' => ['required_if:has_poll,true', Rule::in(['single', 'multiple'])],
             'poll.allow_other' => ['nullable', 'boolean'],
+            'poll.other_label' => ['nullable', 'string', 'max:255'],
             'poll.options' => ['required_if:has_poll,true', 'array', 'min:1'],
             'poll.options.*' => ['string', 'max:255'],
         ]);
@@ -323,6 +404,11 @@ class AnnouncementController extends Controller
         $pollOptions = $hasPoll
             ? array_values(array_filter(array_map(static fn ($label): string => trim((string) $label), $validated['poll']['options'] ?? [])))
             : [];
+        $pollAllowOther = (bool) ($validated['poll']['allow_other'] ?? false);
+        $pollOtherLabel = trim((string) ($validated['poll']['other_label'] ?? ''));
+        if ($pollAllowOther && $pollOtherLabel === '') {
+            $pollOtherLabel = 'Autre';
+        }
 
         if ($hasPoll && $pollOptions === []) {
             throw ValidationException::withMessages([
@@ -332,6 +418,7 @@ class AnnouncementController extends Controller
 
         return [
             'mode' => $mode,
+            'title' => trim((string) ($validated['title'] ?? '')),
             'body_html' => SimpleHtmlSanitizer::sanitize($validated['body_html'] ?? ''),
             'sector_ids' => $sectorIds,
             'user_ids' => $userIds,
@@ -339,7 +426,8 @@ class AnnouncementController extends Controller
             'scheduled_at' => $mode === 'schedule' ? $scheduledAt : null,
             'has_poll' => $hasPoll,
             'poll_type' => $validated['poll']['poll_type'] ?? AnnouncementPoll::TYPE_SINGLE,
-            'poll_allow_other' => (bool) ($validated['poll']['allow_other'] ?? false),
+            'poll_allow_other' => $pollAllowOther,
+            'poll_other_label' => $pollAllowOther ? $pollOtherLabel : null,
             'poll_options' => $pollOptions,
         ];
     }
@@ -358,6 +446,7 @@ class AnnouncementController extends Controller
 
             $attributes = [
                 'created_by_user_id' => $announcement?->created_by_user_id ?? $actorId,
+                'title' => $validated['title'] !== '' ? $validated['title'] : null,
                 'body_html' => $validated['body_html'],
                 'status' => $status,
                 'sector_ids' => $validated['sector_ids'],
@@ -380,6 +469,7 @@ class AnnouncementController extends Controller
                 $poll = $announcement->poll()->create([
                     'poll_type' => $validated['poll_type'],
                     'allow_other' => $validated['poll_allow_other'],
+                    'other_label' => $validated['poll_other_label'],
                 ]);
 
                 foreach ($validated['poll_options'] as $index => $label) {
@@ -420,10 +510,40 @@ class AnnouncementController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function presentAnnouncement(Announcement $announcement): array
+    private function presentAnnouncement(Announcement $announcement, ?User $viewer = null, bool $canManage = false): array
     {
+        $canViewResults = $viewer && ($canManage || (int) $announcement->created_by_user_id === (int) $viewer->id);
+        $canRespond = $viewer
+            && $announcement->poll
+            && $announcement->status === Announcement::STATUS_SENT
+            && $this->isAnnouncementRecipient($announcement, $viewer);
+
+        $poll = null;
+        if ($announcement->poll) {
+            $poll = [
+                'id' => $announcement->poll->id,
+                'poll_type' => $announcement->poll->poll_type,
+                'allow_other' => (bool) $announcement->poll->allow_other,
+                'other_label' => $announcement->poll->other_label ?: 'Autre',
+                'options' => $announcement->poll->options
+                    ->map(fn ($option): array => [
+                        'id' => $option->id,
+                        'label' => $option->label,
+                    ])
+                    ->values()
+                    ->all(),
+                'current_response' => $this->presentCurrentPollResponse($announcement->poll, $viewer),
+                'can_respond' => (bool) $canRespond,
+            ];
+
+            if ($canViewResults) {
+                $poll['results'] = $this->presentPollResults($announcement);
+            }
+        }
+
         return [
             'id' => $announcement->id,
+            'title' => $announcement->title,
             'body_html' => $announcement->body_html,
             'body_text' => SimpleHtmlSanitizer::toPlainText($announcement->body_html),
             'status' => $announcement->status,
@@ -435,12 +555,169 @@ class AnnouncementController extends Controller
             'created_at' => $announcement->created_at?->toIso8601String(),
             'created_by' => $announcement->creator ? $this->userLabel($announcement->creator) : null,
             'created_by_user_id' => $announcement->created_by_user_id,
-            'poll' => $announcement->poll ? [
-                'poll_type' => $announcement->poll->poll_type,
-                'allow_other' => (bool) $announcement->poll->allow_other,
-                'options' => $announcement->poll->options->pluck('label')->values()->all(),
-            ] : null,
+            'poll' => $poll,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function presentCurrentPollResponse(AnnouncementPoll $poll, ?User $viewer): ?array
+    {
+        if (! $viewer) {
+            return null;
+        }
+
+        $response = $poll->responses
+            ->first(fn (AnnouncementPollResponse $candidate): bool => (int) $candidate->user_id === (int) $viewer->id);
+
+        if (! $response) {
+            return null;
+        }
+
+        return [
+            'selected_option_ids' => array_values(array_map('intval', $response->selected_option_ids ?? [])),
+            'other_text' => $response->other_text,
+            'responded_at' => $response->responded_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentPollResults(Announcement $announcement): array
+    {
+        $poll = $announcement->poll;
+        if (! $poll) {
+            return [];
+        }
+
+        $recipients = $this->recipientResolver->resolve(
+            $announcement->sector_ids,
+            $announcement->user_ids,
+            $announcement->excluded_user_ids,
+        );
+        $recipientIds = $recipients->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $recipientCount = count($recipientIds);
+
+        $responses = $poll->responses
+            ->filter(fn (AnnouncementPollResponse $response): bool => in_array((int) $response->user_id, $recipientIds, true))
+            ->values();
+        $responseCount = $responses->count();
+        $respondedUserIds = $responses->pluck('user_id')->map(fn ($id): int => (int) $id)->all();
+        $recipientsById = $recipients->keyBy('id');
+
+        $options = $poll->options->map(function ($option) use ($responses, $responseCount): array {
+            $optionResponses = $responses->filter(function (AnnouncementPollResponse $response) use ($option): bool {
+                return in_array((int) $option->id, array_map('intval', $response->selected_option_ids ?? []), true);
+            })->values();
+            $votes = $optionResponses->count();
+
+            return [
+                'id' => $option->id,
+                'label' => $option->label,
+                'votes' => $votes,
+                'percentage' => $responseCount > 0 ? round(($votes / $responseCount) * 100, 1) : 0,
+                'respondents' => $optionResponses
+                    ->map(fn (AnnouncementPollResponse $response): array => [
+                        'id' => $response->user_id,
+                        'name' => $this->userLabel($response->user),
+                    ])
+                    ->values()
+                    ->all(),
+            ];
+        })->values()->all();
+
+        return [
+            'recipient_count' => $recipientCount,
+            'response_count' => $responseCount,
+            'other_label' => $poll->other_label ?: 'Autre',
+            'options' => $options,
+            'other_responses' => $responses
+                ->filter(fn (AnnouncementPollResponse $response): bool => trim((string) $response->other_text) !== '')
+                ->map(fn (AnnouncementPollResponse $response): array => [
+                    'user_id' => $response->user_id,
+                    'user_name' => $this->userLabel($response->user),
+                    'text' => $response->other_text,
+                    'responded_at' => $response->responded_at?->toIso8601String(),
+                ])
+                ->values()
+                ->all(),
+            'responded_users' => $responses
+                ->map(fn (AnnouncementPollResponse $response): array => [
+                    'id' => $response->user_id,
+                    'name' => $this->userLabel($response->user),
+                    'responded_at' => $response->responded_at?->toIso8601String(),
+                ])
+                ->values()
+                ->all(),
+            'pending_users' => $recipientsById
+                ->reject(fn (User $recipient): bool => in_array((int) $recipient->id, $respondedUserIds, true))
+                ->map(fn (User $recipient): array => [
+                    'id' => $recipient->id,
+                    'name' => $this->userLabel($recipient),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function highlightAnnouncement(?int $announcementId, ?User $user, bool $canManage): ?array
+    {
+        if (! $announcementId || ! $user) {
+            return null;
+        }
+
+        $announcement = Announcement::query()
+            ->with($this->announcementRelations())
+            ->whereKey($announcementId)
+            ->first();
+
+        if (! $announcement) {
+            return null;
+        }
+
+        if ($canManage || (int) $announcement->created_by_user_id === (int) $user->id) {
+            return $this->presentAnnouncement($announcement, $user, $canManage);
+        }
+
+        $recipients = $this->recipientResolver->resolve(
+            $announcement->sector_ids,
+            $announcement->user_ids,
+            $announcement->excluded_user_ids,
+        );
+
+        if (! $recipients->contains(fn (User $recipient): bool => (int) $recipient->id === (int) $user->id)) {
+            return null;
+        }
+
+        return $this->presentAnnouncement($announcement, $user, $canManage);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function announcementRelations(): array
+    {
+        return [
+            'creator:id,name,first_name,last_name',
+            'poll.options',
+            'poll.responses.user:id,name,first_name,last_name',
+        ];
+    }
+
+    private function isAnnouncementRecipient(Announcement $announcement, User $user): bool
+    {
+        $recipients = $this->recipientResolver->resolve(
+            $announcement->sector_ids,
+            $announcement->user_ids,
+            $announcement->excluded_user_ids,
+        );
+
+        return $recipients->contains(fn (User $recipient): bool => (int) $recipient->id === (int) $user->id);
     }
 
     /**

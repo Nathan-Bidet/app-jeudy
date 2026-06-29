@@ -209,7 +209,6 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->name('cotations.fuel-settings.update');
 
     Route::get('/annonces', [AnnouncementController::class, 'index'])
-        ->middleware('sector.access:annonces.view|annonces.create|annonces.manage')
         ->name('annonces.index');
     Route::post('/annonces', [AnnouncementController::class, 'store'])
         ->middleware('sector.access:annonces.create')
@@ -223,6 +222,8 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::post('/annonces/{announcement}/duplicate', [AnnouncementController::class, 'duplicate'])
         ->middleware('sector.access:annonces.create')
         ->name('annonces.duplicate');
+    Route::post('/annonces/{announcement}/poll-response', [AnnouncementController::class, 'respondPoll'])
+        ->name('annonces.poll-response');
     Route::post('/annonces/groups', [AnnouncementController::class, 'storeGroup'])
         ->middleware('sector.access:annonces.create')
         ->name('annonces.groups.store');
