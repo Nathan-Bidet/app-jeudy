@@ -33,6 +33,13 @@ const BASE_CEREALS = [
     { code: 'EMA', name: 'Maïs' },
 ];
 
+const DEFAULT_CEREAL_TABLE_LABELS = {
+    maturity: 'Échéance',
+    matif: 'MATIF',
+    base: 'Base',
+    final_price: 'Prix final',
+};
+
 const COTATION_TABLE_CLASS = 'w-full table-fixed text-[12px] leading-normal sm:text-sm';
 const COTATION_HEADER_ROW_CLASS = 'text-xs font-black uppercase leading-4 tracking-[0.08em] text-[var(--app-muted)]';
 const COTATION_HEADER_CELL_CLASS = 'px-1.5 py-2 sm:px-2.5';
@@ -514,7 +521,7 @@ function normalizeFuelGrid(grid = {}) {
     };
 }
 
-function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, options = [] }) {
+function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, options = [], finalPriceOptions = [] }) {
     const draft = findManualDraft(form.data.manual_prices || [], row) || row;
     const lineType = lineTypeFor(draft);
     const isMatifLine = lineType === 'matif';
@@ -527,6 +534,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
     const matifNumber = parseDecimal(matifValue);
     const marginNumber = Math.abs(parseDecimal(marginValue) ?? 0);
     const finalPrice = matifNumber !== null ? matifNumber - marginNumber : null;
+    const finalPriceReferenceOptions = finalPriceOptions.filter((option) => option.product_code !== (draft.product_code || row.product_code));
 
     return (
         <tr className="border-t border-[var(--app-border)]">
@@ -590,14 +598,32 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage && !isMatifLine ? (
-                    <input
-                        type="number"
-                        step="0.0001"
-                        min="0"
-                        value={matifValue}
-                        onChange={(event) => setManualPrice(row, 'manual_matif', event.target.value)}
-                        className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
-                    />
+                    <div className="grid gap-1">
+                        <input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            value={matifValue}
+                            onChange={(event) => setManualPrice(row, 'manual_matif', event.target.value)}
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                        />
+                        <select
+                            value=""
+                            onChange={(event) => {
+                                const option = finalPriceReferenceOptions.find((item) => item.key === event.target.value);
+                                if (!option) return;
+                                setManualPrice(row, 'manual_matif', option.final_price);
+                            }}
+                            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1 text-[10px] font-semibold"
+                        >
+                            <option value="">Prix final existant</option>
+                            {finalPriceReferenceOptions.map((option) => (
+                                <option key={option.key} value={option.key}>
+                                    {option.label} - {formatPrice(option.final_price)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 ) : (
                     <span className={COTATION_VALUE_CLASS}>{formatPrice(matifValue)}</span>
                 )}
@@ -639,7 +665,20 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
     );
 }
 
-function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManualRow, deleteManualRow, options = [] }) {
+function HeaderLabel({ value, fallback, align = 'left', canManage, onChange }) {
+    if (!canManage) return value || fallback;
+
+    return (
+        <input
+            type="text"
+            value={value || fallback}
+            onChange={(event) => onChange(event.target.value)}
+            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1 text-xs font-black uppercase tracking-[0.04em] text-[var(--app-text)] ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}`}
+        />
+    );
+}
+
+function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManualRow, deleteManualRow, options = [], finalPriceOptions = [], tableLabels = DEFAULT_CEREAL_TABLE_LABELS, setTableLabel }) {
     const deletedIds = form.data.deleted_manual_price_ids || [];
     const persistedRows = (harvest?.rows || []).filter((row) => !deletedIds.includes(Number(row.manual_id)));
     const localRows = (form.data.manual_prices || []).filter((row) => (
@@ -668,10 +707,18 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                         </colgroup>
                         <thead>
                             <tr className={COTATION_HEADER_ROW_CLASS}>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-left`}>Échéance</th>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>Matif</th>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>Base</th>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-right`}>Prix final</th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-left`}>
+                                    <HeaderLabel value={tableLabels.maturity} fallback={DEFAULT_CEREAL_TABLE_LABELS.maturity} canManage={canManage} onChange={(value) => setTableLabel?.('maturity', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>
+                                    <HeaderLabel value={tableLabels.matif} fallback={DEFAULT_CEREAL_TABLE_LABELS.matif} align="center" canManage={canManage} onChange={(value) => setTableLabel?.('matif', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>
+                                    <HeaderLabel value={tableLabels.base} fallback={DEFAULT_CEREAL_TABLE_LABELS.base} align="center" canManage={canManage} onChange={(value) => setTableLabel?.('base', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-right`}>
+                                    <HeaderLabel value={tableLabels.final_price} fallback={DEFAULT_CEREAL_TABLE_LABELS.final_price} align="right" canManage={canManage} onChange={(value) => setTableLabel?.('final_price', value)} />
+                                </th>
                                 {canManage ? <th className={`${COTATION_HEADER_CELL_CLASS} text-right`} /> : null}
                             </tr>
                         </thead>
@@ -685,6 +732,7 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                                     setManualPrice={setManualPrice}
                                     deleteManualRow={deleteManualRow}
                                     options={options}
+                                    finalPriceOptions={finalPriceOptions}
                                 />
                             ))}
                         </tbody>
@@ -708,20 +756,32 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
     );
 }
 
-function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, dragHandle = null, defaultOpen = false }) {
+function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, setCerealLabel, setCerealTableLabel, cerealLabels = {}, tableLabels = DEFAULT_CEREAL_TABLE_LABELS, finalPriceOptions = [], dragHandle = null, defaultOpen = false }) {
     const leftHarvest = group?.harvests?.left || {};
     const rightHarvest = group?.harvests?.right || {};
     const leftOptions = optionGroup?.harvests?.left?.rows || [];
     const rightOptions = optionGroup?.harvests?.right?.rows || [];
+    const baseCereal = BASE_CEREALS.find((cereal) => cereal.code === group?.code);
     const canEditCustomCereal = Boolean(canManage && customCereal);
-    const titleEditor = canEditCustomCereal ? (
-        <input
-            type="text"
-            value={customCereal.name ?? ''}
-            onChange={(event) => setCustomCereal(customCereal, 'name', event.target.value)}
-            placeholder="Nom personnalisé"
-            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-xl font-black uppercase tracking-[0.04em] text-[var(--app-text)] sm:max-w-[28rem]"
-        />
+    const canEditCerealTitle = Boolean(canManage && (customCereal || baseCereal));
+    const titleEditor = canEditCerealTitle ? (
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+                type="text"
+                value={customCereal ? (customCereal.name ?? '') : (cerealLabels[group.code] ?? group.name ?? '')}
+                onChange={(event) => {
+                    if (customCereal) setCustomCereal(customCereal, 'name', event.target.value);
+                    else setCerealLabel(group.code, event.target.value);
+                }}
+                placeholder="Nom personnalisé"
+                className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-xl font-black uppercase tracking-[0.04em] text-[var(--app-text)] sm:max-w-[28rem]"
+            />
+            {baseCereal ? (
+                <span className="shrink-0 text-xs font-semibold normal-case tracking-normal text-[var(--app-muted)]">
+                    Céréale MATIF d'origine : {baseCereal.name}
+                </span>
+            ) : null}
+        </div>
     ) : null;
     const actions = canEditCustomCereal ? (
         <select
@@ -745,8 +805,8 @@ function CerealCard({ group, canManage, form, setManualPrice, addManualRow, dele
     return (
         <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3" defaultOpen={defaultOpen}>
             <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
-                <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} />
-                <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} />
+                <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} finalPriceOptions={finalPriceOptions} tableLabels={tableLabels} setTableLabel={(key, value) => setCerealTableLabel(group.code, key, value)} />
+                <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} finalPriceOptions={finalPriceOptions} tableLabels={tableLabels} setTableLabel={(key, value) => setCerealTableLabel(group.code, key, value)} />
             </div>
         </CollapsibleSection>
     );
@@ -1723,6 +1783,30 @@ function flattenCustomCereals(rows = []) {
     }));
 }
 
+function normalizeCerealLabels(labels = {}) {
+    return Object.fromEntries(BASE_CEREALS.map((cereal) => [
+        cereal.code,
+        String(labels?.[cereal.code] ?? cereal.name),
+    ]));
+}
+
+function normalizeCerealTableLabelSet(labels = {}) {
+    return {
+        ...DEFAULT_CEREAL_TABLE_LABELS,
+        ...(labels || {}),
+    };
+}
+
+function normalizeCerealTableLabels(labels = {}) {
+    return Object.fromEntries(Object.entries(labels || {})
+        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))
+        .map(([code, value]) => [code, normalizeCerealTableLabelSet(value)]));
+}
+
+function cerealTableLabelsFor(labels = {}, code = '') {
+    return normalizeCerealTableLabelSet(labels?.[code] || {});
+}
+
 function normalizeCerealOrder(order = [], groups = []) {
     const groupCodes = (Array.isArray(groups) ? groups : [])
         .map((group) => group?.code)
@@ -1739,6 +1823,8 @@ export default function CotationsIndex({
     transportGrid = transportDefaultGrid(),
     fuelGrid = fuelDefaultGrid(),
     marketData: initialMarketData = { groups: [], fetched_at: null },
+    cerealLabels = {},
+    cerealTableLabels = {},
     permissions = {},
     routes = {},
 }) {
@@ -1764,6 +1850,8 @@ export default function CotationsIndex({
         manual_prices: flattenMarketRows(initialMarketData?.groups || []),
         custom_cereals: flattenCustomCereals(initialMarketData?.custom_cereals || []),
         cereal_order: normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []),
+        cereal_labels: normalizeCerealLabels(initialMarketData?.cereal_labels || cerealLabels),
+        cereal_table_labels: normalizeCerealTableLabels(initialMarketData?.cereal_table_labels || cerealTableLabels),
         cereal_info_html: initialMarketData?.cereal_info_html || '',
         transport_grid: normalizeTransportGrid(transportGrid),
         fuel_grid: normalizeFuelGrid(fuelGrid),
@@ -1780,6 +1868,8 @@ export default function CotationsIndex({
             form.setData('manual_prices', flattenMarketRows(initialMarketData?.groups || []));
             form.setData('custom_cereals', flattenCustomCereals(initialMarketData?.custom_cereals || []));
             form.setData('cereal_order', normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []));
+            form.setData('cereal_labels', normalizeCerealLabels(initialMarketData?.cereal_labels || cerealLabels));
+            form.setData('cereal_table_labels', normalizeCerealTableLabels(initialMarketData?.cereal_table_labels || cerealTableLabels));
             form.setData('cereal_info_html', initialMarketData?.cereal_info_html || '');
         }
     }, [initialMarketData]);
@@ -1924,6 +2014,23 @@ export default function CotationsIndex({
         )));
     };
 
+    const setCerealLabel = (code, value) => {
+        form.setData('cereal_labels', {
+            ...(form.data.cereal_labels || {}),
+            [code]: value,
+        });
+    };
+
+    const setCerealTableLabel = (code, key, value) => {
+        form.setData('cereal_table_labels', {
+            ...(form.data.cereal_table_labels || {}),
+            [code]: {
+                ...cerealTableLabelsFor(form.data.cereal_table_labels || {}, code),
+                [key]: value,
+            },
+        });
+    };
+
     const addCustomCereal = () => {
         const now = Date.now().toString(36).toUpperCase();
         const code = `C${now}`.slice(0, 16);
@@ -1973,6 +2080,8 @@ export default function CotationsIndex({
             manual_prices: flattenMarketRows(data?.groups || []),
             custom_cereals: flattenCustomCereals(data?.custom_cereals || []),
             cereal_order: normalizeCerealOrder(data?.cereal_order || [], data?.groups || []),
+            cereal_labels: normalizeCerealLabels(data?.cereal_labels || cerealLabels),
+            cereal_table_labels: normalizeCerealTableLabels(data?.cereal_table_labels || cerealTableLabels),
             cereal_info_html: data?.cereal_info_html || '',
             transport_grid: normalizeTransportGrid(transportGrid),
             fuel_grid: normalizeFuelGrid(fuelGrid),
@@ -2110,7 +2219,10 @@ export default function CotationsIndex({
                     name: customCereal.name || group.name,
                     base_product_code: customCereal.base_product_code || group.base_product_code,
                     sort: customCereal.sort_order || group.sort,
-                } : group;
+                } : {
+                    ...group,
+                    name: form.data.cereal_labels?.[group.code] || group.name,
+                };
             });
             const existingCodes = new Set(mergedGroups.map((group) => group.code));
             const customGroups = (form.data.custom_cereals || [])
@@ -2137,7 +2249,7 @@ export default function CotationsIndex({
             (group?.harvests?.left?.rows || []).length > 0
             || (group?.harvests?.right?.rows || []).length > 0
         ));
-    }, [marketData, isEditing, form.data.custom_cereals, form.data.cereal_order]);
+    }, [marketData, isEditing, form.data.custom_cereals, form.data.cereal_order, form.data.cereal_labels]);
     const optionGroups = useMemo(() => marketData?.options || [], [marketData]);
     const optionGroupsByCode = useMemo(() => {
         const byCode = Object.fromEntries(optionGroups.map((group) => [group.code, group]));
@@ -2176,7 +2288,8 @@ export default function CotationsIndex({
 
                 return {
                     key: transportReferenceKey(row),
-                    label: labelParts.join(' - '),
+                    product_code: row.product_code,
+                    label: labelParts.join(' — '),
                     final_price: finalPrice,
                 };
             })
@@ -2299,6 +2412,11 @@ export default function CotationsIndex({
                                             optionGroup={optionGroupsByCode[group.code]}
                                             customCereal={(form.data.custom_cereals || []).find((cereal) => cereal.code === group.code) || null}
                                             setCustomCereal={setCustomCereal}
+                                            setCerealLabel={setCerealLabel}
+                                            setCerealTableLabel={setCerealTableLabel}
+                                            cerealLabels={form.data.cereal_labels || {}}
+                                            tableLabels={cerealTableLabelsFor(form.data.cereal_table_labels || {}, group.code)}
+                                            finalPriceOptions={finalPriceOptions}
                                             defaultOpen={Boolean(group.code) && group.code === lastAddedCerealCode}
                                             dragHandle={isEditing ? (
                                                 <button
