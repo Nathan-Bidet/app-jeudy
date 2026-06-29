@@ -25,7 +25,7 @@ import {
     Underline,
     X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 const BASE_CEREALS = [
     { code: 'ECO', name: 'Colza' },
@@ -872,6 +872,29 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
     const firstColumnLabel = String(grid.first_column_label || '').trim() || 'TRANSPORT';
     const optionsByKey = Object.fromEntries(finalPriceOptions.map((option) => [option.key, option]));
     const cellKey = (rowId, columnId) => `${rowId}__${columnId}`;
+    const renderCompactTransportLabel = (value, fallback) => {
+        const label = String(value || fallback || '').trim();
+        if (!label) return fallback;
+
+        const greaterThanMatch = label.match(/^(.*?)\s+(>.*)$/);
+        const parts = greaterThanMatch
+            ? [...greaterThanMatch[1].split(/\s+/).filter(Boolean), greaterThanMatch[2]]
+            : label.split(/\s+/).filter(Boolean);
+
+        return (
+            <>
+                <span className="hidden sm:inline">{label}</span>
+                <span className="inline sm:hidden">
+                    {parts.map((part, index) => (
+                        <Fragment key={`${part}-${index}`}>
+                            {index > 0 ? <br /> : null}
+                            {part}
+                        </Fragment>
+                    ))}
+                </span>
+            </>
+        );
+    };
     const setGridField = (field, value) => setTransportSection({
         ...grid,
         [field]: value,
@@ -945,11 +968,16 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                 </div>
             ) : null}
 
-            <div className="overflow-x-auto">
-                <table className={`${COTATION_TABLE_CLASS} min-w-full border-separate border-spacing-0`}>
+            <div
+                className="w-full max-w-full overflow-x-auto overscroll-x-contain"
+                style={{
+                    '--transport-first-col': canManage ? '8rem' : '7rem',
+                }}
+            >
+                <table className={`${COTATION_TABLE_CLASS.replace('table-fixed', 'table-auto sm:table-fixed')} min-w-max border-separate border-spacing-0 sm:min-w-full`}>
                     <thead>
                         <tr className={COTATION_HEADER_ROW_CLASS}>
-                            <th className={`sticky left-0 z-[1] rounded-tl-xl border border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-left text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
+                            <th className={`sticky left-0 z-30 w-[var(--transport-first-col)] min-w-[var(--transport-first-col)] max-w-[var(--transport-first-col)] rounded-tl-xl border border-[var(--app-border)] bg-[#FACC51] shadow-[2px_0_0_var(--app-border)] sm:w-auto sm:min-w-0 sm:max-w-none ${COTATION_HEADER_CELL_CLASS} whitespace-nowrap text-left text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
                                 {canManage ? (
                                     <input
                                         type="text"
@@ -965,7 +993,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                             {columns.map((column, index) => (
                                 <th
                                     key={column.id}
-                                    className={`min-w-[11rem] border-y border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${index === columns.length - 1 ? 'rounded-tr-xl' : ''}`}
+                                    className={`${canManage ? 'min-w-[13rem]' : 'min-w-[4.75rem]'} border-y border-r border-[var(--app-border)] bg-[#FACC51] sm:min-w-[11rem] ${COTATION_HEADER_CELL_CLASS} whitespace-nowrap text-center text-[var(--color-black)] ${index === columns.length - 1 ? 'rounded-tr-xl' : ''}`}
                                 >
                                     {canManage ? (
                                         <div className="grid gap-1">
@@ -1009,7 +1037,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className={TRANSPORT_HEADER_LABEL_CLASS}>{column.label || `Colonne ${index + 1}`}</div>
+                                        <div className={`${TRANSPORT_HEADER_LABEL_CLASS} whitespace-nowrap`}>{column.label || `Colonne ${index + 1}`}</div>
                                     )}
                                 </th>
                             ))}
@@ -1018,7 +1046,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                     <tbody>
                         {rows.map((row, rowIndex) => (
                             <tr key={row.id}>
-                                <th className={`sticky left-0 z-[1] min-w-[10rem] border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left font-black ${rowIndex === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                                <th className={`sticky left-0 z-20 w-[var(--transport-first-col)] min-w-[var(--transport-first-col)] max-w-[var(--transport-first-col)] border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] shadow-[2px_0_0_var(--app-border)] sm:w-auto sm:min-w-[10rem] sm:max-w-none ${COTATION_BODY_CELL_CLASS} whitespace-normal break-words text-left font-black ${rowIndex === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
                                     {canManage ? (
                                         <div className="grid gap-1">
                                             <input
@@ -1049,7 +1077,9 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className={TRANSPORT_HEADER_LABEL_CLASS}>{row.label || `Ligne ${rowIndex + 1}`}</div>
+                                        <div className={`${TRANSPORT_HEADER_LABEL_CLASS} whitespace-normal break-words`}>
+                                            {renderCompactTransportLabel(row.label, `Ligne ${rowIndex + 1}`)}
+                                        </div>
                                     )}
                                 </th>
                                 {columns.map((column, columnIndex) => {
@@ -1062,7 +1092,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                                     return (
                                         <td
                                             key={`${row.id}-${column.id}`}
-                                            className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center ${rowIndex === rows.length - 1 && columnIndex === columns.length - 1 ? 'rounded-br-xl' : ''}`}
+                                            className={`min-w-[4.75rem] border-b border-r border-[var(--app-border)] sm:min-w-0 ${COTATION_BODY_CELL_CLASS} whitespace-nowrap text-center ${rowIndex === rows.length - 1 && columnIndex === columns.length - 1 ? 'rounded-br-xl' : ''}`}
                                         >
                                             {canManage ? (
                                                 <div className="grid gap-1">
