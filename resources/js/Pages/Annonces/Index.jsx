@@ -1,4 +1,5 @@
 import AppLayout from '@/Layouts/AppLayout';
+import Modal from '@/Components/Modal';
 import RichTextEditor from '@/Components/RichTextEditor';
 import { Head, router, usePage } from '@inertiajs/react';
 import { ChevronDown, Megaphone, MessageSquare, Pencil, Plus, Send, Trash2, X } from 'lucide-react';
@@ -6,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 function emptyFormState() {
     return {
+        title: '',
         body_html: '',
         sector_ids: [],
         user_ids: [],
@@ -13,6 +15,7 @@ function emptyFormState() {
         has_poll: false,
         poll_type: 'single',
         poll_allow_other: false,
+        poll_other_label: 'Autre',
         poll_options: [''],
         send_mode: 'send_now',
         scheduled_at: '',
@@ -21,8 +24,12 @@ function emptyFormState() {
 
 function formFromAnnouncement(announcement) {
     if (!announcement) return emptyFormState();
+    const pollOptions = announcement.poll?.options?.map((option) => (
+        typeof option === 'string' ? option : option.label
+    )).filter(Boolean);
 
     return {
+        title: announcement.title || '',
         body_html: announcement.body_html || '',
         sector_ids: announcement.sector_ids || [],
         user_ids: announcement.user_ids || [],
@@ -30,7 +37,8 @@ function formFromAnnouncement(announcement) {
         has_poll: Boolean(announcement.poll),
         poll_type: announcement.poll?.poll_type || 'single',
         poll_allow_other: Boolean(announcement.poll?.allow_other),
-        poll_options: announcement.poll?.options?.length ? announcement.poll.options : [''],
+        poll_other_label: announcement.poll?.other_label || 'Autre',
+        poll_options: pollOptions?.length ? pollOptions : [''],
         send_mode: announcement.status === 'scheduled' ? 'schedule' : 'send_now',
         scheduled_at: announcement.status === 'scheduled' ? (announcement.scheduled_at || '').slice(0, 16) : '',
     };
@@ -49,14 +57,77 @@ function statusBadgeClass(status) {
     return 'bg-gray-200 text-gray-700';
 }
 
-function htmlToPlainText(html) {
+function htmlNodeToSmsText(node) {
+    if (!node) return '';
+
+    if (node.nodeType === Node.TEXT_NODE) {
+        return node.nodeValue || '';
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+        return '';
+    }
+
+    const tagName = node.tagName.toLowerCase();
+    const content = Array.from(node.childNodes).map(htmlNodeToSmsText).join('');
+
+    if (tagName === 'br') return '\n';
+    if (tagName === 'p' || tagName === 'div') return `${content}\n`;
+
+    return content;
+}
+
+function htmlToSmsText(html) {
     if (!html) return '';
     if (typeof document === 'undefined') return html;
 
     const container = document.createElement('div');
     container.innerHTML = html;
+    const text = Array.from(container.childNodes).map(htmlNodeToSmsText).join('');
 
-    return (container.innerText || container.textContent || '').trim();
+    return text.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function smsMessageWithTitle(title, message) {
+    const cleanTitle = String(title || '').trim();
+    const cleanMessage = String(message || '').trim();
+
+    if (!cleanTitle) return cleanMessage;
+    if (!cleanMessage) return cleanTitle;
+
+    return `${cleanTitle}\n\n${cleanMessage}`;
+}
+
+function pollToSmsText(poll) {
+    if (!poll) return '';
+
+    const options = (poll.options || [])
+        .map((option) => (typeof option === 'string' ? option : option?.label))
+        .map((label) => String(label || '').trim())
+        .filter(Boolean);
+
+    if (poll.allow_other) {
+        const otherLabel = String(poll.other_label || 'Autre').trim();
+        if (otherLabel) options.push(otherLabel);
+    }
+
+    if (options.length === 0) return '';
+
+    const heading = poll.poll_type === 'multiple'
+        ? 'Sondage — plusieurs réponses possibles :'
+        : 'Sondage — une seule réponse possible :';
+
+    return [heading, ...options.map((option) => `• ${option}`)].join('\n');
+}
+
+function smsMessageWithTitleAndPoll(title, message, poll) {
+    const baseMessage = smsMessageWithTitle(title, message);
+    const pollText = pollToSmsText(poll);
+
+    if (!pollText) return baseMessage;
+    if (!baseMessage) return pollText;
+
+    return `${baseMessage}\n\n${pollText}`;
 }
 
 function formatDateTime(value) {
@@ -77,19 +148,78 @@ function resolveRecipientUsers(sectorIds = [], userIds = [], excludedUserIds = [
     const sectorSet = new Set((sectorIds || []).map(Number));
     const userSet = new Set((userIds || []).map(Number));
     const excludedSet = new Set((excludedUserIds || []).map(Number));
+    const recipientsById = new Map();
 
-    return users.filter((user) => (
-        (sectorSet.has(Number(user.sector_id)) || userSet.has(Number(user.id)))
-        && !excludedSet.has(Number(user.id))
-    ));
+    (users || []).forEach((user) => {
+        const userId = Number(user?.id);
+        if (!userId || excludedSet.has(userId)) return;
+
+        if (sectorSet.has(Number(user?.sector_id)) || userSet.has(userId)) {
+            recipientsById.set(userId, user);
+        }
+    });
+
+    return Array.from(recipientsById.values());
+}
+
+function normalizeSmsPhone(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const withoutSpaces = raw.replace(/\s+/g, '');
+    const normalized = withoutSpaces.startsWith('+')
+        ? `+${withoutSpaces.slice(1).replace(/\D/g, '')}`
+        : withoutSpaces.replace(/\D/g, '');
+
+    const national = normalized.startsWith('+33')
+        ? `0${normalized.slice(3)}`
+        : normalized;
+
+    return /^0[67]\d{8}$/.test(national) ? normalized : '';
+}
+
+function firstSmsMobileForUser(user) {
+    const primaryMobile = normalizeSmsPhone(user?.mobile_phone);
+    if (primaryMobile) return primaryMobile;
+
+    const extraPhones = Array.isArray(user?.directory_phones) ? user.directory_phones : [];
+    for (const row of extraPhones) {
+        const mobile = normalizeSmsPhone(row?.number);
+        if (mobile) return mobile;
+    }
+
+    return '';
+}
+
+function smsPlatform() {
+    if (typeof navigator === 'undefined') return 'other';
+
+    const userAgent = navigator.userAgent || '';
+    const platform = navigator.platform || '';
+
+    if (/iPad|iPhone|iPod|Macintosh|MacIntel|MacPPC|Mac68K/i.test(`${userAgent} ${platform}`)) {
+        return 'apple';
+    }
+
+    return 'other';
 }
 
 function buildSmsHref(phones, message) {
-    const numbers = Array.from(new Set(phones.filter(Boolean))).join(',');
-    const isIos = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-    const separator = isIos ? '&' : '?';
+    const numbers = Array.from(new Set((phones || []).map(normalizeSmsPhone).filter(Boolean)));
+    if (numbers.length === 0) {
+        return null;
+    }
 
-    return `sms:${numbers}${separator}body=${encodeURIComponent(message || '')}`;
+    const isApple = smsPlatform() === 'apple';
+    if (isApple) {
+        return `sms:/open?addresses=${numbers.map(encodeURIComponent).join(',')}&body=${encodeURIComponent(message || '')}`;
+    }
+
+    return `sms:${numbers.join(';')}?body=${encodeURIComponent(message || '')}`;
+}
+
+function smsPhonesForRecipients(recipients) {
+    return Array.from(new Set((recipients || []).map(firstSmsMobileForUser).filter(Boolean)));
 }
 
 function recipientsSummary(item, sectorsById, usersById) {
@@ -288,11 +418,14 @@ function RecipientPicker({ sectors, users, formState, setFormState }) {
 }
 
 function RecipientGroups({ groups, formState, setFormState, onSaveGroup, onUpdateGroup, onDeleteGroup }) {
-    const [newGroupName, setNewGroupName] = useState('');
-    const [editingGroupId, setEditingGroupId] = useState(null);
-    const [editingGroupName, setEditingGroupName] = useState('');
+    const [selectedGroupId, setSelectedGroupId] = useState('');
+    const [showSaveModal, setShowSaveModal] = useState(false);
+    const [groupModalMode, setGroupModalMode] = useState('create');
+    const [groupName, setGroupName] = useState('');
 
     const applyGroup = (group) => {
+        if (!group) return;
+
         setFormState((prev) => ({
             ...prev,
             sector_ids: group.sector_ids || [],
@@ -301,121 +434,141 @@ function RecipientGroups({ groups, formState, setFormState, onSaveGroup, onUpdat
         }));
     };
 
+    const selectedGroup = groups.find((group) => Number(group.id) === Number(selectedGroupId));
+
+    const loadSelectedGroup = () => {
+        applyGroup(selectedGroup);
+    };
+
+    const openSaveModal = () => {
+        setGroupModalMode('create');
+        setGroupName('');
+        setShowSaveModal(true);
+    };
+
+    const openEditModal = () => {
+        if (!selectedGroup) return;
+        setGroupModalMode('update');
+        setGroupName(selectedGroup.name || '');
+        setShowSaveModal(true);
+    };
+
     const saveCurrentSelectionAsGroup = () => {
-        const name = newGroupName.trim();
+        const name = groupName.trim();
         if (!name) return;
 
-        onSaveGroup({
+        const payload = {
             name,
             sector_ids: formState.sector_ids,
             user_ids: formState.user_ids,
             excluded_user_ids: formState.excluded_user_ids,
-        });
-        setNewGroupName('');
+        };
+
+        if (groupModalMode === 'update' && selectedGroup) {
+            onUpdateGroup(selectedGroup.id, payload);
+        } else {
+            onSaveGroup(payload);
+        }
+
+        setGroupName('');
+        setShowSaveModal(false);
     };
 
-    const startEditGroup = (group) => {
-        applyGroup(group);
-        setEditingGroupId(group.id);
-        setEditingGroupName(group.name);
-    };
-
-    const updateCurrentGroup = () => {
-        const name = editingGroupName.trim();
-        if (!editingGroupId || !name) return;
-
-        onUpdateGroup(editingGroupId, {
-            name,
-            sector_ids: formState.sector_ids,
-            user_ids: formState.user_ids,
-            excluded_user_ids: formState.excluded_user_ids,
-        });
-        setEditingGroupId(null);
-        setEditingGroupName('');
+    const deleteSelectedGroup = () => {
+        if (!selectedGroup) return;
+        onDeleteGroup(selectedGroup.id);
+        setSelectedGroupId('');
     };
 
     return (
-        <div className="space-y-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
-            <span className="block text-sm font-semibold">Groupes de destinataires enregistrés</span>
-
-            {groups.length === 0 ? (
-                <p className="text-xs text-[var(--app-muted)]">Aucun groupe enregistré pour le moment.</p>
-            ) : (
-                <div className="flex flex-wrap gap-2">
-                    {groups.map((group) => (
-                        <div key={group.id} className="inline-flex items-center gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-sm">
-                            <button type="button" onClick={() => applyGroup(group)} className="font-semibold hover:underline">
-                                {group.name}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => startEditGroup(group)}
-                                aria-label={`Modifier le groupe ${group.name}`}
-                                className="ml-1 text-[var(--app-muted)] hover:text-[var(--brand-brown)]"
-                            >
-                                <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => onDeleteGroup(group.id)}
-                                aria-label={`Supprimer le groupe ${group.name}`}
-                                className="ml-1 text-[var(--app-muted)] hover:text-red-600"
-                            >
-                                <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
-
+        <>
             <div className="flex flex-wrap items-center gap-2">
-                <input
-                    type="text"
-                    value={newGroupName}
-                    onChange={(event) => setNewGroupName(event.target.value)}
-                    placeholder="Nom du nouveau groupe (ex: Tous les chauffeurs)"
-                    className="w-full max-w-sm rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm"
-                />
+                <select
+                    value={selectedGroupId}
+                    onChange={(event) => setSelectedGroupId(event.target.value)}
+                    className="h-10 min-w-48 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 text-sm"
+                >
+                    <option value="">Groupe</option>
+                    {groups.map((group) => (
+                        <option key={group.id} value={group.id}>{group.name}</option>
+                    ))}
+                </select>
                 <button
                     type="button"
-                    onClick={saveCurrentSelectionAsGroup}
-                    disabled={!newGroupName.trim()}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] disabled:opacity-50"
+                    onClick={loadSelectedGroup}
+                    disabled={!selectedGroup}
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 text-xs font-black uppercase tracking-[0.08em] disabled:opacity-50"
+                >
+                    Charger
+                </button>
+                <button
+                    type="button"
+                    onClick={openSaveModal}
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 text-xs font-black uppercase tracking-[0.08em]"
                 >
                     <Plus className="h-3.5 w-3.5" />
-                    Enregistrer la sélection actuelle comme groupe
+                    Enregistrer la sélection
                 </button>
+                {selectedGroup ? (
+                    <>
+                        <button
+                            type="button"
+                            onClick={openEditModal}
+                            aria-label={`Modifier le groupe ${selectedGroup.name}`}
+                            className="inline-flex h-10 items-center rounded-xl border border-transparent px-2 text-[var(--app-muted)] hover:border-[var(--app-border)] hover:bg-[var(--app-surface-soft)] hover:text-[var(--brand-brown)]"
+                        >
+                            <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={deleteSelectedGroup}
+                            aria-label={`Supprimer le groupe ${selectedGroup.name}`}
+                            className="inline-flex h-10 items-center rounded-xl border border-transparent px-2 text-[var(--app-muted)] hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        >
+                            <Trash2 className="h-4 w-4" />
+                        </button>
+                    </>
+                ) : null}
             </div>
 
-            {editingGroupId ? (
-                <div className="flex flex-wrap items-center gap-2 border-t border-[var(--app-border)] pt-3">
-                    <input
-                        type="text"
-                        value={editingGroupName}
-                        onChange={(event) => setEditingGroupName(event.target.value)}
-                        className="w-full max-w-sm rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm"
-                    />
-                    <button
-                        type="button"
-                        onClick={updateCurrentGroup}
-                        disabled={!editingGroupName.trim()}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--color-black)] disabled:opacity-50"
-                    >
-                        Mettre à jour ce groupe
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setEditingGroupId(null);
-                            setEditingGroupName('');
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.08em]"
-                    >
-                        Annuler
-                    </button>
+            <Modal show={showSaveModal} onClose={() => setShowSaveModal(false)} maxWidth="md">
+                <div className="border-b border-[var(--app-border)] px-5 py-4">
+                    <h3 className="text-sm font-black uppercase tracking-[0.08em]">
+                        {groupModalMode === 'update' ? 'Modifier le groupe' : 'Enregistrer un groupe'}
+                    </h3>
                 </div>
-            ) : null}
-        </div>
+                <div className="space-y-4 px-5 py-4">
+                    <div>
+                        <span className="mb-2 block text-sm font-semibold">Nom du groupe</span>
+                        <input
+                            type="text"
+                            value={groupName}
+                            onChange={(event) => setGroupName(event.target.value)}
+                            placeholder="Ex: Tous les chauffeurs"
+                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                            autoFocus
+                        />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowSaveModal(false)}
+                            className="rounded-xl border border-[var(--app-border)] px-3 py-2 text-xs font-black uppercase tracking-[0.08em]"
+                        >
+                            Annuler
+                        </button>
+                        <button
+                            type="button"
+                            onClick={saveCurrentSelectionAsGroup}
+                            disabled={!groupName.trim()}
+                            className="rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--color-black)] disabled:opacity-50"
+                        >
+                            {groupModalMode === 'update' ? 'Mettre à jour' : 'Enregistrer'}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+        </>
     );
 }
 
@@ -437,6 +590,14 @@ function PollEditor({ formState, setFormState }) {
             poll_options: prev.poll_options.length > 1
                 ? prev.poll_options.filter((_, optionIndex) => optionIndex !== index)
                 : prev.poll_options,
+        }));
+    };
+
+    const toggleOtherOption = (checked) => {
+        setFormState((prev) => ({
+            ...prev,
+            poll_allow_other: checked,
+            poll_other_label: checked && !prev.poll_other_label.trim() ? 'Autre' : prev.poll_other_label,
         }));
     };
 
@@ -484,6 +645,17 @@ function PollEditor({ formState, setFormState }) {
                         </button>
                     </div>
                 ))}
+                {formState.poll_allow_other ? (
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="text"
+                            value={formState.poll_other_label}
+                            onChange={(event) => setFormState((prev) => ({ ...prev, poll_other_label: event.target.value }))}
+                            placeholder="Libellé de la réponse libre"
+                            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm"
+                        />
+                    </div>
+                ) : null}
             </div>
 
             <button
@@ -499,11 +671,284 @@ function PollEditor({ formState, setFormState }) {
                 <input
                     type="checkbox"
                     checked={formState.poll_allow_other}
-                    onChange={(event) => setFormState((prev) => ({ ...prev, poll_allow_other: event.target.checked }))}
+                    onChange={(event) => toggleOtherOption(event.target.checked)}
                 />
                 Ajouter l'option "Autre" (réponse libre)
             </label>
+
         </div>
+    );
+}
+
+function PollResults({ results }) {
+    const [openOptionIds, setOpenOptionIds] = useState([]);
+    const [showOtherResponses, setShowOtherResponses] = useState(false);
+
+    if (!results) return null;
+
+    const toggleOptionRespondents = (optionId) => {
+        const numericId = Number(optionId);
+        setOpenOptionIds((previous) => (
+            previous.includes(numericId)
+                ? previous.filter((id) => id !== numericId)
+                : [...previous, numericId]
+        ));
+    };
+
+    return (
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
+            <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Réponses reçues</div>
+            <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                <div className="rounded-lg bg-[var(--app-surface)] p-2">
+                    <span className="block text-xs text-[var(--app-muted)]">Destinataires</span>
+                    <strong>{results.recipient_count || 0}</strong>
+                </div>
+                <div className="rounded-lg bg-[var(--app-surface)] p-2">
+                    <span className="block text-xs text-[var(--app-muted)]">Réponses</span>
+                    <strong>{results.response_count || 0}</strong>
+                </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+                {(results.options || []).map((option) => {
+                    const isOpen = openOptionIds.includes(Number(option.id));
+
+                    return (
+                        <div key={option.id} className="rounded-lg bg-[var(--app-surface)] p-2">
+                            <div className="flex items-center justify-between gap-3 text-sm">
+                                <span className="font-semibold">{option.label}</span>
+                                <span className="text-xs text-[var(--app-muted)]">
+                                    {option.votes} vote{option.votes > 1 ? 's' : ''} · {option.percentage}%
+                                </span>
+                            </div>
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200">
+                                <div
+                                    className="h-full rounded-full bg-[var(--brand-yellow-dark)]"
+                                    style={{ width: `${Math.min(Number(option.percentage) || 0, 100)}%` }}
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => toggleOptionRespondents(option.id)}
+                                className="mt-2 text-xs font-semibold text-[var(--brand-brown)] hover:underline"
+                            >
+                                {isOpen ? 'Masquer les répondants' : 'Voir les répondants'}
+                            </button>
+                            {isOpen ? (
+                                <div className="mt-2 max-h-32 overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-2">
+                                    {(option.respondents || []).length ? option.respondents.map((user) => (
+                                        <p key={user.id} className="text-sm">{user.name}</p>
+                                    )) : (
+                                        <p className="text-xs text-[var(--app-muted)]">Aucun répondant</p>
+                                    )}
+                                </div>
+                            ) : null}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {(results.other_responses || []).length ? (
+                <div className="mt-3">
+                    <button
+                        type="button"
+                        onClick={() => setShowOtherResponses((value) => !value)}
+                        className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)] hover:text-[var(--brand-brown)]"
+                    >
+                        {showOtherResponses ? `Masquer les réponses ${results.other_label || 'Autre'}` : `Réponses ${results.other_label || 'Autre'} (${results.other_responses.length})`}
+                    </button>
+                    {showOtherResponses ? (
+                        <div className="mt-2 max-h-44 space-y-2 overflow-y-auto">
+                            {results.other_responses.map((response) => (
+                                <div key={`${response.user_id}-${response.responded_at}`} className="rounded-lg bg-[var(--app-surface)] p-2 text-sm">
+                                    <div className="font-semibold">{response.user_name}</div>
+                                    <div className="mt-1 whitespace-pre-wrap">{response.text}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                    <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Ont répondu</div>
+                    <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-[var(--app-surface)] p-2">
+                        {(results.responded_users || []).length ? results.responded_users.map((user) => (
+                            <p key={user.id} className="text-sm">{user.name}</p>
+                        )) : <p className="text-xs text-[var(--app-muted)]">Aucune réponse pour le moment.</p>}
+                    </div>
+                </div>
+                <div>
+                    <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">En attente</div>
+                    <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-[var(--app-surface)] p-2">
+                        {(results.pending_users || []).length ? results.pending_users.map((user) => (
+                            <p key={user.id} className="text-sm">{user.name}</p>
+                        )) : <p className="text-xs text-[var(--app-muted)]">Tout le monde a répondu.</p>}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function AnnouncementDetailModal({ announcement, onClose, onSubmitPollResponse, pollResponseProcessing, errors = {} }) {
+    const poll = announcement?.poll;
+    const currentResponse = poll?.current_response;
+    const [selectedOptionIds, setSelectedOptionIds] = useState([]);
+    const [useOther, setUseOther] = useState(false);
+    const [otherText, setOtherText] = useState('');
+
+    useEffect(() => {
+        const nextSelectedIds = currentResponse?.selected_option_ids || [];
+        const nextOtherText = currentResponse?.other_text || '';
+        setSelectedOptionIds(nextSelectedIds.map(Number));
+        setUseOther(nextOtherText.trim() !== '');
+        setOtherText(nextOtherText);
+    }, [announcement?.id, currentResponse?.responded_at]);
+
+    if (!announcement) return null;
+
+    const toggleOption = (optionId) => {
+        const numericId = Number(optionId);
+        if (poll.poll_type === 'single') {
+            setSelectedOptionIds([numericId]);
+            setUseOther(false);
+            return;
+        }
+
+        setSelectedOptionIds((previous) => (
+            previous.includes(numericId)
+                ? previous.filter((id) => id !== numericId)
+                : [...previous, numericId]
+        ));
+    };
+
+    const toggleOther = (checked) => {
+        setUseOther(checked);
+        if (checked && poll.poll_type === 'single') {
+            setSelectedOptionIds([]);
+        }
+        if (!checked) {
+            setOtherText('');
+        }
+    };
+
+    const submitPollResponse = () => {
+        onSubmitPollResponse(announcement, {
+            selected_option_ids: selectedOptionIds,
+            other_text: useOther ? otherText : '',
+        });
+    };
+
+    return (
+        <Modal show={Boolean(announcement)} onClose={onClose} maxWidth="2xl">
+            <div className="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-base font-black uppercase tracking-[0.08em]">Détail de l'annonce</h3>
+                        <p className="mt-1 text-xs text-[var(--app-muted)]">
+                            Envoyée le {formatDateTime(announcement.sent_at || announcement.created_at)}
+                            {announcement.created_by ? ` par ${announcement.created_by}` : ''}
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="rounded-lg border border-[var(--app-border)] px-2 py-1 text-xs font-semibold"
+                    >
+                        Fermer
+                    </button>
+                </div>
+            </div>
+
+            <div className="space-y-4 bg-[var(--app-surface)] px-5 py-4 text-sm">
+                {announcement.title ? (
+                    <h4 className="text-lg font-black text-[var(--app-text)]">{announcement.title}</h4>
+                ) : null}
+
+                <div
+                    className="prose prose-sm max-w-none whitespace-pre-wrap rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3"
+                    dangerouslySetInnerHTML={{ __html: announcement.body_html || '<p>(message vide)</p>' }}
+                />
+
+                {poll ? (
+                    <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
+                        <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Sondage</div>
+                        <div className="mt-1 font-semibold">
+                            {poll.poll_type === 'multiple' ? 'Choix multiples' : 'Choix unique'}
+                        </div>
+
+                        {poll.can_respond ? (
+                            <div className="mt-3 space-y-2">
+                                {(poll.options || []).map((option) => (
+                                    <label key={option.id} className="flex cursor-pointer items-center gap-2 rounded-lg bg-[var(--app-surface)] px-3 py-2">
+                                        <input
+                                            type={poll.poll_type === 'multiple' ? 'checkbox' : 'radio'}
+                                            name={`announcement-poll-${poll.id}`}
+                                            checked={selectedOptionIds.includes(Number(option.id))}
+                                            onChange={() => toggleOption(option.id)}
+                                        />
+                                        <span>{option.label}</span>
+                                    </label>
+                                ))}
+
+                                {poll.allow_other ? (
+                                    <div className="rounded-lg bg-[var(--app-surface)] px-3 py-2">
+                                        <label className="flex cursor-pointer items-center gap-2">
+                                            <input
+                                                type={poll.poll_type === 'multiple' ? 'checkbox' : 'radio'}
+                                                name={`announcement-poll-${poll.id}`}
+                                                checked={useOther}
+                                                onChange={(event) => toggleOther(event.target.checked)}
+                                            />
+                                            <span>{poll.other_label || 'Autre'}</span>
+                                        </label>
+                                        {useOther ? (
+                                            <textarea
+                                                value={otherText}
+                                                onChange={(event) => setOtherText(event.target.value)}
+                                                rows={3}
+                                                className="mt-2 w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                                                placeholder="Votre réponse..."
+                                            />
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
+                                {currentResponse ? (
+                                    <p className="text-xs font-semibold text-emerald-700">Votre réponse a été enregistrée.</p>
+                                ) : null}
+                                {errors.selected_option_ids ? (
+                                    <p className="text-xs font-semibold text-red-600">{errors.selected_option_ids}</p>
+                                ) : null}
+                                {errors.other_text ? (
+                                    <p className="text-xs font-semibold text-red-600">{errors.other_text}</p>
+                                ) : null}
+
+                                <button
+                                    type="button"
+                                    onClick={submitPollResponse}
+                                    disabled={pollResponseProcessing}
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--color-black)] disabled:opacity-60"
+                                >
+                                    {currentResponse ? 'Enregistrer ma réponse' : 'Répondre'}
+                                </button>
+                            </div>
+                        ) : (
+                            <ul className="mt-2 list-disc space-y-1 pl-5">
+                                {(poll.options || []).map((option) => (
+                                    <li key={option.id}>{option.label}</li>
+                                ))}
+                                {poll.allow_other ? <li>{poll.other_label || 'Autre'} activé</li> : null}
+                            </ul>
+                        )}
+                    </div>
+                ) : null}
+
+                {poll?.results ? <PollResults results={poll.results} /> : null}
+            </div>
+        </Modal>
     );
 }
 
@@ -515,6 +960,7 @@ export default function AnnoncesIndex({
     announcements = [],
     openDraft = null,
     highlightId = null,
+    highlightAnnouncement = null,
 }) {
     const page = usePage();
     const { errors = {}, auth = {} } = page.props;
@@ -526,6 +972,9 @@ export default function AnnoncesIndex({
     const [formState, setFormState] = useState(() => formFromAnnouncement(openDraft));
     const [editingId, setEditingId] = useState(openDraft?.id ?? null);
     const [processing, setProcessing] = useState(false);
+    const [detailAnnouncement, setDetailAnnouncement] = useState(null);
+    const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
+    const [pendingSmsHref, setPendingSmsHref] = useState(null);
 
     useEffect(() => {
         if (openDraft) {
@@ -535,6 +984,24 @@ export default function AnnoncesIndex({
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openDraft?.id]);
+
+    useEffect(() => {
+        if (!highlightId) return;
+        const highlighted = announcements.find((item) => Number(item.id) === Number(highlightId));
+        if (highlighted || highlightAnnouncement) {
+            setDetailAnnouncement(highlighted || highlightAnnouncement);
+        }
+    }, [announcements, highlightId, highlightAnnouncement]);
+
+    useEffect(() => {
+        if (!detailAnnouncement) return;
+        const refreshed = announcements.find((item) => Number(item.id) === Number(detailAnnouncement.id))
+            || (Number(highlightAnnouncement?.id) === Number(detailAnnouncement.id) ? highlightAnnouncement : null);
+
+        if (refreshed && refreshed !== detailAnnouncement) {
+            setDetailAnnouncement(refreshed);
+        }
+    }, [announcements, highlightAnnouncement, detailAnnouncement]);
 
     const sectorsById = useMemo(() => Object.fromEntries(sectors.map((sector) => [sector.id, sector.name])), [sectors]);
     const usersById = useMemo(() => Object.fromEntries(users.map((user) => [user.id, user.name])), [users]);
@@ -553,6 +1020,7 @@ export default function AnnoncesIndex({
     const submitAnnouncement = (mode) => {
         const payload = {
             mode,
+            title: formState.title,
             body_html: formState.body_html,
             sector_ids: formState.sector_ids,
             user_ids: formState.user_ids,
@@ -562,6 +1030,7 @@ export default function AnnoncesIndex({
             poll: formState.has_poll ? {
                 poll_type: formState.poll_type,
                 allow_other: formState.poll_allow_other,
+                other_label: formState.poll_other_label,
                 options: formState.poll_options.map((option) => option.trim()).filter(Boolean),
             } : null,
         };
@@ -602,17 +1071,45 @@ export default function AnnoncesIndex({
         router.delete(route('annonces.groups.destroy', id), { preserveScroll: true });
     };
 
+    const submitPollResponse = (announcement, payload) => {
+        setPollResponseProcessing(true);
+        router.post(route('annonces.poll-response', announcement.id), payload, {
+            preserveScroll: true,
+            onFinish: () => setPollResponseProcessing(false),
+        });
+    };
+
     const sendSmsForForm = () => {
         const recipients = resolveRecipientUsers(formState.sector_ids, formState.user_ids, formState.excluded_user_ids, users);
-        const phones = recipients.map((user) => user.phone).filter(Boolean);
-        const message = htmlToPlainText(formState.body_html);
-        window.location.href = buildSmsHref(phones, message);
+        const phones = smsPhonesForRecipients(recipients);
+        const poll = formState.has_poll ? {
+            poll_type: formState.poll_type,
+            allow_other: formState.poll_allow_other,
+            other_label: formState.poll_other_label,
+            options: formState.poll_options,
+        } : null;
+        const message = smsMessageWithTitleAndPoll(formState.title, htmlToSmsText(formState.body_html), poll);
+        const href = buildSmsHref(phones, message);
+        if (href) setPendingSmsHref(href);
     };
 
     const sendSmsForAnnouncement = (item) => {
         const recipients = resolveRecipientUsers(item.sector_ids, item.user_ids, item.excluded_user_ids, users);
-        const phones = recipients.map((user) => user.phone).filter(Boolean);
-        window.location.href = buildSmsHref(phones, item.body_text || '');
+        const phones = smsPhonesForRecipients(recipients);
+        const message = smsMessageWithTitleAndPoll(
+            item.title,
+            htmlToSmsText(item.body_html || item.body_text || ''),
+            item.poll,
+        );
+        const href = buildSmsHref(phones, message);
+        if (href) setPendingSmsHref(href);
+    };
+
+    const confirmOpenSms = () => {
+        if (!pendingSmsHref) return;
+        const href = pendingSmsHref;
+        setPendingSmsHref(null);
+        window.location.href = href;
     };
 
     const canEditAnnouncement = (item) => (
@@ -668,6 +1165,18 @@ export default function AnnoncesIndex({
                             />
 
                             {errors.sector_ids ? <p className="text-xs text-red-600">{errors.sector_ids}</p> : null}
+
+                            <div>
+                                <span className="mb-2 block text-sm font-semibold">Titre de l'annonce</span>
+                                <input
+                                    type="text"
+                                    value={formState.title}
+                                    onChange={(event) => setFormState((prev) => ({ ...prev, title: event.target.value }))}
+                                    placeholder="Titre optionnel"
+                                    className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                                />
+                                {errors.title ? <p className="mt-1 text-xs text-red-600">{errors.title}</p> : null}
+                            </div>
 
                             <div>
                                 <span className="mb-2 block text-sm font-semibold">Message</span>
@@ -791,6 +1300,9 @@ export default function AnnoncesIndex({
                                         ) : null}
                                     </div>
 
+                                    {item.title ? (
+                                        <h3 className="mt-2 text-sm font-black text-[var(--app-text)]">{item.title}</h3>
+                                    ) : null}
                                     <p className="mt-2 whitespace-pre-line text-sm">{item.body_text || '(message vide)'}</p>
 
                                     <div className="mt-2 space-y-0.5">
@@ -805,8 +1317,8 @@ export default function AnnoncesIndex({
                                                 Sondage ({item.poll.poll_type === 'multiple' ? 'réponses multiples' : 'réponse unique'}) :
                                             </span>
                                             {' '}
-                                            {item.poll.options.join(', ')}
-                                            {item.poll.allow_other ? ' + Autre' : ''}
+                                            {item.poll.options.map((option) => option.label).join(', ')}
+                                            {item.poll.allow_other ? ` + ${item.poll.other_label || 'Autre'}` : ''}
                                         </div>
                                     ) : null}
 
@@ -838,6 +1350,13 @@ export default function AnnoncesIndex({
                                             <MessageSquare className="h-3.5 w-3.5" />
                                             SMS
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setDetailAnnouncement(item)}
+                                            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--app-border)] px-2.5 py-1.5 text-xs font-semibold"
+                                        >
+                                            {item.poll?.results ? 'Voir les réponses' : 'Détail'}
+                                        </button>
                                         {canCreate && canEditAnnouncement(item) ? (
                                             <button
                                                 type="button"
@@ -855,6 +1374,48 @@ export default function AnnoncesIndex({
                     )}
                 </section>
             </div>
+
+            <AnnouncementDetailModal
+                announcement={detailAnnouncement}
+                onClose={() => setDetailAnnouncement(null)}
+                onSubmitPollResponse={submitPollResponse}
+                pollResponseProcessing={pollResponseProcessing}
+                errors={errors}
+            />
+
+            <Modal show={Boolean(pendingSmsHref)} onClose={() => setPendingSmsHref(null)} maxWidth="lg">
+                <div className="border-b border-[var(--app-border)] px-5 py-4">
+                    <h3 className="text-sm font-black uppercase tracking-[0.08em]">Confirmation d'ouverture SMS</h3>
+                </div>
+                <div className="space-y-4 px-5 py-4 text-sm">
+                    <p>Cette action va ouvrir l'application Messages/SMS de votre appareil si elle est disponible.</p>
+                    <p>Les destinataires seront ajoutés automatiquement à partir des numéros mobiles renseignés dans l'annuaire.</p>
+                    <div>
+                        <p className="font-semibold">Veuillez vérifier attentivement les destinataires avant l'envoi :</p>
+                        <ul className="mt-2 list-disc space-y-1 pl-5">
+                            <li>si un utilisateur n'a pas de numéro mobile renseigné, il ne sera pas ajouté ;</li>
+                            <li>si un numéro est mal renseigné, le destinataire peut être absent ou incorrect ;</li>
+                            <li>le SMS ne sera pas envoyé automatiquement, vous devrez confirmer l'envoi dans l'application Messages/SMS.</li>
+                        </ul>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--app-border)] pt-4">
+                        <button
+                            type="button"
+                            onClick={() => setPendingSmsHref(null)}
+                            className="rounded-xl border border-[var(--app-border)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em]"
+                        >
+                            Annuler
+                        </button>
+                        <button
+                            type="button"
+                            onClick={confirmOpenSms}
+                            className="rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--color-black)]"
+                        >
+                            Ouvrir l'application SMS
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </AppLayout>
     );
 }

@@ -16,6 +16,7 @@ class AnnouncementPoll extends Model
         'announcement_id',
         'poll_type',
         'allow_other',
+        'other_label',
     ];
 
     protected function casts(): array
@@ -33,5 +34,10 @@ class AnnouncementPoll extends Model
     public function options(): HasMany
     {
         return $this->hasMany(AnnouncementPollOption::class)->orderBy('sort_order');
+    }
+
+    public function responses(): HasMany
+    {
+        return $this->hasMany(AnnouncementPollResponse::class);
     }
 }
