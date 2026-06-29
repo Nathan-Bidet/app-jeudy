@@ -42,7 +42,15 @@
                             <tr>
                                 <th class="label"></th>
                                 @foreach ($table['cereal_groups'] as $cerealGroup)
-                                    <th class="group-start" colspan="{{ count($cerealGroup['columns']) }}">{{ $cerealGroup['name'] }}</th>
+                                    <th class="group-start" colspan="{{ count($cerealGroup['columns']) }}">
+                                        {{ $cerealGroup['name'] }}
+                                        <div style="font-size: 7px; font-weight: 700; margin-top: 2px;">
+                                            {{ $cerealGroup['labels']['maturity'] ?? 'Échéance' }} /
+                                            {{ $cerealGroup['labels']['matif'] ?? 'MATIF' }} /
+                                            {{ $cerealGroup['labels']['base'] ?? 'Base' }} /
+                                            {{ $cerealGroup['labels']['final_price'] ?? 'Prix final' }}
+                                        </div>
+                                    </th>
                                 @endforeach
                             </tr>
                             <tr>
@@ -56,7 +64,7 @@
                         </thead>
                         <tbody>
                             <tr>
-                                <td class="label">Matif</td>
+                                <td class="label">{{ $table['labels']['matif'] ?? 'MATIF' }}</td>
                                 @foreach ($table['cereal_groups'] as $cerealGroup)
                                     @foreach ($cerealGroup['columns'] as $column)
                                         <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['matif'] }}</td>
@@ -64,7 +72,7 @@
                                 @endforeach
                             </tr>
                             <tr>
-                                <td class="label">Base</td>
+                                <td class="label">{{ $table['labels']['base'] ?? 'Base' }}</td>
                                 @foreach ($table['cereal_groups'] as $cerealGroup)
                                     @foreach ($cerealGroup['columns'] as $column)
                                         <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['margin'] }}</td>
@@ -72,7 +80,7 @@
                                 @endforeach
                             </tr>
                             <tr class="row-final">
-                                <td class="label">Prix final</td>
+                                <td class="label">{{ $table['labels']['final_price'] ?? 'Prix final' }}</td>
                                 @foreach ($table['cereal_groups'] as $cerealGroup)
                                     @foreach ($cerealGroup['columns'] as $column)
                                         <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['final_price'] }}</td>
