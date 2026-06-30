@@ -24,10 +24,6 @@ class DashboardController extends Controller
 
         return Inertia::render('Dashboard/Index', [
             'dashboard' => $this->dashboardDataService->buildForUser($user),
-            'viewer' => [
-                'is_admin' => (bool) $user->hasRole('admin'),
-                'sector_name' => $user->sector?->name,
-            ],
         ]);
     }
 }
