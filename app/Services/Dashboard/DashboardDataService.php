@@ -7,6 +7,7 @@ use App\Models\CotationSetting;
 use App\Models\LdtEntry;
 use App\Models\User;
 use App\Support\Access\AccessManager;
+use App\Support\Cotations\CotationPdfFormatter;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -100,10 +101,17 @@ class DashboardDataService
         $labels = $this->cerealLabelsConfig();
 
         return [
-            ['label' => $labels['EBM'] ?? 'Blé', 'href' => route('cotations.index', ['cereal' => 'EBM']), 'kind' => 'cereal', 'code' => 'EBM'],
-            ['label' => $labels['ECO'] ?? 'Colza', 'href' => route('cotations.index', ['cereal' => 'ECO']), 'kind' => 'cereal', 'code' => 'ECO'],
-            ['label' => $labels['EMA'] ?? 'Maïs', 'href' => route('cotations.index', ['cereal' => 'EMA']), 'kind' => 'cereal', 'code' => 'EMA'],
+            ['label' => $this->dashboardCerealLabel($labels['EBM'] ?? 'Blé', 'Blé'), 'href' => route('cotations.index', ['cereal' => 'EBM']), 'kind' => 'cereal', 'code' => 'EBM'],
+            ['label' => $this->dashboardCerealLabel($labels['ECO'] ?? 'Colza', 'Colza'), 'href' => route('cotations.index', ['cereal' => 'ECO']), 'kind' => 'cereal', 'code' => 'ECO'],
+            ['label' => $this->dashboardCerealLabel($labels['EMA'] ?? 'Maïs', 'Maïs'), 'href' => route('cotations.index', ['cereal' => 'EMA']), 'kind' => 'cereal', 'code' => 'EMA'],
         ];
+    }
+
+    private function dashboardCerealLabel(string $label, string $fallback): string
+    {
+        $cleaned = CotationPdfFormatter::text($label);
+
+        return $cleaned !== '' ? $cleaned : $fallback;
     }
 
     /**
