@@ -1086,7 +1086,7 @@ function NotificationsMenu() {
                 leaveFrom="opacity-100 translate-y-0"
                 leaveTo="opacity-0 translate-y-1"
             >
-                <MenuItems className="absolute right-0 z-50 mt-2 w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl focus:outline-none">
+                <MenuItems className="fixed left-1/2 top-16 z-50 w-[calc(100vw-24px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl focus:outline-none sm:absolute sm:right-0 sm:left-auto sm:top-auto sm:mt-2 sm:w-[min(24rem,calc(100vw-1rem))] sm:translate-x-0">
                     <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-4 py-3">
                         <p className="text-sm font-semibold">Notifications</p>
                         {hasUnread ? (

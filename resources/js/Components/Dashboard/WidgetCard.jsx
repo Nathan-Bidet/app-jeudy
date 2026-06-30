@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { ArrowRight, Check, FileText, Fuel, LayoutGrid, Newspaper, TrendingUp } from 'lucide-react';
+import { ArrowRight, BookUser, CalendarDays, CalendarX2, Check, Clock3, FileText, Fuel, LayoutGrid, Newspaper, TrendingUp } from 'lucide-react';
 import cornIconUrl from '../../../icons/cereals/corn.svg';
 import rapeseedIconUrl from '../../../icons/cereals/rapeseed.svg';
 import wheatIconUrl from '../../../icons/cereals/wheat.svg';
@@ -67,7 +67,7 @@ function CardInner({ widget, openLinkEnabled = false }) {
                             Ouvrir
                         </span>
                     )
-                ) : widget.type === 'cotations' ? null : (
+                ) : ['cotations', 'quick_links'].includes(widget.type) ? null : (
                     <span className="rounded-full border border-[var(--app-border)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--app-muted)]">
                         Placeholder
                     </span>
@@ -138,6 +138,14 @@ function CardInner({ widget, openLinkEnabled = false }) {
                         >
                             {link.label}
                         </Link>
+                    ))}
+                </div>
+            )}
+
+            {widget.type === 'quick_links' && (
+                <div className="mt-4 grid grid-cols-3 gap-2 md:flex md:flex-nowrap">
+                    {(widget.links ?? []).map((item, index) => (
+                        <QuickAccessTile key={`${item.label}-${index}`} item={item} />
                     ))}
                 </div>
             )}
@@ -220,6 +228,55 @@ function CotationTile({ item, compact = false }) {
             <span className="min-w-0 truncate">{item.label}</span>
         </Link>
     );
+}
+
+function QuickAccessTile({ item }) {
+    const Icon = iconForQuickAccessItem(item);
+
+    return (
+        <Link
+            href={item.href}
+            className="flex h-14 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-1.5 text-center text-[10px] font-black uppercase leading-3 tracking-[0.06em] text-[var(--app-text)] transition hover:bg-[var(--app-surface)] hover:shadow-sm sm:px-3 sm:text-xs md:flex-1"
+        >
+            <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center">
+                <Icon className="h-[20px] w-[20px]" strokeWidth={2.3} />
+            </span>
+            <span className="min-w-0 truncate">{item.label}</span>
+        </Link>
+    );
+}
+
+function iconForQuickAccessItem(item) {
+    const iconKey = String(item.icon ?? item.label ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-');
+
+    switch (iconKey) {
+        case 'calendar':
+        case 'calendrier':
+            return CalendarDays;
+        case 'leaves':
+        case 'conges':
+            return CalendarX2;
+        case 'hours':
+        case 'heures':
+            return Clock3;
+        case 'ldt':
+        case 'ldt-book':
+        case 'livre-du-travail':
+            return FileText;
+        case 'a_prevoir':
+        case 'a-prevoir':
+        case 'ldt-planning':
+            return Clock3;
+        case 'directory':
+        case 'annuaire':
+            return BookUser;
+        default:
+            return ArrowRight;
+    }
 }
 
 function iconForCotationItem(item) {
