@@ -9,100 +9,78 @@
 </head>
 <body>
 
-{{-- Page 1 : céréales + transport (le carburant reste sur une page à part) --}}
-<div class="page">
-    <h1>Cotations céréales</h1>
-    <p class="meta">Généré le {{ $generatedAt->format('d/m/Y à H:i') }}</p>
+@php
+    $renderHeader = function (string $title, ?string $subtitle = null) use ($generatedAt, $lastRefreshAt, $logoPath): string {
+        $logoHtml = is_string($logoPath ?? null) && file_exists($logoPath)
+            ? '<img class="pdf-logo" src="'.e($logoPath).'" alt="Logo Jeudy">'
+            : '<strong>JEUDY</strong>';
 
-    <div class="page-cereals density-{{ $cerealDensity ?? 0 }}">
-    @php
-        $hasAnyCerealData = ($cerealHarvestTables['left']['has_data'] ?? false) || ($cerealHarvestTables['right']['has_data'] ?? false);
-    @endphp
-
-    @if ($hasAnyCerealData)
-        @foreach (['left', 'right'] as $bucket)
-            @php
-                $table = $cerealHarvestTables[$bucket];
-            @endphp
-
-            <div class="harvest-section">
-                <div class="section-title">Récolte {{ $table['year'] }}</div>
-
-                @if ($table['has_data'])
-                    <table class="cereal-grid">
-                        <colgroup>
-                            <col style="width: {{ $table['stub_width'] }}%">
-                            @foreach ($table['cereal_groups'] as $cerealGroup)
-                                @foreach ($cerealGroup['columns'] as $column)
-                                    <col style="width: {{ $table['column_width'] }}%">
-                                @endforeach
-                            @endforeach
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th class="label"></th>
-                                @foreach ($table['cereal_groups'] as $cerealGroup)
-                                    <th class="group-start" colspan="{{ count($cerealGroup['columns']) }}">
-                                        {{ $cerealGroup['name'] }}
-                                        <div style="font-size: 7px; font-weight: 700; margin-top: 2px;">
-                                            {{ $cerealGroup['labels']['maturity'] ?? 'Échéance' }} /
-                                            {{ $cerealGroup['labels']['matif'] ?? 'MATIF' }} /
-                                            {{ $cerealGroup['labels']['base'] ?? 'Base' }} /
-                                            {{ $cerealGroup['labels']['final_price'] ?? 'Prix final' }}
-                                        </div>
-                                    </th>
-                                @endforeach
-                            </tr>
-                            <tr>
-                                <th class="label"></th>
-                                @foreach ($table['cereal_groups'] as $cerealGroup)
-                                    @foreach ($cerealGroup['columns'] as $column)
-                                        <th class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['label'] }}</th>
-                                    @endforeach
-                                @endforeach
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td class="label">{{ $table['labels']['matif'] ?? 'MATIF' }}</td>
-                                @foreach ($table['cereal_groups'] as $cerealGroup)
-                                    @foreach ($cerealGroup['columns'] as $column)
-                                        <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['matif'] }}</td>
-                                    @endforeach
-                                @endforeach
-                            </tr>
-                            <tr>
-                                <td class="label">{{ $table['labels']['base'] ?? 'Base' }}</td>
-                                @foreach ($table['cereal_groups'] as $cerealGroup)
-                                    @foreach ($cerealGroup['columns'] as $column)
-                                        <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['margin'] }}</td>
-                                    @endforeach
-                                @endforeach
-                            </tr>
-                            <tr class="row-final">
-                                <td class="label">{{ $table['labels']['final_price'] ?? 'Prix final' }}</td>
-                                @foreach ($table['cereal_groups'] as $cerealGroup)
-                                    @foreach ($cerealGroup['columns'] as $column)
-                                        <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['final_price'] }}</td>
-                                    @endforeach
-                                @endforeach
-                            </tr>
-                        </tbody>
-                    </table>
-                @else
-                    <div class="empty">Aucune échéance disponible pour cette récolte.</div>
-                @endif
+        return '
+            <div class="pdf-header">
+                <table class="pdf-header-table">
+                    <tr>
+                        <td class="pdf-logo-cell">'.$logoHtml.'</td>
+                        <td class="pdf-title-cell">
+                            <h1 class="pdf-title">'.e($title).'</h1>
+                            '.($subtitle ? '<div class="pdf-subtitle">'.e($subtitle).'</div>' : '').'
+                        </td>
+                        <td class="pdf-meta-cell">
+                            <div><span class="pdf-meta-label">Généré :</span> '.e($generatedAt->format('d/m/Y à H:i')).'</div>
+                            <div><span class="pdf-meta-label">Cours :</span> '.e($lastRefreshAt ? $lastRefreshAt->format('d/m/Y à H:i') : 'Non disponible').'</div>
+                        </td>
+                    </tr>
+                </table>
             </div>
-        @endforeach
-    @else
-        <p class="no-data">Aucune cotation disponible.</p>
-    @endif
-    </div>
+        ';
+    };
 
-    {{-- Transport : enchaîné directement sous les céréales sur la même page.
-         Mise en forme normale (non compactée) ; si le contenu déborde, le
-         saut de page se fait automatiquement, sans contrainte forcée. --}}
-    @forelse ($transportGrid['sections'] ?? [] as $section)
+    $wantedTransportTitles = [
+        'cereales tarif de vente aux eleveurs',
+        'produits lamines tarif de vente aux eleveurs',
+        'contrat laminage achat cereales',
+    ];
+    $normalizeTransportTitle = static function (string $title): string {
+        $normalized = mb_strtolower($title, 'UTF-8');
+        $normalized = strtr($normalized, [
+            'à' => 'a', 'â' => 'a', 'ä' => 'a',
+            'ç' => 'c',
+            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'î' => 'i', 'ï' => 'i',
+            'ô' => 'o', 'ö' => 'o',
+            'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+        ]);
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized) ?? '';
+
+        return trim(preg_replace('/\s+/', ' ', $normalized) ?? '');
+    };
+    $transportSections = collect($transportGrid['sections'] ?? [])->filter(function (array $section) use ($wantedTransportTitles, $normalizeTransportTitle): bool {
+        $normalized = $normalizeTransportTitle((string) ($section['title'] ?? ''));
+        return in_array($normalized, $wantedTransportTitles, true);
+    })->values();
+@endphp
+
+{{-- Page 1 : céréales récolte gauche --}}
+<div class="page page-cereals">
+    {!! $renderHeader('Cotations céréales - Récolte '.($cerealHarvestTables['left']['year'] ?? '')) !!}
+
+    @if (trim((string) ($cerealInfoHtml ?? '')) !== '')
+        <div class="information-block">{!! $cerealInfoHtml !!}</div>
+    @endif
+
+    @include('cotations.partials.cereal-harvest-table', ['table' => $cerealHarvestTables['left']])
+</div>
+
+{{-- Page 2 : céréales récolte droite --}}
+<div class="page page-cereals">
+    {!! $renderHeader('Cotations céréales - Récolte '.($cerealHarvestTables['right']['year'] ?? '')) !!}
+    @include('cotations.partials.cereal-harvest-table', ['table' => $cerealHarvestTables['right']])
+</div>
+
+{{-- Page 3 : transports --}}
+<div class="page transport-page">
+    {!! $renderHeader('Tarifs transports') !!}
+
+    @forelse ($transportSections as $section)
         <div class="transport-section">
             <div class="section-title">{{ $section['title'] ?: 'PRIX DES TRANSPORTS' }}</div>
             <table class="grid-table">
@@ -139,8 +117,57 @@
     @endforelse
 </div>
 
-{{-- Page 2 : carburant --}}
-@include('cotations.partials.fuel-page', ['fuelGrid' => $fuelGrid, 'generatedAt' => $generatedAt])
+{{-- Page 4 : carburants --}}
+<div class="page fuel-page">
+    {!! $renderHeader('Prix carburants') !!}
+
+    @php
+        $fuelSectionsById = collect($fuelGrid['sections'] ?? [])->keyBy('id');
+    @endphp
+
+    <div class="columns">
+        <div class="col">
+            @if ($fuelSectionsById->has('fuel_grand_froid'))
+                @include('cotations.partials.fuel-section', ['section' => $fuelSectionsById->get('fuel_grand_froid')])
+            @endif
+        </div>
+        <div class="col">
+            <div class="section-title">{{ $fuelGrid['gazole']['label'] ?: 'GAZOLE' }}</div>
+            <table class="grid-table">
+                <thead>
+                    <tr>
+                        <th class="label"></th>
+                        <th>HT</th>
+                        <th>TTC</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="label">{{ $fuelGrid['gazole']['tranche'] ?: 'GAZOLE' }}</td>
+                        @php
+                            $gazoleText = $fuelGrid['gazole']['text'] ?? '';
+                        @endphp
+                        <td>{{ $gazoleText !== '' ? $gazoleText : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ht'] ?? null) }}</td>
+                        <td>{{ $gazoleText !== '' ? $gazoleText : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ttc'] ?? null) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="columns">
+        <div class="col">
+            @if ($fuelSectionsById->has('gnr_agri'))
+                @include('cotations.partials.fuel-section', ['section' => $fuelSectionsById->get('gnr_agri')])
+            @endif
+        </div>
+        <div class="col">
+            @if ($fuelSectionsById->has('gnr_taxe'))
+                @include('cotations.partials.fuel-section', ['section' => $fuelSectionsById->get('gnr_taxe')])
+            @endif
+        </div>
+    </div>
+</div>
 
 </body>
 </html>

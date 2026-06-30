@@ -178,6 +178,7 @@ class CotationController extends Controller
             'manual_prices.*.maturity_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
             'manual_prices.*.harvest_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
             'manual_prices.*.manual_matif' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'manual_prices.*.final_price_reference_key' => ['nullable', 'string', 'max:180'],
             'manual_prices.*.margin' => ['nullable', 'integer', 'min:0', 'max:9999999'],
             'manual_prices.*.sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
             'deleted_manual_price_ids' => ['nullable', 'array'],
@@ -407,35 +408,21 @@ class CotationController extends Controller
                 'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
                 'finalPriceByKey' => $finalPriceByKey,
                 'generatedAt' => now(),
+                'lastRefreshAt' => $this->marketService->lastRefresh()?->fetched_at,
+                'cerealInfoHtml' => $this->cerealInfoConfig(),
+                'logoPath' => public_path('Logo Jeudy.png'),
+                'pdfOrientation' => 'landscape',
             ];
 
-            // Page 1 = céréales + transport (le transport garde sa mise en
-            // forme normale, jamais resserrée), page 2 = carburant : 2 pages
-            // au total dans le cas standard. On ne resserre que la grille
-            // céréales (densité 0 -> 2) pour qu'elle tienne sur une seule
-            // page ; si malgré tout le contenu déborde (beaucoup de
-            // céréales/transport), on garde simplement le rendu le plus
-            // compact obtenu et le surplus se reporte naturellement sur une
-            // page supplémentaire.
-            $pdf = null;
-            $bestPageCount = null;
-            foreach ([0, 1, 2] as $density) {
-                $candidate = Pdf::loadView('cotations.pdf', [...$viewData, 'cerealDensity' => $density])
-                    ->setPaper('a4', 'landscape');
-                $candidate->render();
-                $pageCount = $candidate->getDomPDF()->getCanvas()->get_page_count();
+            $pdf = Pdf::loadView('cotations.pdf', $viewData)
+                ->setPaper('a4', 'landscape');
 
-                if ($bestPageCount === null || $pageCount < $bestPageCount) {
-                    $pdf = $candidate;
-                    $bestPageCount = $pageCount;
-                }
+            $filename = 'cotations-'.now()->format('Y-m-d-His').'.pdf';
 
-                if ($pageCount <= 2) {
-                    break;
-                }
-            }
-
-            return $pdf->download('cotations-'.now()->format('Y-m-d-His').'.pdf');
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            ]);
         } catch (Throwable $exception) {
             Log::error('cotations.export-pdf failed', [
                 'message' => $exception->getMessage(),
@@ -465,9 +452,15 @@ class CotationController extends Controller
             $pdf = Pdf::loadView('cotations.fuel-pdf', [
                 'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
                 'generatedAt' => now(),
+                'pdfOrientation' => 'landscape',
             ])->setPaper('a4', 'landscape');
 
-            return $pdf->download('prix-carburant-'.now()->format('Y-m-d-His').'.pdf');
+            $filename = 'prix-carburant-'.now()->format('Y-m-d-His').'.pdf';
+
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            ]);
         } catch (Throwable $exception) {
             Log::error('cotations.export-fuel-pdf failed', [
                 'message' => $exception->getMessage(),
@@ -1356,6 +1349,7 @@ class CotationController extends Controller
             ->filter(fn ($row): bool => is_array($row))
             ->filter(function (array $row): bool {
                 return $this->hasDecimalInput($row['manual_matif'] ?? null)
+                    || $this->hasDecimalInput($row['final_price_reference_key'] ?? null)
                     || $this->hasDecimalInput($row['margin'] ?? null)
                     || $this->hasDecimalInput($row['manual_id'] ?? null)
                     || $this->hasDecimalInput($row['display_label'] ?? null)
@@ -1405,7 +1399,7 @@ class CotationController extends Controller
 
             $before = $manual->exists ? $this->manualPriceSnapshot($manual) : null;
 
-            $manual->forceFill([
+            $values = [
                 'identity_hash' => $manual->identity_hash ?: $identityHash,
                 'market_identity_hash' => $marketIdentityHash,
                 'line_type' => $lineType,
@@ -1422,7 +1416,15 @@ class CotationController extends Controller
                 'margin' => $this->nullablePositiveInteger($row['margin'] ?? null),
                 'sort_order' => (int) ($row['sort_order'] ?? 0),
                 'updated_by' => $request->user()?->id,
-            ])->save();
+            ];
+
+            if (Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key')) {
+                $values['final_price_reference_key'] = $lineType === 'custom'
+                    ? (trim((string) ($row['final_price_reference_key'] ?? '')) ?: null)
+                    : null;
+            }
+
+            $manual->forceFill($values)->save();
 
             $after = $this->manualPriceSnapshot($manual->refresh());
 
@@ -1585,6 +1587,7 @@ class CotationController extends Controller
             'maturity_year' => $manual->maturity_year,
             'harvest_year' => $manual->harvest_year,
             'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
+            'final_price_reference_key' => Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key') ? $manual->final_price_reference_key : null,
             'margin' => $manual->margin !== null ? (float) $manual->margin : null,
             'sort_order' => $manual->sort_order,
         ];

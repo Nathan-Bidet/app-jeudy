@@ -156,8 +156,7 @@ class CotationMarketService
             ->all();
 
         if (Schema::hasTable('cotation_manual_prices')) {
-            CotationManualPrice::query()
-                ->select([
+            $manualColumns = [
                     'id',
                     'identity_hash',
                     'market_identity_hash',
@@ -174,7 +173,15 @@ class CotationMarketService
                     'manual_matif',
                     'margin',
                     'sort_order',
-                ])
+            ];
+
+            $hasFinalPriceReference = Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key');
+            if ($hasFinalPriceReference) {
+                $manualColumns[] = 'final_price_reference_key';
+            }
+
+            CotationManualPrice::query()
+                ->select($manualColumns)
                 ->whereIn('harvest_year', $wantedYears)
                 ->orderBy('product_sort')
                 ->orderBy('product_name')
@@ -182,10 +189,13 @@ class CotationMarketService
                 ->orderBy('sort_order')
                 ->orderBy('maturity_label')
                 ->get()
-                ->each(function (CotationManualPrice $manual) use (&$configuredRows, $marketRows): void {
+                ->each(function (CotationManualPrice $manual) use (&$configuredRows, $marketRows, $hasFinalPriceReference): void {
                     $lineType = $manual->line_type === 'matif' ? 'matif' : 'custom';
                     $marketIdentity = $lineType === 'matif' ? $manual->market_identity_hash : null;
                     $market = $marketIdentity ? ($marketRows[$marketIdentity] ?? null) : null;
+                    $finalPriceReferenceKey = $hasFinalPriceReference && $lineType === 'custom'
+                        ? (trim((string) $manual->final_price_reference_key) ?: null)
+                        : null;
                     $matif = $lineType === 'matif'
                         ? ($market['matif'] ?? null)
                         : ($manual->manual_matif !== null ? (float) $manual->manual_matif : null);
@@ -207,13 +217,16 @@ class CotationMarketService
                         'matif' => $matif,
                         'euronext_price' => $market['matif'] ?? null,
                         'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
+                        'final_price_reference_key' => $finalPriceReferenceKey,
                         'margin' => $manual->margin !== null ? abs((float) $manual->margin) : null,
                         'sort' => (int) $manual->sort_order,
                         'last_seen_at' => $market['last_seen_at'] ?? null,
                         'has_euronext' => $lineType === 'matif' && $market !== null,
                     ];
-                });
+            });
         }
+
+        $configuredRows = $this->resolveFinalPriceReferences($configuredRows, $marketRows);
 
         if ($includeEmptyProducts) {
             foreach (self::BASE_PRODUCT_CODES as $code) {
@@ -266,6 +279,7 @@ class CotationMarketService
                 'matif' => $matif,
                 'euronext_price' => $row['euronext_price'],
                 'manual_matif' => $row['manual_matif'],
+                'final_price_reference_key' => $row['final_price_reference_key'] ?? null,
                 'margin' => $margin,
                 'final_price' => $matif !== null ? (float) $matif - (float) ($margin ?? 0) : null,
                 'sort' => $row['sort'],
@@ -428,6 +442,84 @@ class CotationMarketService
             });
 
         return $rows;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $configuredRows
+     * @param  array<string, array<string, mixed>>  $marketRows
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveFinalPriceReferences(array $configuredRows, array $marketRows): array
+    {
+        $rowsByReference = [];
+
+        foreach ($marketRows as $row) {
+            $rowsByReference[$this->finalPriceReferenceKey($row)] = $row + [
+                'margin' => null,
+                'final_price_reference_key' => null,
+            ];
+        }
+
+        foreach ($configuredRows as $row) {
+            $rowsByReference[$this->finalPriceReferenceKey($row)] = $row;
+        }
+
+        $resolvedFinalPrices = [];
+        $resolveFinalPrice = function (string $referenceKey, array $stack = []) use (&$resolveFinalPrice, &$resolvedFinalPrices, $rowsByReference): ?float {
+            if (array_key_exists($referenceKey, $resolvedFinalPrices)) {
+                return $resolvedFinalPrices[$referenceKey];
+            }
+
+            if (in_array($referenceKey, $stack, true) || ! isset($rowsByReference[$referenceKey])) {
+                return $resolvedFinalPrices[$referenceKey] = null;
+            }
+
+            $row = $rowsByReference[$referenceKey];
+            $matif = $row['matif'] ?? null;
+            $sourceReference = trim((string) ($row['final_price_reference_key'] ?? ''));
+
+            if ($sourceReference !== '') {
+                $matif = $resolveFinalPrice($sourceReference, [...$stack, $referenceKey]);
+            }
+
+            if ($matif === null || $matif === '') {
+                return $resolvedFinalPrices[$referenceKey] = null;
+            }
+
+            $margin = $row['margin'] !== null ? abs((float) $row['margin']) : 0.0;
+
+            return $resolvedFinalPrices[$referenceKey] = (float) $matif - $margin;
+        };
+
+        foreach ($configuredRows as &$row) {
+            $sourceReference = trim((string) ($row['final_price_reference_key'] ?? ''));
+            if ($sourceReference === '') {
+                continue;
+            }
+
+            $row['matif'] = $resolveFinalPrice($sourceReference);
+        }
+        unset($row);
+
+        return $configuredRows;
+    }
+
+    /**
+     * Mirrors transportReferenceKey() in resources/js/Pages/Cotations/Index.jsx.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function finalPriceReferenceKey(array $row): string
+    {
+        if (! empty($row['identity_hash'])) {
+            return 'identity:'.$row['identity_hash'];
+        }
+
+        if (! empty($row['manual_id'])) {
+            return 'manual:'.$row['manual_id'];
+        }
+
+        return 'line:'.($row['product_code'] ?? '').':'.($row['harvest_year'] ?? '').':'.($row['display_label'] ?? $row['label'] ?? $row['maturity_label'] ?? '');
     }
 
     /**

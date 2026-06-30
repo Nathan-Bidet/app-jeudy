@@ -387,6 +387,35 @@ function lineTypeFor(row) {
     return row?.line_type || (row?.market_identity_hash ? 'matif' : 'custom');
 }
 
+function resolveFinalPriceFromRows(rowsByKey, referenceKey, stack = [], resolved = new Map()) {
+    if (resolved.has(referenceKey)) return resolved.get(referenceKey);
+    if (!referenceKey || stack.includes(referenceKey) || !rowsByKey.has(referenceKey)) {
+        resolved.set(referenceKey, null);
+        return null;
+    }
+
+    const row = rowsByKey.get(referenceKey);
+    let matif = lineTypeFor(row) === 'matif'
+        ? parseDecimal(row.matif)
+        : parseDecimal(row.manual_matif ?? row.matif);
+    const sourceReference = String(row.final_price_reference_key || '').trim();
+
+    if (sourceReference) {
+        matif = resolveFinalPriceFromRows(rowsByKey, sourceReference, [...stack, referenceKey], resolved);
+    }
+
+    if (matif === null) {
+        resolved.set(referenceKey, null);
+        return null;
+    }
+
+    const margin = Math.abs(parseDecimal(row.margin) ?? 0);
+    const finalPrice = matif - margin;
+    resolved.set(referenceKey, finalPrice);
+
+    return finalPrice;
+}
+
 function transportDefaultGrid() {
     const defaultSection = {
         id: 'transport_1',
@@ -526,7 +555,14 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
     const lineType = lineTypeFor(draft);
     const isMatifLine = lineType === 'matif';
     const selectedOption = isMatifLine ? options.find((option) => option.identity_hash === draft.market_identity_hash) : null;
-    const matifValue = isMatifLine ? (selectedOption?.matif ?? draft.matif ?? row.matif ?? '') : (draft.manual_matif ?? row.manual_matif ?? '');
+    const finalPriceReferenceOptions = finalPriceOptions.filter((option) => option.product_code !== (draft.product_code || row.product_code));
+    const finalPriceReferenceKey = !isMatifLine ? String(draft.final_price_reference_key ?? row.final_price_reference_key ?? '').trim() : '';
+    const selectedFinalPriceReference = finalPriceReferenceKey
+        ? finalPriceReferenceOptions.find((option) => option.key === finalPriceReferenceKey)
+        : null;
+    const matifValue = isMatifLine
+        ? (selectedOption?.matif ?? draft.matif ?? row.matif ?? '')
+        : (selectedFinalPriceReference?.final_price ?? draft.manual_matif ?? row.manual_matif ?? '');
     const rawMarginValue = draft.margin ?? row.margin ?? '';
     const marginValue = rawMarginValue === '' || rawMarginValue === null || rawMarginValue === undefined
         ? ''
@@ -534,7 +570,6 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
     const matifNumber = parseDecimal(matifValue);
     const marginNumber = Math.abs(parseDecimal(marginValue) ?? 0);
     const finalPrice = matifNumber !== null ? matifNumber - marginNumber : null;
-    const finalPriceReferenceOptions = finalPriceOptions.filter((option) => option.product_code !== (draft.product_code || row.product_code));
 
     return (
         <tr className="border-t border-[var(--app-border)]">
@@ -563,6 +598,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                     maturity_year: option.maturity_year ?? row.harvest_year ?? '',
                                     harvest_year: option.harvest_year ?? row.harvest_year ?? '',
                                     manual_matif: '',
+                                    final_price_reference_key: '',
                                     matif: option.matif,
                                     has_euronext: true,
                                 } : {
@@ -573,6 +609,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                     maturity_month: '',
                                     maturity_year: draft.maturity_year || row.harvest_year || '',
                                     manual_matif: draft.manual_matif || '',
+                                    final_price_reference_key: draft.final_price_reference_key || '',
                                     matif: '',
                                     has_euronext: false,
                                 });
@@ -604,15 +641,23 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                             step="0.0001"
                             min="0"
                             value={matifValue}
-                            onChange={(event) => setManualPrice(row, 'manual_matif', event.target.value)}
-                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                            disabled={Boolean(finalPriceReferenceKey)}
+                            onChange={(event) => setManualPrice(row, {
+                                manual_matif: event.target.value,
+                                final_price_reference_key: '',
+                            })}
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center disabled:bg-[var(--app-surface-soft)] disabled:text-[var(--app-muted)] ${COTATION_VALUE_CLASS}`}
                         />
                         <select
-                            value=""
+                            value={finalPriceReferenceKey}
                             onChange={(event) => {
                                 const option = finalPriceReferenceOptions.find((item) => item.key === event.target.value);
-                                if (!option) return;
-                                setManualPrice(row, 'manual_matif', option.final_price);
+                                setManualPrice(row, option ? {
+                                    final_price_reference_key: option.key,
+                                    manual_matif: '',
+                                } : {
+                                    final_price_reference_key: '',
+                                });
                             }}
                             className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1 text-[10px] font-semibold"
                         >
@@ -1197,6 +1242,7 @@ function FuelGridSection({
     grid,
     canManage,
     canEdit = false,
+    defaultOpen = false,
     setFuelGrid,
     onStartEditing,
     onCancelEditing,
@@ -1677,7 +1723,6 @@ function FuelGridSection({
             {canExportPdf ? (
                 <a
                     href={exportPdfUrl}
-                    download
                     className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
                 >
                     <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
@@ -1688,7 +1733,7 @@ function FuelGridSection({
     );
 
     return (
-        <CollapsibleSection title="Prix carburant" icon={Fuel} actions={fuelActions}>
+        <CollapsibleSection title="Prix carburant" icon={Fuel} actions={fuelActions} defaultOpen={defaultOpen}>
             {isViewingHistory ? (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-light)] px-3 py-2 text-xs font-black uppercase tracking-[0.06em] text-[var(--color-black)]">
                     <History className="h-4 w-4" strokeWidth={2.3} />
@@ -1794,6 +1839,7 @@ function flattenMarketRows(groups = []) {
             harvest_year: row.harvest_year ?? group?.harvests?.[bucket]?.year ?? '',
             matif: row.matif ?? '',
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
+            final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
             sort_order: row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
@@ -1871,6 +1917,14 @@ export default function CotationsIndex({
     const canManage = Boolean(permissions?.can_manage);
     const canManageFuel = Boolean(permissions?.can_manage_fuel);
     const canViewFuelHistory = Boolean(permissions?.can_view_fuel_history);
+    const [targetCerealCode] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return new URLSearchParams(window.location.search).get('cereal') || '';
+    });
+    const [targetSection] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return new URLSearchParams(window.location.search).get('section') || '';
+    });
     const [fuelHistoryVersions, setFuelHistoryVersions] = useState([]);
     const [fuelHistoryLoading, setFuelHistoryLoading] = useState(false);
     const [fuelHistoryError, setFuelHistoryError] = useState('');
@@ -1923,6 +1977,34 @@ export default function CotationsIndex({
 
         return () => window.clearTimeout(timeout);
     }, [lastAddedCerealCode]);
+
+    useEffect(() => {
+        if (!targetCerealCode || loading) return undefined;
+
+        const timeout = window.setTimeout(() => {
+            Array.from(document.querySelectorAll('[data-cereal-code]'))
+                .find((element) => element.getAttribute('data-cereal-code') === targetCerealCode)
+                ?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                });
+        }, 80);
+
+        return () => window.clearTimeout(timeout);
+    }, [targetCerealCode, loading, marketData]);
+
+    useEffect(() => {
+        if (targetSection !== 'fuel') return undefined;
+
+        const timeout = window.setTimeout(() => {
+            document.querySelector('[data-cotation-section="fuel"]')?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            });
+        }, 80);
+
+        return () => window.clearTimeout(timeout);
+    }, [targetSection]);
 
     const fetchMarketData = async ({ initial = false } = {}) => {
         if (!canViewCereals || !routes.market_data) return;
@@ -1985,6 +2067,7 @@ export default function CotationsIndex({
             harvest_year: row.harvest_year ?? '',
             matif: row.matif ?? '',
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
+            final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
             sort_order: row.sort_order ?? row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
@@ -2025,6 +2108,7 @@ export default function CotationsIndex({
                 harvest_year: harvest.year,
                 matif: '',
                 manual_matif: '',
+                final_price_reference_key: '',
                 margin: '',
                 sort_order: form.data.manual_prices?.length || 0,
                 has_euronext: false,
@@ -2301,15 +2385,14 @@ export default function CotationsIndex({
             rowsByKey.set(transportReferenceKey(row), row);
         });
 
+        const resolved = new Map();
+
         return Array.from(rowsByKey.values())
             .map((row) => {
-                const matif = lineTypeFor(row) === 'matif'
-                    ? parseDecimal(row.matif)
-                    : parseDecimal(row.manual_matif ?? row.matif);
-                if (matif === null) return null;
+                const key = transportReferenceKey(row);
+                const finalPrice = resolveFinalPriceFromRows(rowsByKey, key, [], resolved);
+                if (finalPrice === null) return null;
 
-                const base = Math.abs(parseDecimal(row.margin) ?? 0);
-                const finalPrice = matif - base;
                 const labelParts = [
                     row.product_name || row.product_code || 'Céréale',
                     row.harvest_year ? `Récolte ${row.harvest_year}` : '',
@@ -2317,7 +2400,7 @@ export default function CotationsIndex({
                 ].filter(Boolean);
 
                 return {
-                    key: transportReferenceKey(row),
+                    key,
                     product_code: row.product_code,
                     label: labelParts.join(' — '),
                     final_price: finalPrice,
@@ -2352,7 +2435,6 @@ export default function CotationsIndex({
                 {canManage && routes.export_pdf ? (
                     <a
                         href={routes.export_pdf}
-                        download
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
                     >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
@@ -2447,7 +2529,7 @@ export default function CotationsIndex({
                                             cerealLabels={form.data.cereal_labels || {}}
                                             tableLabels={cerealTableLabelsFor(form.data.cereal_table_labels || {}, group.code)}
                                             finalPriceOptions={finalPriceOptions}
-                                            defaultOpen={Boolean(group.code) && group.code === lastAddedCerealCode}
+                                            defaultOpen={Boolean(group.code) && (group.code === lastAddedCerealCode || group.code === targetCerealCode)}
                                             dragHandle={isEditing ? (
                                                 <button
                                                     type="button"
@@ -2491,29 +2573,32 @@ export default function CotationsIndex({
                 ) : null}
 
                 {canViewFuel ? (
-                    <FuelGridSection
-                        grid={displayedFuelGrid}
-                        canManage={isFuelEditing && !isViewingFuelHistory}
-                        canEdit={canManageFuel && !isEditing && !isViewingFuelHistory}
-                        setFuelGrid={setFuelGrid}
-                        onStartEditing={startFuelEditing}
-                        onCancelEditing={cancelFuelEditing}
-                        onSave={saveFuelSettings}
-                        processing={form.processing}
-                        canViewHistory={canViewFuelHistory}
-                        isViewingHistory={isViewingFuelHistory}
-                        historyVersion={activeFuelHistoryVersion}
-                        historyHasOlder={fuelHistoryIndex !== null && fuelHistoryIndex < fuelHistoryVersions.length - 1}
-                        historyHasNewer={fuelHistoryIndex !== null}
-                        historyLoading={fuelHistoryLoading}
-                        historyError={fuelHistoryError}
-                        onOpenHistory={openFuelHistory}
-                        onCloseHistory={closeFuelHistory}
-                        onShowOlderHistory={showOlderFuelVersion}
-                        onShowNewerHistory={showNewerFuelVersion}
-                        canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
-                        exportPdfUrl={routes.export_fuel_pdf}
-                    />
+                    <div data-cotation-section="fuel">
+                        <FuelGridSection
+                            grid={displayedFuelGrid}
+                            canManage={isFuelEditing && !isViewingFuelHistory}
+                            canEdit={canManageFuel && !isEditing && !isViewingFuelHistory}
+                            defaultOpen={targetSection === 'fuel'}
+                            setFuelGrid={setFuelGrid}
+                            onStartEditing={startFuelEditing}
+                            onCancelEditing={cancelFuelEditing}
+                            onSave={saveFuelSettings}
+                            processing={form.processing}
+                            canViewHistory={canViewFuelHistory}
+                            isViewingHistory={isViewingFuelHistory}
+                            historyVersion={activeFuelHistoryVersion}
+                            historyHasOlder={fuelHistoryIndex !== null && fuelHistoryIndex < fuelHistoryVersions.length - 1}
+                            historyHasNewer={fuelHistoryIndex !== null}
+                            historyLoading={fuelHistoryLoading}
+                            historyError={fuelHistoryError}
+                            onOpenHistory={openFuelHistory}
+                            onCloseHistory={closeFuelHistory}
+                            onShowOlderHistory={showOlderFuelVersion}
+                            onShowNewerHistory={showNewerFuelVersion}
+                            canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
+                            exportPdfUrl={routes.export_fuel_pdf}
+                        />
+                    </div>
                 ) : null}
 
                 {canManage && isEditing ? (

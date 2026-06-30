@@ -11,6 +11,7 @@ use App\Services\FormattingRuleService;
 use App\Services\Visibility\DateRestrictionScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 
 class AprevoirService
 {
@@ -28,19 +29,24 @@ class AprevoirService
         $viewer = $filters['user'] ?? null;
 
         $taskModelClass = $this->taskModelClass();
+        $relations = [
+            'vehicle:id,name,registration,vehicle_type_id',
+            'vehicle.type:id,code',
+            'remorque:id,name,registration',
+            'assigneeUser:id,name,first_name,last_name,sector_id,email,phone,mobile_phone,internal_number,depot_address,display_order',
+            'assigneeTransporter:id,first_name,last_name,company_name,phone,email,display_order',
+            'assigneeDepot:id,name,phone,email,address_line1,address_line2,postal_code,city,country',
+            'createdBy:id,name,first_name,last_name',
+            'updatedBy:id,name,first_name,last_name',
+            'pointedBy:id,name,first_name,last_name',
+        ];
+
+        if ($this->supportsPartialPointing()) {
+            $relations[] = 'partiallyPointedBy:id,name,first_name,last_name';
+        }
+
         $query = $taskModelClass::query()
-            ->with([
-                'vehicle:id,name,registration,vehicle_type_id',
-                'vehicle.type:id,code',
-                'remorque:id,name,registration',
-                'assigneeUser:id,name,first_name,last_name,sector_id,email,phone,mobile_phone,internal_number,depot_address,display_order',
-                'assigneeTransporter:id,first_name,last_name,company_name,phone,email,display_order',
-                'assigneeDepot:id,name,phone,email,address_line1,address_line2,postal_code,city,country',
-                'createdBy:id,name,first_name,last_name',
-                'updatedBy:id,name,first_name,last_name',
-                'pointedBy:id,name,first_name,last_name',
-                'partiallyPointedBy:id,name,first_name,last_name',
-            ]);
+            ->with($relations);
 
         if ($viewer) {
             DateRestrictionScope::apply($query, $viewer, $this->visibilityScopeModule());
@@ -222,12 +228,22 @@ class AprevoirService
             $query->where('boursagri_contract_number', 'like', '%'.trim((string) $filters['boursagri_contract_number']).'%');
         }
 
-        if (($filters['pointed_filter'] ?? 'all') === 'pointed') {
+        $pointedFilter = $filters['pointed_filter'] ?? 'all';
+        $supportsPartialPointing = $this->supportsPartialPointing();
+
+        if ($pointedFilter === 'pointed') {
             $query->where('pointed', true);
-        } elseif (($filters['pointed_filter'] ?? 'all') === 'partial') {
-            $query->where('pointed', false)->where('partially_pointed', true);
-        } elseif (($filters['pointed_filter'] ?? 'all') === 'unpointed') {
-            $query->where('pointed', false)->where('partially_pointed', false);
+        } elseif ($pointedFilter === 'partial') {
+            if ($supportsPartialPointing) {
+                $query->where('pointed', false)->where('partially_pointed', true);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($pointedFilter === 'unpointed') {
+            $query->where('pointed', false);
+            if ($supportsPartialPointing) {
+                $query->where('partially_pointed', false);
+            }
         }
     }
 
@@ -527,7 +543,8 @@ class AprevoirService
         $createdName = $this->personName($task->createdBy);
         $updatedName = $this->personName($task->updatedBy);
         $pointedName = $this->personName($task->pointedBy);
-        $partiallyPointedName = $this->personName($task->partiallyPointedBy);
+        $supportsPartialPointing = $this->supportsPartialPointing();
+        $partiallyPointedName = $supportsPartialPointing ? $this->personName($task->partiallyPointedBy) : null;
 
         $indicators = $this->publicIndicators($task->indicators);
         $isProjectedToLdt = $this->projectsToLdt();
@@ -564,9 +581,9 @@ class AprevoirService
             'pointed_at' => $task->pointed_at?->toIso8601String(),
             'pointed_at_label' => $task->pointed_at?->format('d/m/Y H:i'),
             'pointed_by' => $pointedName,
-            'partially_pointed' => (bool) $task->partially_pointed,
-            'partially_pointed_at' => $task->partially_pointed_at?->toIso8601String(),
-            'partially_pointed_at_label' => $task->partially_pointed_at?->format('d/m/Y H:i'),
+            'partially_pointed' => $supportsPartialPointing ? (bool) $task->partially_pointed : false,
+            'partially_pointed_at' => $supportsPartialPointing ? $task->partially_pointed_at?->toIso8601String() : null,
+            'partially_pointed_at_label' => $supportsPartialPointing ? $task->partially_pointed_at?->format('d/m/Y H:i') : null,
             'partially_pointed_by' => $partiallyPointedName,
             'position' => (int) $task->position,
             'created_by' => [
@@ -634,5 +651,21 @@ class AprevoirService
     protected function projectsToLdt(): bool
     {
         return true;
+    }
+
+    protected function supportsPartialPointing(): bool
+    {
+        static $cache = [];
+
+        $taskModelClass = $this->taskModelClass();
+        $table = (new $taskModelClass())->getTable();
+
+        if (! array_key_exists($table, $cache)) {
+            $cache[$table] = Schema::hasColumn($table, 'partially_pointed')
+                && Schema::hasColumn($table, 'partially_pointed_at')
+                && Schema::hasColumn($table, 'partially_pointed_by_user_id');
+        }
+
+        return $cache[$table];
     }
 }

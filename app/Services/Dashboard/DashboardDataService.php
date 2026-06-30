@@ -2,11 +2,14 @@
 
 namespace App\Services\Dashboard;
 
-use App\Models\LdtEntry;
 use App\Models\AprevoirTask;
+use App\Models\CotationSetting;
+use App\Models\LdtEntry;
 use App\Models\User;
+use App\Support\Access\AccessManager;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 
 class DashboardDataService
 {
@@ -18,31 +21,29 @@ class DashboardDataService
         $isAdmin = $user->hasRole('admin');
         $sectorName = $user->sector?->name ?? 'Secteur non défini';
 
-        $widgets = [
-            $this->tasksWidget($user),
-            $this->newsWidget($isAdmin, $sectorName),
-        ];
-
-        if ($isAdmin) {
-            array_splice($widgets, 1, 0, [$this->pendingLeavesWidget()]);
-        }
-
         return [
             'meta' => [
                 'scope' => $isAdmin ? 'global' : 'sector',
                 'scope_label' => $isAdmin ? 'Vue globale administrateur' : "Vue secteur : {$sectorName}",
                 'generated_at' => now()->toIso8601String(),
             ],
-            'widgets' => $widgets,
+            'widgets' => array_values(array_filter([
+                $this->tasksWidget($user),
+                $this->cotationsWidget($user),
+            ])),
         ];
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null
      */
-    private function tasksWidget(User $user): array
+    private function tasksWidget(User $user): ?array
     {
         $items = $this->upcomingTasksForUser($user);
+
+        if (empty($items)) {
+            return null;
+        }
 
         return [
             'key' => 'tasks-today',
@@ -58,102 +59,145 @@ class DashboardDataService
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null
      */
-    private function pendingLeavesWidget(): array
+    private function cotationsWidget(User $user): ?array
     {
-        return [
-            'key' => 'pending-leaves',
-            'title' => 'Congés en attente',
-            'type' => 'metrics',
-            'icon' => 'calendar',
-            'accent' => 'red',
-            'clickable' => false,
-            'href' => null,
-            'subtitle' => 'Vue admin globale (placeholder)',
-            'metrics' => [
-                ['label' => 'Demandes', 'value' => '07'],
-                ['label' => 'Urgentes', 'value' => '02'],
-                ['label' => 'Cette semaine', 'value' => '12'],
-            ],
-            'footer' => 'Module congés à brancher',
-        ];
-    }
+        $access = app(AccessManager::class);
+        $canViewCereals = $access->can($user, 'cotations.cereals.view') || $access->can($user, 'cotations.cereals.edit');
+        $canViewFuel = $access->can($user, 'cotations.fuel.view') || $access->can($user, 'cotations.fuel.edit');
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function documentsWidget(bool $isAdmin, string $sectorName): array
-    {
-        return [
-            'key' => 'recent-documents',
-            'title' => 'Documents récents',
-            'type' => 'list',
-            'icon' => 'document',
-            'accent' => 'brown',
-            'clickable' => false,
-            'href' => null,
-            'subtitle' => $isAdmin ? 'Tous secteurs (placeholder)' : "{$sectorName} uniquement (placeholder)",
-            'items' => [
-                ['label' => 'Procédure qualité v3.pdf', 'meta' => 'Il y a 1 h', 'status' => 'Mis à jour'],
-                ['label' => 'Compte rendu équipe.docx', 'meta' => 'Il y a 3 h', 'status' => 'Nouveau'],
-                ['label' => 'Tableau suivi.xlsx', 'meta' => 'Hier', 'status' => 'Consulté'],
-            ],
-            'footer' => 'Module GED à brancher',
-        ];
-    }
+        if ((! $canViewCereals && ! $canViewFuel) || ! Route::has('cotations.index')) {
+            return null;
+        }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function newsWidget(bool $isAdmin, string $sectorName): array
-    {
+        $cereals = $canViewCereals ? $this->dashboardCereals() : [];
+        $fuelBlocks = $canViewFuel ? $this->dashboardFuelBlocks() : [];
+        $mobileFuel = $canViewFuel ? [[
+            'label' => 'Carburant',
+            'href' => route('cotations.index', ['section' => 'fuel']),
+            'kind' => 'fuel',
+        ]] : [];
+
         return [
-            'key' => 'recent-news',
-            'title' => 'Actualités récentes',
-            'type' => 'list',
-            'icon' => 'news',
+            'key' => 'cotations',
+            'title' => 'Cotations',
+            'type' => 'cotations',
+            'icon' => 'cotations',
             'accent' => 'green',
-            'clickable' => false,
-            'href' => null,
-            'subtitle' => $isAdmin ? 'Flux global (placeholder)' : "Flux {$sectorName} (placeholder)",
-            'items' => [
-                ['label' => 'Maintenance prévue vendredi', 'meta' => 'IT', 'status' => 'Info'],
-                ['label' => 'Nouvelle procédure de validation', 'meta' => 'RH', 'status' => 'Important'],
-                ['label' => 'Mise à jour du planning mensuel', 'meta' => 'Ops', 'status' => 'Info'],
-            ],
-            'footer' => 'Module actualités à brancher',
+            'cereals' => $cereals,
+            'fuel_blocks' => $fuelBlocks,
+            'mobile_cereals' => array_slice($cereals, 0, 3),
+            'mobile_fuel' => $mobileFuel,
         ];
+    }
+
+    /**
+     * @return array<int, array{label:string,href:string,kind:string,code:string}>
+     */
+    private function dashboardCereals(): array
+    {
+        $labels = $this->cerealLabelsConfig();
+
+        return [
+            ['label' => $labels['EBM'] ?? 'Blé', 'href' => route('cotations.index', ['cereal' => 'EBM']), 'kind' => 'cereal', 'code' => 'EBM'],
+            ['label' => $labels['ECO'] ?? 'Colza', 'href' => route('cotations.index', ['cereal' => 'ECO']), 'kind' => 'cereal', 'code' => 'ECO'],
+            ['label' => $labels['EMA'] ?? 'Maïs', 'href' => route('cotations.index', ['cereal' => 'EMA']), 'kind' => 'cereal', 'code' => 'EMA'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function cerealLabelsConfig(): array
+    {
+        $defaults = [
+            'ECO' => 'Colza',
+            'EBM' => 'Blé',
+            'EMA' => 'Maïs',
+        ];
+
+        if (! Schema::hasTable('cotation_settings')) {
+            return $defaults;
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_display_labels')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+        if (! is_array($decoded)) {
+            return $defaults;
+        }
+
+        foreach ($defaults as $code => $defaultLabel) {
+            $label = trim((string) ($decoded[$code] ?? ''));
+            $defaults[$code] = $label !== '' ? $label : $defaultLabel;
+        }
+
+        return $defaults;
+    }
+
+    /**
+     * @return array<int, array{label:string,href:string,kind:string}>
+     */
+    private function dashboardFuelBlocks(): array
+    {
+        $config = $this->fuelGridConfig();
+        $blocks = collect($config['sections'] ?? [])
+            ->filter(fn ($section): bool => is_array($section))
+            ->map(fn (array $section): array => [
+                'label' => trim((string) ($section['label'] ?? '')) ?: 'Carburant',
+                'href' => route('cotations.index', ['section' => 'fuel']),
+                'kind' => 'fuel',
+            ])
+            ->values()
+            ->all();
+
+        $gazoleLabel = trim((string) ($config['gazole']['label'] ?? ''));
+        if ($gazoleLabel !== '') {
+            $blocks[] = [
+                'label' => $gazoleLabel,
+                'href' => route('cotations.index', ['section' => 'fuel']),
+                'kind' => 'fuel',
+            ];
+        }
+
+        return $blocks;
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function shortcutsWidget(bool $isAdmin): array
+    private function fuelGridConfig(): array
     {
-        $links = [
-            ['label' => 'Mon profil', 'href' => $this->safeRoute('profile.edit')],
-            ['label' => 'Dashboard', 'href' => $this->safeRoute('dashboard')],
-            ['label' => 'Annuaire', 'href' => $this->safeRoute('directory.index')],
+        $default = [
+            'sections' => [
+                ['id' => 'fuel_grand_froid', 'label' => 'FUEL GRAND FROID'],
+                ['id' => 'gnr_agri', 'label' => 'GNR AGRI Enregistré'],
+                ['id' => 'gnr_taxe', 'label' => 'GNR Taxé'],
+            ],
+            'gazole' => ['label' => 'GAZOLE'],
         ];
 
-        if ($isAdmin) {
-            $links[] = ['label' => 'Utilisateurs', 'href' => $this->safeRoute('admin.users.index')];
-            $links[] = ['label' => 'Secteurs', 'href' => $this->safeRoute('admin.sectors.index')];
-            $links[] = ['label' => 'Logs', 'href' => $this->safeRoute('admin.logs.index')];
+        if (! Schema::hasTable('cotation_settings')) {
+            return $default;
+        }
+
+        $note = CotationSetting::query()->where('key', 'fuel_grid_config')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+        if (! is_array($decoded)) {
+            return $default;
         }
 
         return [
-            'key' => 'quick-shortcuts',
-            'title' => 'Raccourcis rapides',
-            'type' => 'links',
-            'icon' => 'shortcut',
-            'accent' => 'yellow',
-            'clickable' => false,
-            'href' => null,
-            'subtitle' => 'Accès rapides aux modules',
-            'links' => array_values(array_filter($links, fn (array $link): bool => ! empty($link['href']))),
-            'footer' => 'Menu contextuel du dashboard',
+            'sections' => collect($decoded['sections'] ?? $default['sections'])
+                ->filter(fn ($section): bool => is_array($section))
+                ->map(fn (array $section, int $index): array => [
+                    'label' => trim((string) ($section['label'] ?? '')) ?: ($default['sections'][$index]['label'] ?? 'Carburant'),
+                ])
+                ->values()
+                ->all(),
+            'gazole' => [
+                'label' => trim((string) ($decoded['gazole']['label'] ?? '')) ?: 'GAZOLE',
+            ],
         ];
     }
 
