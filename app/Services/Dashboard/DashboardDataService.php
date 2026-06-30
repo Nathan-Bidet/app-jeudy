@@ -31,6 +31,7 @@ class DashboardDataService
             'widgets' => array_values(array_filter([
                 $this->tasksWidget($user),
                 $this->cotationsWidget($user),
+                $this->quickAccessWidget($user),
             ])),
         ];
     }
@@ -112,6 +113,76 @@ class DashboardDataService
         $cleaned = CotationPdfFormatter::text($label);
 
         return $cleaned !== '' ? $cleaned : $fallback;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function quickAccessWidget(User $user): ?array
+    {
+        $access = app(AccessManager::class);
+        $links = [];
+
+        if (Route::has('calendar.index') && $access->can($user, 'calendar.view')) {
+            $links[] = [
+                'label' => 'Calendrier',
+                'href' => route('calendar.index'),
+                'icon' => 'calendar',
+            ];
+        }
+
+        if (Route::has('leaves.index')) {
+            $links[] = [
+                'label' => 'Congés',
+                'href' => route('leaves.index'),
+                'icon' => 'leaves',
+            ];
+        }
+
+        if (Route::has('hours.index') && $access->can($user, 'heures.view')) {
+            $links[] = [
+                'label' => 'Heures',
+                'href' => route('hours.index'),
+                'icon' => 'hours',
+            ];
+        }
+
+        if (Route::has('ldt.index') && $access->can($user, 'ldt.view')) {
+            $links[] = [
+                'label' => 'Livre du travail',
+                'href' => route('ldt.index'),
+                'icon' => 'ldt-book',
+            ];
+        }
+
+        if (Route::has('a_prevoir.index') && $access->can($user, 'a_prevoir.view')) {
+            $links[] = [
+                'label' => 'À prévoir',
+                'href' => route('a_prevoir.index'),
+                'icon' => 'ldt-planning',
+            ];
+        }
+
+        if (Route::has('directory.index') && $user->can('viewAny', User::class)) {
+            $links[] = [
+                'label' => 'Annuaire',
+                'href' => route('directory.index'),
+                'icon' => 'annuaire',
+            ];
+        }
+
+        if ($links === []) {
+            return null;
+        }
+
+        return [
+            'key' => 'quick-access',
+            'title' => 'Accès rapides',
+            'type' => 'quick_links',
+            'icon' => 'shortcut',
+            'accent' => 'green',
+            'links' => $links,
+        ];
     }
 
     /**
