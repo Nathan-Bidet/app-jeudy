@@ -21,8 +21,8 @@
                     <tr>
                         <td class="pdf-logo-cell">'.$logoHtml.'</td>
                         <td class="pdf-title-cell">
-                            <h1 class="pdf-title">'.e($title).'</h1>
-                            '.($subtitle ? '<div class="pdf-subtitle">'.e($subtitle).'</div>' : '').'
+                            <h1 class="pdf-title">'.e(\App\Support\Cotations\CotationPdfFormatter::text($title)).'</h1>
+                            '.($subtitle ? '<div class="pdf-subtitle">'.e(\App\Support\Cotations\CotationPdfFormatter::text($subtitle)).'</div>' : '').'
                         </td>
                         <td class="pdf-meta-cell">
                             <div><span class="pdf-meta-label">Généré :</span> '.e($generatedAt->format('d/m/Y à H:i')).'</div>
@@ -34,29 +34,7 @@
         ';
     };
 
-    $wantedTransportTitles = [
-        'cereales tarif de vente aux eleveurs',
-        'produits lamines tarif de vente aux eleveurs',
-        'contrat laminage achat cereales',
-    ];
-    $normalizeTransportTitle = static function (string $title): string {
-        $normalized = mb_strtolower($title, 'UTF-8');
-        $normalized = strtr($normalized, [
-            'à' => 'a', 'â' => 'a', 'ä' => 'a',
-            'ç' => 'c',
-            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
-            'î' => 'i', 'ï' => 'i',
-            'ô' => 'o', 'ö' => 'o',
-            'ù' => 'u', 'û' => 'u', 'ü' => 'u',
-        ]);
-        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized) ?? '';
-
-        return trim(preg_replace('/\s+/', ' ', $normalized) ?? '');
-    };
-    $transportSections = collect($transportGrid['sections'] ?? [])->filter(function (array $section) use ($wantedTransportTitles, $normalizeTransportTitle): bool {
-        $normalized = $normalizeTransportTitle((string) ($section['title'] ?? ''));
-        return in_array($normalized, $wantedTransportTitles, true);
-    })->values();
+    $transportSections = collect($transportGrid['sections'] ?? [])->values();
 @endphp
 
 {{-- Page 1 : céréales récolte gauche --}}
@@ -64,7 +42,7 @@
     {!! $renderHeader('Cotations céréales - Récolte '.($cerealHarvestTables['left']['year'] ?? '')) !!}
 
     @if (trim((string) ($cerealInfoHtml ?? '')) !== '')
-        <div class="information-block">{!! $cerealInfoHtml !!}</div>
+        <div class="information-block">{!! \App\Support\Cotations\CotationPdfFormatter::html($cerealInfoHtml) !!}</div>
     @endif
 
     @include('cotations.partials.cereal-harvest-table', ['table' => $cerealHarvestTables['left']])
@@ -82,20 +60,20 @@
 
     @forelse ($transportSections as $section)
         <div class="transport-section">
-            <div class="section-title">{{ $section['title'] ?: 'PRIX DES TRANSPORTS' }}</div>
+            <div class="section-title">{{ \App\Support\Cotations\CotationPdfFormatter::text($section['title'] ?: 'PRIX DES TRANSPORTS') }}</div>
             <table class="grid-table">
                 <thead>
                     <tr>
-                        <th class="label">{{ $section['first_column_label'] ?: 'TRANSPORT' }}</th>
+                        <th class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($section['first_column_label'] ?: 'TRANSPORT') }}</th>
                         @foreach ($section['columns'] ?? [] as $column)
-                            <th>{{ $column['label'] ?: 'Colonne' }}</th>
+                            <th>{{ \App\Support\Cotations\CotationPdfFormatter::text($column['label'] ?: 'Colonne') }}</th>
                         @endforeach
                     </tr>
                 </thead>
                 <tbody>
                     @foreach ($section['rows'] ?? [] as $row)
                         <tr>
-                            <td class="label">{{ $row['label'] ?: 'Ligne' }}</td>
+                            <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($row['label'] ?: 'Ligne') }}</td>
                             @foreach ($section['columns'] ?? [] as $column)
                                 @php
                                     $cellKey = $row['id'].'__'.$column['id'];
@@ -105,7 +83,7 @@
                                         ? (float) $referencePrice + (float) ($column['base'] ?? 0) + (float) ($row['base'] ?? 0)
                                         : null;
                                 @endphp
-                                <td>{{ $customText !== '' ? $customText : \App\Support\Cotations\CotationPdfFormatter::roundedPrice($price) }}</td>
+                                <td>{{ $customText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($customText) : \App\Support\Cotations\CotationPdfFormatter::roundedPrice($price) }}</td>
                             @endforeach
                         </tr>
                     @endforeach
@@ -132,7 +110,7 @@
             @endif
         </div>
         <div class="col">
-            <div class="section-title">{{ $fuelGrid['gazole']['label'] ?: 'GAZOLE' }}</div>
+            <div class="section-title">{{ \App\Support\Cotations\CotationPdfFormatter::text($fuelGrid['gazole']['label'] ?: 'GAZOLE') }}</div>
             <table class="grid-table">
                 <thead>
                     <tr>
@@ -143,12 +121,12 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="label">{{ $fuelGrid['gazole']['tranche'] ?: 'GAZOLE' }}</td>
+                        <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($fuelGrid['gazole']['tranche'] ?: 'GAZOLE') }}</td>
                         @php
                             $gazoleText = $fuelGrid['gazole']['text'] ?? '';
                         @endphp
-                        <td>{{ $gazoleText !== '' ? $gazoleText : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ht'] ?? null) }}</td>
-                        <td>{{ $gazoleText !== '' ? $gazoleText : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ttc'] ?? null) }}</td>
+                        <td>{{ $gazoleText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($gazoleText) : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ht'] ?? null) }}</td>
+                        <td>{{ $gazoleText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($gazoleText) : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ttc'] ?? null) }}</td>
                     </tr>
                 </tbody>
             </table>

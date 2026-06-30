@@ -1,5 +1,5 @@
 @if ($section)
-    <div class="section-title">{{ $section['label'] ?: 'Section' }}</div>
+    <div class="section-title">{{ \App\Support\Cotations\CotationPdfFormatter::text($section['label'] ?: 'Section') }}</div>
     <table class="grid-table">
         <thead>
             <tr>
@@ -14,9 +14,9 @@
                     $rowText = trim((string) ($row['text'] ?? ''));
                 @endphp
                 <tr>
-                    <td class="label">{{ $row['tranche'] ?: 'Tranche' }}</td>
-                    <td>{{ $rowText !== '' ? $rowText : \App\Support\Cotations\CotationPdfFormatter::price($row['computed_ht'] ?? null) }}</td>
-                    <td>{{ $rowText !== '' ? $rowText : \App\Support\Cotations\CotationPdfFormatter::price($row['computed_ttc'] ?? null) }}</td>
+                    <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($row['tranche'] ?: 'Tranche') }}</td>
+                    <td>{{ $rowText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($rowText) : \App\Support\Cotations\CotationPdfFormatter::price($row['computed_ht'] ?? null) }}</td>
+                    <td>{{ $rowText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($rowText) : \App\Support\Cotations\CotationPdfFormatter::price($row['computed_ttc'] ?? null) }}</td>
                 </tr>
             @endforeach
         </tbody>

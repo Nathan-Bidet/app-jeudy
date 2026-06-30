@@ -30,7 +30,7 @@
                             <th class="label"></th>
                             @foreach ($chunk as $cerealGroup)
                                 <th class="group-start cereal-name" colspan="{{ count($cerealGroup['columns']) }}">
-                                    {{ $cerealGroup['name'] }}
+                                    {{ \App\Support\Cotations\CotationPdfFormatter::text($cerealGroup['name']) }}
                                 </th>
                             @endforeach
                         </tr>
@@ -38,14 +38,14 @@
                             <th class="label"></th>
                             @foreach ($chunk as $cerealGroup)
                                 @foreach ($cerealGroup['columns'] as $column)
-                                    <th class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['label'] }}</th>
+                                    <th class="{{ $loop->first ? 'group-start' : '' }}">{{ \App\Support\Cotations\CotationPdfFormatter::text($column['label']) }}</th>
                                 @endforeach
                             @endforeach
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
-                            <td class="label">{{ $table['labels']['matif'] ?? 'MATIF' }}</td>
+                            <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($table['labels']['matif'] ?? 'MATIF') }}</td>
                             @foreach ($chunk as $cerealGroup)
                                 @foreach ($cerealGroup['columns'] as $column)
                                     <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['matif'] }}</td>
@@ -53,7 +53,7 @@
                             @endforeach
                         </tr>
                         <tr>
-                            <td class="label">{{ $table['labels']['base'] ?? 'Base' }}</td>
+                            <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($table['labels']['base'] ?? 'Base') }}</td>
                             @foreach ($chunk as $cerealGroup)
                                 @foreach ($cerealGroup['columns'] as $column)
                                     <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['margin'] }}</td>
@@ -61,7 +61,7 @@
                             @endforeach
                         </tr>
                         <tr class="row-final">
-                            <td class="label">{{ $table['labels']['final_price'] ?? 'Prix final' }}</td>
+                            <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($table['labels']['final_price'] ?? 'Prix final') }}</td>
                             @foreach ($chunk as $cerealGroup)
                                 @foreach ($cerealGroup['columns'] as $column)
                                     <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['final_price'] }}</td>

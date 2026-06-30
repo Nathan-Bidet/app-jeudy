@@ -16,7 +16,7 @@
             @endif
         </div>
         <div class="col">
-            <div class="section-title">{{ $fuelGrid['gazole']['label'] ?: 'GAZOLE' }}</div>
+            <div class="section-title">{{ \App\Support\Cotations\CotationPdfFormatter::text($fuelGrid['gazole']['label'] ?: 'GAZOLE') }}</div>
             <table class="grid-table">
                 <thead>
                     <tr>
@@ -27,12 +27,12 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="label">{{ $fuelGrid['gazole']['tranche'] ?: 'GAZOLE' }}</td>
+                        <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($fuelGrid['gazole']['tranche'] ?: 'GAZOLE') }}</td>
                         @php
                             $gazoleText = $fuelGrid['gazole']['text'] ?? '';
                         @endphp
-                        <td>{{ $gazoleText !== '' ? $gazoleText : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ht'] ?? null) }}</td>
-                        <td>{{ $gazoleText !== '' ? $gazoleText : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ttc'] ?? null) }}</td>
+                        <td>{{ $gazoleText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($gazoleText) : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ht'] ?? null) }}</td>
+                        <td>{{ $gazoleText !== '' ? \App\Support\Cotations\CotationPdfFormatter::text($gazoleText) : \App\Support\Cotations\CotationPdfFormatter::price($fuelGrid['gazole']['computed_ttc'] ?? null) }}</td>
                     </tr>
                 </tbody>
             </table>
