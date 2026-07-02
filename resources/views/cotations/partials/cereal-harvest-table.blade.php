@@ -13,6 +13,7 @@
             @php
                 $visibleColumnCount = $chunk->sum(fn (array $cerealGroup): int => count($cerealGroup['columns'] ?? []));
                 $columnWidth = $visibleColumnCount > 0 ? (100 - $stubWidth) / $visibleColumnCount : 0;
+                $hasFreeText = $chunk->contains(fn (array $cerealGroup): bool => collect($cerealGroup['columns'] ?? [])->contains(fn (array $column): bool => trim((string) ($column['free_text'] ?? '')) !== ''));
             @endphp
 
             @if ($visibleColumnCount > 0)
@@ -34,8 +35,18 @@
                                 </th>
                             @endforeach
                         </tr>
+                        @if ($hasFreeText)
+                            <tr>
+                                <th class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($table['labels']['free_text'] ?? 'Livraison') }}</th>
+                                @foreach ($chunk as $cerealGroup)
+                                    @foreach ($cerealGroup['columns'] as $column)
+                                        <th class="{{ $loop->first ? 'group-start' : '' }}">{{ \App\Support\Cotations\CotationPdfFormatter::text($column['free_text'] ?? '') }}</th>
+                                    @endforeach
+                                @endforeach
+                            </tr>
+                        @endif
                         <tr>
-                            <th class="label"></th>
+                            <th class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($table['labels']['maturity'] ?? 'Échéance') }}</th>
                             @foreach ($chunk as $cerealGroup)
                                 @foreach ($cerealGroup['columns'] as $column)
                                     <th class="{{ $loop->first ? 'group-start' : '' }}">{{ \App\Support\Cotations\CotationPdfFormatter::text($column['label']) }}</th>

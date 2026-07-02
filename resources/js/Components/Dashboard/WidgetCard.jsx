@@ -219,7 +219,7 @@ function CotationTile({ item, compact = false }) {
         <Link
             href={item.href}
             className={`flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-center font-black uppercase tracking-[0.06em] text-[var(--app-text)] transition hover:bg-[var(--app-surface)] hover:shadow-sm ${
-                compact ? 'h-14 px-1.5 text-[10px] leading-3' : 'px-3 py-3 text-xs'
+                compact ? 'h-12 px-1.5 text-[10px] leading-3' : 'h-12 px-3 text-xs leading-3'
             }`}
         >
             <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center overflow-visible">
@@ -236,7 +236,7 @@ function QuickAccessTile({ item }) {
     return (
         <Link
             href={item.href}
-            className="flex h-14 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-1.5 text-center text-[10px] font-black uppercase leading-3 tracking-[0.06em] text-[var(--app-text)] transition hover:bg-[var(--app-surface)] hover:shadow-sm sm:px-3 sm:text-xs md:flex-1"
+            className="flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-1.5 text-center text-[10px] font-black uppercase leading-3 tracking-[0.06em] text-[var(--app-text)] transition hover:bg-[var(--app-surface)] hover:shadow-sm sm:px-3 sm:text-xs md:flex-1"
         >
             <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center">
                 <Icon className="h-[20px] w-[20px]" strokeWidth={2.3} />
