@@ -195,6 +195,7 @@ class CotationController extends Controller
             'cereal_labels.*' => ['nullable', 'string', 'max:80'],
             'cereal_table_labels' => ['nullable', 'array'],
             'cereal_table_labels.*' => ['nullable', 'array'],
+            'cereal_table_labels.*.free_text' => ['nullable', 'string', 'max:80'],
             'cereal_table_labels.*.maturity' => ['nullable', 'string', 'max:80'],
             'cereal_table_labels.*.matif' => ['nullable', 'string', 'max:80'],
             'cereal_table_labels.*.base' => ['nullable', 'string', 'max:80'],
@@ -503,7 +504,8 @@ class CotationController extends Controller
                 $columns = [];
                 foreach ($sourceRows as $row) {
                     $columns[] = [
-                        'label' => (string) ($row['label'] ?: 'Échéance'),
+                        'free_text' => (string) ($row['display_label'] ?? ''),
+                        'label' => $this->maturityShortLabel((string) ($row['maturity_label'] ?: ($row['label'] ?: 'Échéance'))),
                         'matif' => CotationPdfFormatter::price($row['matif'] ?? null),
                         'margin' => CotationPdfFormatter::margin($row['margin'] ?? null),
                         'final_price' => CotationPdfFormatter::price($row['final_price'] ?? null),
@@ -533,6 +535,42 @@ class CotationController extends Controller
         }
 
         return $tables;
+    }
+
+    private function maturityShortLabel(string $value): string
+    {
+        $label = trim($value);
+        if ($label === '') {
+            return '';
+        }
+
+        $replacements = [
+            '/\bjanvier\b/iu' => 'janv',
+            '/\bfévrier\b/iu' => 'fev',
+            '/\bfevrier\b/iu' => 'fev',
+            '/\bmars\b/iu' => 'mars',
+            '/\bavril\b/iu' => 'avr',
+            '/\bmai\b/iu' => 'mai',
+            '/\bjuin\b/iu' => 'juin',
+            '/\bjuillet\b/iu' => 'juil',
+            '/\baoût\b/iu' => 'aout',
+            '/\baout\b/iu' => 'aout',
+            '/\bseptembre\b/iu' => 'sept',
+            '/\boctobre\b/iu' => 'oct',
+            '/\bnovembre\b/iu' => 'nov',
+            '/\bdécembre\b/iu' => 'dec',
+            '/\bdecembre\b/iu' => 'dec',
+        ];
+
+        foreach ($replacements as $pattern => $replacement) {
+            $label = preg_replace($pattern, $replacement, $label) ?? $label;
+        }
+
+        $label = mb_strtolower($label, 'UTF-8');
+        $label = preg_replace('/\s*[-\/]\s*/u', ' - ', $label) ?? $label;
+        $label = preg_replace('/\s+/u', ' ', $label) ?? $label;
+
+        return trim($label);
     }
 
     /**
@@ -807,6 +845,7 @@ class CotationController extends Controller
     private function defaultCerealTableLabels(): array
     {
         return [
+            'free_text' => 'Texte libre',
             'maturity' => 'Échéance',
             'matif' => 'MATIF',
             'base' => 'Base',

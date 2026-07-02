@@ -266,7 +266,7 @@ class CotationMarketService
                 'line_type' => $row['line_type'],
                 'manual_id' => $row['manual_id'] ?? null,
                 'code' => $row['contract_code'],
-                'label' => $row['display_label'] ?: $row['label'],
+                'label' => $row['label'],
                 'display_label' => $row['display_label'],
                 'maturity_label' => $row['label'],
                 'product_code' => $row['product_code'],
@@ -498,6 +498,12 @@ class CotationMarketService
             }
 
             $row['matif'] = $resolveFinalPrice($sourceReference);
+            if (isset($rowsByReference[$sourceReference])) {
+                $sourceRow = $rowsByReference[$sourceReference];
+                $row['label'] = $sourceRow['label'] ?? $sourceRow['maturity_label'] ?? $row['label'];
+                $row['maturity_month'] = $sourceRow['maturity_month'] ?? null;
+                $row['maturity_year'] = $sourceRow['maturity_year'] ?? $row['maturity_year'];
+            }
         }
         unset($row);
 
