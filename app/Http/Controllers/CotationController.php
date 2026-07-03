@@ -845,7 +845,7 @@ class CotationController extends Controller
     private function defaultCerealTableLabels(): array
     {
         return [
-            'free_text' => 'Texte libre',
+            'free_text' => 'Livraison',
             'maturity' => 'Échéance',
             'matif' => 'MATIF',
             'base' => 'Base',
