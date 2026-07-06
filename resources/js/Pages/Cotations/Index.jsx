@@ -51,10 +51,12 @@ const COTATION_ROW_LABEL_CLASS = 'text-xs font-black leading-4 sm:text-sm sm:lea
 const COTATION_HARVEST_TITLE_CLASS = 'border-b border-[var(--app-border)] bg-[#FACC51] px-3 py-2 text-[13px] font-black uppercase leading-4 tracking-[0.08em] text-[var(--color-black)]';
 const TRANSPORT_HEADER_LABEL_CLASS = 'text-sm font-black leading-5';
 const TRANSPORT_HEADER_INPUT_CLASS = 'text-sm font-black leading-5';
+const CUSTOM_MATURITY_SENTINEL = 'Option personnalisée';
 
 function maturityShortLabel(value) {
     const source = String(value || '').trim();
     if (!source) return '';
+    if (source.toLowerCase() === CUSTOM_MATURITY_SENTINEL.toLowerCase()) return '';
 
     const normalized = source
         .normalize('NFD')
@@ -81,6 +83,12 @@ function maturityShortLabel(value) {
         .replace(/\s*[-/]\s*/g, ' - ')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function customMaturityInputValue(value) {
+    const source = String(value || '').trim();
+
+    return source.toLowerCase() === CUSTOM_MATURITY_SENTINEL.toLowerCase() ? '' : source;
 }
 
 function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3', defaultOpen = false, compactMobile = false }) {
@@ -630,55 +638,65 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
             <td className={COTATION_BODY_CELL_CLASS}>
                 {canManage && !isMatifLine && finalPriceReferenceKey ? (
                     <div className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-1.5 text-xs font-bold text-[var(--app-text)] sm:text-sm">
-                        {maturityShortLabel(linkedMaturityLabel) || '-'}
+                        {maturityShortLabel(linkedMaturityLabel)}
                     </div>
                 ) : canManage ? (
-                    <select
-                        value={isMatifLine ? draft.market_identity_hash || '' : 'custom'}
-                        onChange={(event) => {
-                            const option = options.find((item) => item.identity_hash === event.target.value);
-                            setManualPrice(row, option ? {
-                                line_type: 'matif',
-                                market_identity_hash: option.identity_hash,
-                                contract_code: option.contract_code || '',
-                                maturity_label: option.maturity_label || option.label || '',
-                                maturity_month: option.maturity_month ?? '',
-                                maturity_year: option.maturity_year ?? row.harvest_year ?? '',
-                                harvest_year: option.harvest_year ?? row.harvest_year ?? '',
-                                manual_matif: '',
-                                final_price_reference_key: '',
-                                matif: option.matif,
-                                has_euronext: true,
-                            } : {
-                                line_type: 'custom',
-                                market_identity_hash: '',
-                                contract_code: '',
-                                maturity_label: 'Option personnalisée',
-                                maturity_month: '',
-                                maturity_year: draft.maturity_year || row.harvest_year || '',
-                                manual_matif: draft.manual_matif || '',
-                                final_price_reference_key: draft.final_price_reference_key || '',
-                                matif: '',
-                                has_euronext: false,
-                            });
-                        }}
-                        className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
-                    >
-                        <option value="custom">Option personnalisée</option>
-                        {options.map((option) => (
-                            <option key={option.identity_hash} value={option.identity_hash}>
-                                {option.label} - {formatPrice(option.matif)}
-                            </option>
-                        ))}
-                    </select>
+                    <div className="grid gap-1">
+                        <select
+                            value={isMatifLine ? draft.market_identity_hash || '' : 'custom'}
+                            onChange={(event) => {
+                                const option = options.find((item) => item.identity_hash === event.target.value);
+                                setManualPrice(row, option ? {
+                                    line_type: 'matif',
+                                    market_identity_hash: option.identity_hash,
+                                    contract_code: option.contract_code || '',
+                                    maturity_label: option.maturity_label || option.label || '',
+                                    maturity_month: option.maturity_month ?? '',
+                                    maturity_year: option.maturity_year ?? row.harvest_year ?? '',
+                                    harvest_year: option.harvest_year ?? row.harvest_year ?? '',
+                                    manual_matif: '',
+                                    final_price_reference_key: '',
+                                    matif: option.matif,
+                                    has_euronext: true,
+                                } : {
+                                    line_type: 'custom',
+                                    market_identity_hash: '',
+                                    contract_code: '',
+                                    maturity_label: '',
+                                    maturity_month: '',
+                                    maturity_year: draft.maturity_year || row.harvest_year || '',
+                                    manual_matif: draft.manual_matif || '',
+                                    final_price_reference_key: draft.final_price_reference_key || '',
+                                    matif: '',
+                                    has_euronext: false,
+                                });
+                            }}
+                            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
+                        >
+                            <option value="custom">Option personnalisée</option>
+                            {options.map((option) => (
+                                <option key={option.identity_hash} value={option.identity_hash}>
+                                    {option.label} - {formatPrice(option.matif)}
+                                </option>
+                            ))}
+                        </select>
+                        {!isMatifLine ? (
+                            <input
+                                type="text"
+                                value={customMaturityInputValue(draft.maturity_label)}
+                                onChange={(event) => setManualPrice(row, {
+                                    maturity_label: event.target.value,
+                                })}
+                                placeholder="Libellé d'échéance"
+                                className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
+                            />
+                        ) : null}
+                    </div>
                 ) : (
                     <div className={`${COTATION_ROW_LABEL_CLASS} break-words [overflow-wrap:anywhere]`}>
-                        {maturityShortLabel(row.maturity_label || row.label) || '-'}
+                        {maturityShortLabel(row.maturity_label || row.label)}
                     </div>
                 )}
-                {!isMatifLine && canManage ? (
-                    <div className="mt-1 text-[9px] font-black uppercase tracking-[0.04em] text-[var(--app-muted)] sm:text-[10px]">Manuel</div>
-                ) : null}
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage && !isMatifLine ? (
@@ -702,7 +720,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                 setManualPrice(row, option ? {
                                     final_price_reference_key: option.key,
                                     manual_matif: '',
-                                    maturity_label: option.maturity_label || option.label || 'Option personnalisée',
+                                    maturity_label: customMaturityInputValue(option.maturity_label || option.label || ''),
                                     maturity_month: option.maturity_month ?? '',
                                     maturity_year: option.maturity_year ?? draft.maturity_year ?? row.harvest_year ?? '',
                                 } : {
@@ -2156,7 +2174,7 @@ export default function CotationsIndex({
                 product_sort: group.sort || 999,
                 contract_code: '',
                 display_label: '',
-                maturity_label: 'Option personnalisée',
+                maturity_label: '',
                 maturity_month: '',
                 maturity_year: harvest.year,
                 harvest_year: harvest.year,
@@ -2450,14 +2468,14 @@ export default function CotationsIndex({
                 const labelParts = [
                     row.product_name || row.product_code || 'Céréale',
                     row.harvest_year ? `Récolte ${row.harvest_year}` : '',
-                    row.maturity_label || row.label || 'Échéance',
+                    customMaturityInputValue(row.maturity_label || row.label || '') || 'Échéance',
                 ].filter(Boolean);
 
                 return {
                     key,
                     product_code: row.product_code,
                     label: labelParts.join(' — '),
-                    maturity_label: row.maturity_label || row.label || '',
+                    maturity_label: customMaturityInputValue(row.maturity_label || row.label || ''),
                     maturity_month: row.maturity_month ?? '',
                     maturity_year: row.maturity_year ?? row.harvest_year ?? '',
                     final_price: finalPrice,
