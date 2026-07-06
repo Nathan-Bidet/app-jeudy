@@ -162,18 +162,18 @@ class CotationController extends Controller
             'settings' => ['required', 'array'],
             'settings.*.id' => ['required', Rule::in($ids)],
             'settings.*.value' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'settings.*.note' => ['nullable', 'string', 'max:1000'],
+            'settings.*.note' => ['nullable', 'string', 'max:5000'],
             'manual_prices' => ['nullable', 'array'],
             'manual_prices.*.manual_id' => ['nullable', 'integer'],
             'manual_prices.*.identity_hash' => ['nullable', 'string', 'size:40'],
             'manual_prices.*.market_identity_hash' => ['nullable', 'string', 'size:40'],
             'manual_prices.*.line_type' => ['nullable', Rule::in(['matif', 'custom'])],
             'manual_prices.*.product_code' => ['required_with:manual_prices', 'string', 'max:16'],
-            'manual_prices.*.product_name' => ['required_with:manual_prices', 'string', 'max:80'],
+            'manual_prices.*.product_name' => ['required_with:manual_prices', 'string', 'max:255'],
             'manual_prices.*.product_sort' => ['nullable', 'integer', 'min:0', 'max:999'],
-            'manual_prices.*.contract_code' => ['nullable', 'string', 'max:80'],
-            'manual_prices.*.display_label' => ['nullable', 'string', 'max:80'],
-            'manual_prices.*.maturity_label' => ['nullable', 'string', 'max:80'],
+            'manual_prices.*.contract_code' => ['nullable', 'string', 'max:255'],
+            'manual_prices.*.display_label' => ['nullable', 'string', 'max:255'],
+            'manual_prices.*.maturity_label' => ['nullable', 'string', 'max:255'],
             'manual_prices.*.maturity_month' => ['nullable', 'integer', 'min:1', 'max:12'],
             'manual_prices.*.maturity_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
             'manual_prices.*.harvest_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
@@ -186,54 +186,54 @@ class CotationController extends Controller
             'custom_cereals' => ['nullable', 'array'],
             'custom_cereals.*.id' => ['nullable', 'integer'],
             'custom_cereals.*.code' => ['nullable', 'string', 'max:16'],
-            'custom_cereals.*.name' => ['required_with:custom_cereals', 'string', 'max:80'],
+            'custom_cereals.*.name' => ['required_with:custom_cereals', 'string', 'max:255'],
             'custom_cereals.*.base_product_code' => ['required_with:custom_cereals', Rule::in(['ECO', 'EBM', 'EMA'])],
             'custom_cereals.*.sort_order' => ['nullable', 'integer', 'min:100', 'max:9999'],
             'cereal_order' => ['nullable', 'array', 'max:100'],
             'cereal_order.*' => ['string', 'max:16'],
             'cereal_labels' => ['nullable', 'array'],
-            'cereal_labels.*' => ['nullable', 'string', 'max:80'],
+            'cereal_labels.*' => ['nullable', 'string', 'max:255'],
             'cereal_table_labels' => ['nullable', 'array'],
             'cereal_table_labels.*' => ['nullable', 'array'],
-            'cereal_table_labels.*.free_text' => ['nullable', 'string', 'max:80'],
-            'cereal_table_labels.*.maturity' => ['nullable', 'string', 'max:80'],
-            'cereal_table_labels.*.matif' => ['nullable', 'string', 'max:80'],
-            'cereal_table_labels.*.base' => ['nullable', 'string', 'max:80'],
-            'cereal_table_labels.*.final_price' => ['nullable', 'string', 'max:80'],
-            'cereal_info_html' => ['nullable', 'string', 'max:20000'],
+            'cereal_table_labels.*.free_text' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.maturity' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.matif' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.base' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.final_price' => ['nullable', 'string', 'max:255'],
+            'cereal_info_html' => ['nullable', 'string', 'max:100000'],
             'transport_grid' => ['nullable', 'array'],
-            'transport_grid.title' => ['nullable', 'string', 'max:120'],
-            'transport_grid.first_column_label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.title' => ['nullable', 'string', 'max:255'],
+            'transport_grid.first_column_label' => ['nullable', 'string', 'max:255'],
             'transport_grid.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.columns' => ['nullable', 'array', 'max:12'],
             'transport_grid.columns.*.id' => ['required_with:transport_grid.columns', 'string', 'max:80'],
-            'transport_grid.columns.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.columns.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.columns.*.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.columns.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.rows' => ['nullable', 'array', 'max:30'],
             'transport_grid.rows.*.id' => ['required_with:transport_grid.rows', 'string', 'max:80'],
-            'transport_grid.rows.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.rows.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.rows.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.cells' => ['nullable', 'array'],
-            'transport_grid.cells.*.text' => ['nullable', 'string', 'max:120'],
+            'transport_grid.cells.*.text' => ['nullable', 'string', 'max:500'],
             'transport_grid.sections' => ['nullable', 'array', 'max:20'],
             'transport_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
-            'transport_grid.sections.*.title' => ['nullable', 'string', 'max:120'],
-            'transport_grid.sections.*.first_column_label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.title' => ['nullable', 'string', 'max:255'],
+            'transport_grid.sections.*.first_column_label' => ['nullable', 'string', 'max:255'],
             'transport_grid.sections.*.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.sections.*.columns' => ['nullable', 'array', 'max:12'],
             'transport_grid.sections.*.columns.*.id' => ['required_with:transport_grid.sections.*.columns', 'string', 'max:80'],
-            'transport_grid.sections.*.columns.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.columns.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.sections.*.columns.*.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.sections.*.columns.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
             'transport_grid.sections.*.rows.*.id' => ['required_with:transport_grid.sections.*.rows', 'string', 'max:80'],
-            'transport_grid.sections.*.rows.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.rows.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.sections.*.rows.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.sections.*.cells' => ['nullable', 'array'],
-            'transport_grid.sections.*.cells.*.text' => ['nullable', 'string', 'max:120'],
+            'transport_grid.sections.*.cells.*.text' => ['nullable', 'string', 'max:500'],
             ...$this->fuelGridValidationRules(),
-        ]);
+        ], $this->cotationValidationMessages(), $this->cotationValidationAttributes());
 
         $before = $settings->mapWithKeys(fn (CotationSetting $setting): array => [
             (string) $setting->id => $this->settingSnapshot($setting),
@@ -324,7 +324,11 @@ class CotationController extends Controller
 
     public function updateFuelSettings(Request $request): RedirectResponse
     {
-        $validated = $request->validate($this->fuelGridValidationRules(required: true));
+        $validated = $request->validate(
+            $this->fuelGridValidationRules(required: true),
+            $this->cotationValidationMessages(),
+            $this->cotationValidationAttributes(),
+        );
         $before = $this->fuelGridConfig();
         $fuelGridChange = $this->updateFuelGrid($validated['fuel_grid'] ?? null, $request, $before);
 
@@ -541,6 +545,9 @@ class CotationController extends Controller
     {
         $label = trim($value);
         if ($label === '') {
+            return '';
+        }
+        if (mb_strtolower($label, 'UTF-8') === 'option personnalisée') {
             return '';
         }
 
@@ -1192,24 +1199,84 @@ class CotationController extends Controller
             'fuel_grid.vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fuel_grid.sections' => ['nullable', 'array', 'max:10'],
             'fuel_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.sections.*.label' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.label' => ['nullable', 'string', 'max:255'],
             'fuel_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
             'fuel_grid.sections.*.rows.*.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.sections.*.rows.*.tranche' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.rows.*.tranche' => ['nullable', 'string', 'max:255'],
             'fuel_grid.sections.*.rows.*.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.sections.*.rows.*.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
-            'fuel_grid.sections.*.rows.*.text' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.rows.*.text' => ['nullable', 'string', 'max:500'],
             'fuel_grid.gnr_tax' => ['nullable', 'array'],
             'fuel_grid.gnr_tax.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gnr_tax.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gazole' => ['nullable', 'array'],
             'fuel_grid.gazole.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.gazole.label' => ['nullable', 'string', 'max:120'],
-            'fuel_grid.gazole.tranche' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gazole.label' => ['nullable', 'string', 'max:255'],
+            'fuel_grid.gazole.tranche' => ['nullable', 'string', 'max:255'],
             'fuel_grid.gazole.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gazole.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gazole.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
-            'fuel_grid.gazole.text' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gazole.text' => ['nullable', 'string', 'max:500'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function cotationValidationMessages(): array
+    {
+        return [
+            'required' => 'Le champ :attribute est obligatoire.',
+            'required_with' => 'Le champ :attribute est obligatoire.',
+            'array' => 'Le champ :attribute doit être une liste valide.',
+            'string' => 'Le champ :attribute doit être un texte.',
+            'numeric' => 'Le champ :attribute doit être un nombre.',
+            'integer' => 'Le champ :attribute doit être un nombre entier.',
+            'in' => 'La valeur sélectionnée pour :attribute est invalide.',
+            'size.string' => 'Le champ :attribute doit contenir exactement :size caractères.',
+            'max.string' => 'Le champ :attribute ne peut pas dépasser :max caractères.',
+            'max.array' => 'Le champ :attribute ne peut pas contenir plus de :max éléments.',
+            'max.numeric' => 'Le champ :attribute ne peut pas être supérieur à :max.',
+            'min.numeric' => 'Le champ :attribute doit être au moins égal à :min.',
+            'min.integer' => 'Le champ :attribute doit être au moins égal à :min.',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function cotationValidationAttributes(): array
+    {
+        return [
+            'settings.*.note' => 'note',
+            'manual_prices.*.product_name' => 'nom de la céréale',
+            'manual_prices.*.contract_code' => 'code contrat',
+            'manual_prices.*.display_label' => 'livraison',
+            'manual_prices.*.maturity_label' => 'libellé d’échéance',
+            'custom_cereals.*.name' => 'nom de la céréale personnalisée',
+            'cereal_labels.*' => 'nom de céréale',
+            'cereal_table_labels.*.free_text' => 'libellé Livraison',
+            'cereal_table_labels.*.maturity' => 'libellé Échéance',
+            'cereal_table_labels.*.matif' => 'libellé MATIF',
+            'cereal_table_labels.*.base' => 'libellé Base',
+            'cereal_table_labels.*.final_price' => 'libellé Prix final',
+            'cereal_info_html' => 'bloc Information',
+            'transport_grid.title' => 'titre du tableau transport',
+            'transport_grid.first_column_label' => 'première colonne transport',
+            'transport_grid.columns.*.label' => 'colonne transport',
+            'transport_grid.rows.*.label' => 'ligne transport',
+            'transport_grid.cells.*.text' => 'texte du tableau transport',
+            'transport_grid.sections.*.title' => 'titre de section transport',
+            'transport_grid.sections.*.first_column_label' => 'première colonne transport',
+            'transport_grid.sections.*.columns.*.label' => 'colonne transport',
+            'transport_grid.sections.*.rows.*.label' => 'ligne transport',
+            'transport_grid.sections.*.cells.*.text' => 'texte du tableau transport',
+            'fuel_grid.sections.*.label' => 'titre carburant',
+            'fuel_grid.sections.*.rows.*.tranche' => 'libellé carburant',
+            'fuel_grid.sections.*.rows.*.text' => 'texte carburant',
+            'fuel_grid.gazole.label' => 'titre gazole',
+            'fuel_grid.gazole.tranche' => 'libellé gazole',
+            'fuel_grid.gazole.text' => 'texte gazole',
         ];
     }
 
@@ -1419,7 +1486,10 @@ class CotationController extends Controller
                 ? (int) $row['maturity_month']
                 : null;
             $displayLabel = trim((string) ($row['display_label'] ?? ''));
-            $maturityLabel = trim((string) ($row['maturity_label'] ?? '')) ?: $displayLabel;
+            $maturityLabel = trim((string) ($row['maturity_label'] ?? ''));
+            if ($maturityLabel === '') {
+                $maturityLabel = $lineType === 'custom' ? 'Option personnalisée' : 'Échéance personnalisée';
+            }
             $marketIdentityHash = $lineType === 'matif' && $this->hasDecimalInput($row['market_identity_hash'] ?? null)
                 ? (string) $row['market_identity_hash']
                 : null;
@@ -1447,7 +1517,7 @@ class CotationController extends Controller
                 'product_sort' => (int) ($row['product_sort'] ?? 999),
                 'contract_code' => $lineType === 'matif' ? (trim((string) ($row['contract_code'] ?? '')) ?: null) : null,
                 'display_label' => $displayLabel ?: null,
-                'maturity_label' => $maturityLabel ?: 'Échéance personnalisée',
+                'maturity_label' => $maturityLabel,
                 'maturity_month' => $lineType === 'matif' ? $maturityMonth : null,
                 'maturity_year' => (int) $row['maturity_year'],
                 'harvest_year' => (int) $row['harvest_year'],
