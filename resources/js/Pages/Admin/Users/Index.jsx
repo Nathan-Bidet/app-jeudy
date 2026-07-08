@@ -10,6 +10,98 @@ import { Head, router, useForm } from '@inertiajs/react';
 import { AlertTriangle, Pencil, Save, Trash2, UserPlus } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+const ABILITY_GROUP_ORDER = [
+    'dashboard',
+    'directory',
+    'a_prevoir',
+    'engrais',
+    'ldt',
+    'task.data',
+    'task.fuel',
+    'task.tiers',
+    'task.formatting',
+    'task.archive',
+    'heures',
+    'calendar',
+    'cotations',
+    'annonces',
+    'admin.users',
+    'admin.sectors',
+    'admin.access',
+    'admin.logs',
+    'admin.entities',
+    'other',
+];
+
+const ABILITY_GROUP_LABELS = {
+    dashboard: 'Dashboard',
+    directory: 'Annuaire',
+    a_prevoir: 'À Prévoir',
+    engrais: 'Engrais',
+    ldt: 'Livre du Travail',
+    'task.data': 'Tâches - Données',
+    'task.fuel': 'Tâches - Carburant',
+    'task.tiers': 'Tâches - Tiers',
+    'task.formatting': 'Mise en forme',
+    'task.archive': 'Tâches - Archive',
+    heures: 'Heures',
+    calendar: 'Calendrier',
+    cotations: 'Cotations',
+    annonces: 'Annonces',
+    'admin.users': 'Administration - Utilisateurs',
+    'admin.sectors': 'Administration - Secteurs',
+    'admin.access': 'Administration - Accès',
+    'admin.logs': 'Administration - Logs',
+    'admin.entities': 'Administration - Entités',
+    other: 'Autres permissions',
+};
+
+function abilityGroupKey(ability) {
+    if (ability.startsWith('task.formatting.')) return 'task.formatting';
+    if (ability.startsWith('task.archive.')) return 'task.archive';
+    if (ability.startsWith('task.data.')) return 'task.data';
+    if (ability.startsWith('task.fuel.')) return 'task.fuel';
+    if (ability.startsWith('task.tiers.')) return 'task.tiers';
+    if (ability.startsWith('admin.users.')) return 'admin.users';
+    if (ability.startsWith('admin.sectors.')) return 'admin.sectors';
+    if (ability.startsWith('admin.access.')) return 'admin.access';
+    if (ability.startsWith('admin.logs.')) return 'admin.logs';
+    if (ability.startsWith('admin.entities.')) return 'admin.entities';
+
+    const [prefix] = ability.split('.');
+
+    if (['dashboard', 'directory', 'a_prevoir', 'engrais', 'ldt', 'heures', 'calendar', 'cotations', 'annonces'].includes(prefix)) {
+        return prefix;
+    }
+
+    return 'other';
+}
+
+function groupAbilities(abilities) {
+    const grouped = abilities.reduce((acc, ability) => {
+        const key = abilityGroupKey(ability);
+        if (!acc.has(key)) {
+            acc.set(key, []);
+        }
+        acc.get(key).push(ability);
+        return acc;
+    }, new Map());
+
+    return Array.from(grouped.entries())
+        .sort(([left], [right]) => {
+            const leftIndex = ABILITY_GROUP_ORDER.indexOf(left);
+            const rightIndex = ABILITY_GROUP_ORDER.indexOf(right);
+            const safeLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+            const safeRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+            return safeLeft - safeRight;
+        })
+        .map(([key, list]) => ({
+            key,
+            label: ABILITY_GROUP_LABELS[key] || key,
+            abilities: [...list].sort((left, right) => left.localeCompare(right)),
+        }));
+}
+
 function getDisplayName(user) {
     const firstName = (user?.first_name ?? '').trim();
     const lastName = (user?.last_name ?? '').trim();
@@ -51,6 +143,7 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
 
         return Array.from(new Set(merged)).sort((left, right) => left.localeCompare(right));
     }, [abilities, selectedUser]);
+    const groupedAbilityOptions = useMemo(() => groupAbilities(abilityOptions), [abilityOptions]);
 
     const roleForm = useForm({
         role: selectedUser?.role ?? 'utilisateur',
@@ -397,62 +490,70 @@ export default function AdminUsersIndex({ users, sectors, roles, abilities = [] 
                                         </div>
 
                                         <div className="max-h-72 divide-y divide-gray-100 overflow-auto">
-                                            {abilityOptions.map((ability) => {
-                                                const allowed = hasAllow(ability);
-                                                const denied = hasDeny(ability);
-
-                                                return (
-                                                    <div
-                                                        key={ability}
-                                                        className="grid grid-cols-[1fr_auto] items-center gap-3 px-3 py-2"
-                                                    >
-                                                        <div className="min-w-0">
-                                                            <p className="truncate text-xs font-semibold text-gray-800">
-                                                                {abilityLabel(ability)}
-                                                            </p>
-                                                            <p className="truncate font-mono text-[10px] text-gray-500">
-                                                                {ability}
-                                                            </p>
-                                                        </div>
-
-                                                        <div className="flex items-center gap-1 text-xs">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setAbilityEffect(ability, 'none')}
-                                                                className={`rounded px-2 py-1 ${
-                                                                    !allowed && !denied
-                                                                        ? 'bg-gray-800 text-white'
-                                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                                                }`}
-                                                            >
-                                                                Défaut
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setAbilityEffect(ability, 'allow')}
-                                                                className={`rounded px-2 py-1 ${
-                                                                    allowed
-                                                                        ? 'bg-green-600 text-white'
-                                                                        : 'bg-green-50 text-green-700 hover:bg-green-100'
-                                                                }`}
-                                                            >
-                                                                Allow
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setAbilityEffect(ability, 'deny')}
-                                                                className={`rounded px-2 py-1 ${
-                                                                    denied
-                                                                        ? 'bg-red-600 text-white'
-                                                                        : 'bg-red-50 text-red-700 hover:bg-red-100'
-                                                                }`}
-                                                            >
-                                                                Deny
-                                                            </button>
-                                                        </div>
+                                            {groupedAbilityOptions.map((group) => (
+                                                <div key={group.key}>
+                                                    <div className="bg-gray-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-gray-500">
+                                                        {group.label}
                                                     </div>
-                                                );
-                                            })}
+
+                                                    {group.abilities.map((ability) => {
+                                                        const allowed = hasAllow(ability);
+                                                        const denied = hasDeny(ability);
+
+                                                        return (
+                                                            <div
+                                                                key={ability}
+                                                                className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-gray-100 px-3 py-2"
+                                                            >
+                                                                <div className="min-w-0">
+                                                                    <p className="truncate text-xs font-semibold text-gray-800">
+                                                                        {abilityLabel(ability)}
+                                                                    </p>
+                                                                    <p className="truncate font-mono text-[10px] text-gray-500">
+                                                                        {ability}
+                                                                    </p>
+                                                                </div>
+
+                                                                <div className="flex items-center gap-1 text-xs">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setAbilityEffect(ability, 'none')}
+                                                                        className={`rounded px-2 py-1 ${
+                                                                            !allowed && !denied
+                                                                                ? 'bg-gray-800 text-white'
+                                                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                                        }`}
+                                                                    >
+                                                                        Défaut
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setAbilityEffect(ability, 'allow')}
+                                                                        className={`rounded px-2 py-1 ${
+                                                                            allowed
+                                                                                ? 'bg-green-600 text-white'
+                                                                                : 'bg-green-50 text-green-700 hover:bg-green-100'
+                                                                        }`}
+                                                                    >
+                                                                        Allow
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setAbilityEffect(ability, 'deny')}
+                                                                        className={`rounded px-2 py-1 ${
+                                                                            denied
+                                                                                ? 'bg-red-600 text-white'
+                                                                                : 'bg-red-50 text-red-700 hover:bg-red-100'
+                                                                        }`}
+                                                                    >
+                                                                        Deny
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ))}
 
                                             {abilityOptions.length === 0 && (
                                                 <div className="px-3 py-4 text-sm text-gray-500">
