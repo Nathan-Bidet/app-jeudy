@@ -423,6 +423,82 @@ function PaginationFooter({ meta, onPageChange }) {
     );
 }
 
+function FuelSitesPanel({ items = [], depots = [], onAdd, onUpdate, onDelete }) {
+    const [selectedDepotId, setSelectedDepotId] = useState('');
+
+    const existingDepotIds = useMemo(() => new Set(items.map((item) => item.depot_id).filter(Boolean)), [items]);
+    const availableDepots = useMemo(() => depots.filter((depot) => !existingDepotIds.has(depot.id)), [depots, existingDepotIds]);
+
+    const add = async () => {
+        if (!selectedDepotId) return;
+        await onAdd(Number(selectedDepotId));
+        setSelectedDepotId('');
+    };
+
+    return (
+        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-4">
+            <div className="mb-3">
+                <h3 className="text-sm font-black uppercase tracking-[0.08em]">Sites</h3>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+                <select
+                    value={selectedDepotId}
+                    onChange={(event) => setSelectedDepotId(event.target.value)}
+                    className="min-w-0 flex-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm"
+                >
+                    <option value="">Sélectionner un dépôt</option>
+                    {availableDepots.map((depot) => (
+                        <option key={depot.id} value={depot.id}>{depot.name}</option>
+                    ))}
+                </select>
+                <button
+                    type="button"
+                    onClick={add}
+                    disabled={!selectedDepotId}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
+                    Ajouter
+                </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+                {items.length === 0 ? (
+                    <p className="text-sm text-[var(--app-muted)]">Aucun site. Sélectionnez un dépôt ci-dessus.</p>
+                ) : (
+                    items.map((item) => (
+                        <div key={item.id} className="grid gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-2 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+                            <span className="px-3 py-2 text-sm font-medium text-[var(--app-text)]">
+                                {item.depot_label || item.label}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => onUpdate(item.id, { active: !item.active })}
+                                className={`rounded-lg border px-3 py-2 text-xs font-black uppercase tracking-[0.08em] ${
+                                    item.active
+                                        ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
+                                        : 'border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)]'
+                                }`}
+                            >
+                                {item.active ? 'Actif' : 'Inactif'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onDelete(item.id)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-500 bg-red-500 text-white"
+                                aria-label="Supprimer"
+                            >
+                                <Trash2 className="h-4 w-4" strokeWidth={2.2} />
+                            </button>
+                        </div>
+                    ))
+                )}
+            </div>
+        </section>
+    );
+}
+
 function FuelOptionsPanel({ title, kind, items = [], onCreate, onUpdate, onDelete }) {
     const [newLabel, setNewLabel] = useState('');
     const [editingValues, setEditingValues] = useState({});
@@ -513,12 +589,12 @@ function FuelOptionsPanel({ title, kind, items = [], onCreate, onUpdate, onDelet
     );
 }
 
-function FuelSettingsModal({ show, onClose, options, onOptionsChange }) {
-    const [error, setError] = useState('');
+function FuelSettingsModal({ show, onClose, options, onOptionsChange, depots = [] }) {
+    const [error, setError] = useState(‘’);
 
     const replaceOption = (option) => {
         onOptionsChange((current) => {
-            const groupKey = option.kind === 'site' ? 'sites' : 'product_types';
+            const groupKey = option.kind === ‘site’ ? ‘sites’ : ‘product_types’;
             return {
                 ...current,
                 [groupKey]: (current[groupKey] || []).map((item) => (item.id === option.id ? option : item)),
@@ -526,47 +602,62 @@ function FuelSettingsModal({ show, onClose, options, onOptionsChange }) {
         });
     };
 
-    const createOption = async (kind, label) => {
-        setError('');
+    const addSiteDepot = async (depotId) => {
+        setError(‘’);
         try {
-            const data = await jsonRequest('/tasks/fuel/options', {
-                method: 'POST',
-                body: JSON.stringify({ kind, label }),
+            const data = await jsonRequest(‘/tasks/fuel/options’, {
+                method: ‘POST’,
+                body: JSON.stringify({ kind: ‘site’, depot_id: depotId }),
             });
-            const option = data.option;
-            const groupKey = kind === 'site' ? 'sites' : 'product_types';
             onOptionsChange((current) => ({
                 ...current,
-                [groupKey]: [...(current[groupKey] || []), option],
+                sites: [...(current.sites || []), data.option],
             }));
         } catch (caughtError) {
-            setError(caughtError instanceof Error ? caughtError.message : 'Impossible d’ajouter la valeur.');
+            setError(caughtError instanceof Error ? caughtError.message : ‘Impossible d\’ajouter le site.’);
+        }
+    };
+
+    const createOption = async (kind, label) => {
+        setError(‘’);
+        try {
+            const data = await jsonRequest(‘/tasks/fuel/options’, {
+                method: ‘POST’,
+                body: JSON.stringify({ kind, label }),
+            });
+            const groupKey = kind === ‘site’ ? ‘sites’ : ‘product_types’;
+            onOptionsChange((current) => ({
+                ...current,
+                [groupKey]: [...(current[groupKey] || []), data.option],
+            }));
+        } catch (caughtError) {
+            setError(caughtError instanceof Error ? caughtError.message : ‘Impossible d\’ajouter la valeur.’);
         }
     };
 
     const updateOption = async (id, payload) => {
-        setError('');
+        setError(‘’);
         try {
             const data = await jsonRequest(`/tasks/fuel/options/${id}`, {
-                method: 'PUT',
+                method: ‘PUT’,
                 body: JSON.stringify(payload),
             });
             replaceOption(data.option);
         } catch (caughtError) {
-            setError(caughtError instanceof Error ? caughtError.message : 'Impossible de modifier la valeur.');
+            setError(caughtError instanceof Error ? caughtError.message : ‘Impossible de modifier la valeur.’);
         }
     };
 
     const deleteOption = async (id) => {
-        setError('');
+        setError(‘’);
         try {
-            await jsonRequest(`/tasks/fuel/options/${id}`, { method: 'DELETE' });
+            await jsonRequest(`/tasks/fuel/options/${id}`, { method: ‘DELETE’ });
             onOptionsChange((current) => ({
                 sites: (current.sites || []).filter((item) => item.id !== id),
                 product_types: (current.product_types || []).filter((item) => item.id !== id),
             }));
         } catch (caughtError) {
-            setError(caughtError instanceof Error ? caughtError.message : 'Impossible de supprimer la valeur.');
+            setError(caughtError instanceof Error ? caughtError.message : ‘Impossible de supprimer la valeur.’);
         }
     };
 
@@ -593,11 +684,10 @@ function FuelSettingsModal({ show, onClose, options, onOptionsChange }) {
                     </div>
                 ) : null}
 
-                <FuelOptionsPanel
-                    title="Sites"
-                    kind="site"
+                <FuelSitesPanel
                     items={options.sites || []}
-                    onCreate={createOption}
+                    depots={depots}
+                    onAdd={addSiteDepot}
                     onUpdate={updateOption}
                     onDelete={deleteOption}
                 />
@@ -1711,7 +1801,7 @@ function FuelTable({
     );
 }
 
-export default function TaskFuelIndex({ permissions = {}, deliveries = [], options = { sites: [], product_types: [] }, query = {} }) {
+export default function TaskFuelIndex({ permissions = {}, deliveries = [], options = { sites: [], product_types: [] }, query = {}, depots = [] }) {
     const canUpdate = Boolean(permissions.can_update);
     const canDelete = Boolean(permissions.can_delete);
     const initialDeliveries = normalizeDeliveryPayload(deliveries);
@@ -1998,6 +2088,7 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
                 onClose={() => setShowSettingsModal(false)}
                 options={fuelOptions}
                 onOptionsChange={setFuelOptions}
+                depots={depots}
             />
 
             <FuelDeliveryModal

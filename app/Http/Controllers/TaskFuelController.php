@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Depot;
 use App\Models\TaskFuelDelivery;
 use App\Models\TaskFuelOption;
 use App\Models\TaskTiersRecord;
@@ -59,6 +60,12 @@ class TaskFuelController extends Controller
                 ],
             ],
             'options' => $this->fuelOptionsPayload(),
+            'depots' => Depot::query()
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (Depot $depot): array => ['id' => $depot->id, 'name' => $depot->name])
+                ->values(),
             'query' => [
                 'search' => $search,
                 'filters' => $this->normalizeFuelFiltersForFrontend($filters),
@@ -254,17 +261,50 @@ class TaskFuelController extends Controller
     {
         $validated = $request->validate([
             'kind' => ['required', 'string', 'in:site,product_type'],
-            'label' => ['required', 'string', 'max:255'],
+            'depot_id' => ['nullable', 'integer', 'exists:depots,id'],
+            'label' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $option = TaskFuelOption::query()->create([
-            'kind' => $validated['kind'],
-            'label' => trim((string) $validated['label']),
-            'active' => true,
-            'sort_order' => (int) TaskFuelOption::query()->where('kind', $validated['kind'])->max('sort_order') + 1,
-            'created_by_user_id' => $request->user()?->id,
-            'updated_by_user_id' => $request->user()?->id,
-        ]);
+        if ($validated['kind'] === TaskFuelOption::KIND_SITE) {
+            $depotId = $validated['depot_id'] ?? null;
+
+            if (! $depotId) {
+                return response()->json(['message' => 'Veuillez sélectionner un dépôt.'], 422);
+            }
+
+            if (TaskFuelOption::query()->where('kind', TaskFuelOption::KIND_SITE)->where('depot_id', $depotId)->exists()) {
+                return response()->json(['message' => 'Ce dépôt est déjà dans la liste des sites.'], 422);
+            }
+
+            $depot = Depot::query()->findOrFail($depotId);
+
+            $option = TaskFuelOption::query()->create([
+                'kind' => TaskFuelOption::KIND_SITE,
+                'depot_id' => $depot->id,
+                'label' => $depot->name,
+                'active' => true,
+                'sort_order' => (int) TaskFuelOption::query()->where('kind', TaskFuelOption::KIND_SITE)->max('sort_order') + 1,
+                'created_by_user_id' => $request->user()?->id,
+                'updated_by_user_id' => $request->user()?->id,
+            ]);
+
+            $this->loadSiteRelations($option);
+        } else {
+            $label = trim((string) ($validated['label'] ?? ''));
+
+            if ($label === '') {
+                return response()->json(['message' => 'Le libellé est requis.'], 422);
+            }
+
+            $option = TaskFuelOption::query()->create([
+                'kind' => $validated['kind'],
+                'label' => $label,
+                'active' => true,
+                'sort_order' => (int) TaskFuelOption::query()->where('kind', $validated['kind'])->max('sort_order') + 1,
+                'created_by_user_id' => $request->user()?->id,
+                'updated_by_user_id' => $request->user()?->id,
+            ]);
+        }
 
         return response()->json([
             'message' => 'Valeur ajoutée.',
@@ -274,16 +314,27 @@ class TaskFuelController extends Controller
 
     public function updateOption(Request $request, TaskFuelOption $option): JsonResponse
     {
+        $isSite = $option->kind === TaskFuelOption::KIND_SITE;
+
         $validated = $request->validate([
-            'label' => ['required', 'string', 'max:255'],
+            'label' => ['sometimes', 'nullable', 'string', 'max:255'],
             'active' => ['required', 'boolean'],
         ]);
 
-        $option->forceFill([
-            'label' => trim((string) $validated['label']),
+        $updates = [
             'active' => (bool) $validated['active'],
             'updated_by_user_id' => $request->user()?->id,
-        ])->save();
+        ];
+
+        if (! $isSite && isset($validated['label'])) {
+            $updates['label'] = trim((string) $validated['label']);
+        }
+
+        $option->forceFill($updates)->save();
+
+        if ($isSite) {
+            $this->loadSiteRelations($option);
+        }
 
         return response()->json([
             'message' => 'Valeur mise à jour.',
@@ -571,6 +622,13 @@ class TaskFuelController extends Controller
         $this->ensureDefaultFuelOptions();
 
         $options = TaskFuelOption::query()
+            ->with([
+                'depot' => fn ($q) => $q->with([
+                    'users' => fn ($uq) => $uq
+                        ->whereHas('sector', fn ($sq) => $sq->whereRaw("LOWER(name) = 'chauffeur carb'"))
+                        ->select(['users.id', 'users.name', 'users.depot_id']),
+                ]),
+            ])
             ->orderBy('kind')
             ->orderBy('sort_order')
             ->orderBy('label')
@@ -586,35 +644,49 @@ class TaskFuelController extends Controller
 
     private function fuelOptionPayload(TaskFuelOption $option): array
     {
+        $depotLabel = $option->label ?? '';
+
+        if ($option->kind === TaskFuelOption::KIND_SITE && $option->depot !== null) {
+            $depotName = $option->depot->name;
+            $chauffeurCarb = $option->depot->relationLoaded('users') ? $option->depot->users->first() : null;
+            $depotLabel = $chauffeurCarb ? $depotName.' - '.$chauffeurCarb->name : $depotName;
+        }
+
         return [
             'id' => $option->id,
             'kind' => $option->kind,
             'label' => $option->label,
+            'depot_id' => $option->depot_id,
+            'depot_label' => $depotLabel,
             'active' => (bool) $option->active,
             'sort_order' => $option->sort_order,
         ];
     }
 
+    private function loadSiteRelations(TaskFuelOption $option): void
+    {
+        $option->load([
+            'depot' => fn ($q) => $q->with([
+                'users' => fn ($uq) => $uq
+                    ->whereHas('sector', fn ($sq) => $sq->whereRaw("LOWER(name) = 'chauffeur carb'"))
+                    ->select(['users.id', 'users.name', 'users.depot_id']),
+            ]),
+        ]);
+    }
+
     private function ensureDefaultFuelOptions(): void
     {
-        if (TaskFuelOption::query()->exists()) {
+        if (TaskFuelOption::query()->where('kind', TaskFuelOption::KIND_PRODUCT_TYPE)->exists()) {
             return;
         }
 
-        $defaults = [
-            TaskFuelOption::KIND_PRODUCT_TYPE => ['GNR', 'Gazole', 'Fuel', 'AdBlue'],
-            TaskFuelOption::KIND_SITE => ['Site défini plus tard', 'Dépôt défini plus tard'],
-        ];
-
-        foreach ($defaults as $kind => $labels) {
-            foreach ($labels as $index => $label) {
-                TaskFuelOption::query()->create([
-                    'kind' => $kind,
-                    'label' => $label,
-                    'active' => true,
-                    'sort_order' => $index + 1,
-                ]);
-            }
+        foreach (['GNR', 'Gazole', 'Fuel', 'AdBlue'] as $index => $label) {
+            TaskFuelOption::query()->create([
+                'kind' => TaskFuelOption::KIND_PRODUCT_TYPE,
+                'label' => $label,
+                'active' => true,
+                'sort_order' => $index + 1,
+            ]);
         }
     }
 

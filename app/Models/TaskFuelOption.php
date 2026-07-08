@@ -12,6 +12,7 @@ class TaskFuelOption extends Model
 
     protected $fillable = [
         'kind',
+        'depot_id',
         'label',
         'active',
         'sort_order',
@@ -22,11 +23,17 @@ class TaskFuelOption extends Model
     protected function casts(): array
     {
         return [
+            'depot_id' => 'integer',
             'active' => 'boolean',
             'sort_order' => 'integer',
             'created_by_user_id' => 'integer',
             'updated_by_user_id' => 'integer',
         ];
+    }
+
+    public function depot(): BelongsTo
+    {
+        return $this->belongsTo(Depot::class);
     }
 
     public function createdBy(): BelongsTo
