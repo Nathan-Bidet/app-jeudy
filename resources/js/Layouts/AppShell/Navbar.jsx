@@ -13,6 +13,7 @@ import {
     Database,
     ExternalLink,
     FileText,
+    Fuel,
     Home,
     ListTodo,
     Megaphone,
@@ -224,6 +225,34 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             label: 'Données',
             href: null,
             icon: Database,
+            disabled: true,
+            hint: 'Accès requis',
+        } : null,
+        safeHasRoute('task.fuel.index') && (permissions?.task_fuel_view ?? false) ? {
+            key: 'task-fuel',
+            label: 'Carburant',
+            href: safeHref('task.fuel.index'),
+            icon: Fuel,
+            active: safeCurrent('task.fuel.*'),
+        } : isAdmin ? {
+            key: 'task-fuel',
+            label: 'Carburant',
+            href: null,
+            icon: Fuel,
+            disabled: true,
+            hint: 'Accès requis',
+        } : null,
+        safeHasRoute('task.tiers.index') && (permissions?.task_tiers_view ?? false) ? {
+            key: 'task-tiers',
+            label: 'Tiers',
+            href: safeHref('task.tiers.index'),
+            icon: BookUser,
+            active: safeCurrent('task.tiers.*'),
+        } : isAdmin ? {
+            key: 'task-tiers',
+            label: 'Tiers',
+            href: null,
+            icon: BookUser,
             disabled: true,
             hint: 'Accès requis',
         } : null,
@@ -488,8 +517,11 @@ function GlobalSearchVisual() {
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const [hasSearched, setHasSearched] = useState(false);
+    const [resultScrollTop, setResultScrollTop] = useState(0);
+    const [resultViewportHeight, setResultViewportHeight] = useState(320);
     const containerRef = useRef(null);
     const inputRef = useRef(null);
+    const resultListRef = useRef(null);
     const focusInput = useCallback(() => {
         window.requestAnimationFrame(() => {
             inputRef.current?.focus();
@@ -610,6 +642,44 @@ function GlobalSearchVisual() {
         };
     }, [isOpen, query]);
 
+    const showDropdown = isOpen && (query.trim().length >= 2 || isLoading || errorMessage !== '' || hasSearched);
+
+    useEffect(() => {
+        if (!showDropdown) {
+            return undefined;
+        }
+
+        const measureResultViewport = () => {
+            setResultViewportHeight(resultListRef.current?.clientHeight || 320);
+        };
+
+        measureResultViewport();
+        window.addEventListener('resize', measureResultViewport);
+
+        return () => window.removeEventListener('resize', measureResultViewport);
+    }, [showDropdown, results.length]);
+
+    useEffect(() => {
+        setResultScrollTop(0);
+        resultListRef.current?.scrollTo({ top: 0 });
+    }, [query]);
+
+    const resultItemHeight = 74;
+    const shouldVirtualizeResults = results.length > 80;
+    const virtualStartIndex = shouldVirtualizeResults
+        ? Math.max(0, Math.floor(resultScrollTop / resultItemHeight) - 6)
+        : 0;
+    const virtualEndIndex = shouldVirtualizeResults
+        ? Math.min(results.length, Math.ceil((resultScrollTop + resultViewportHeight) / resultItemHeight) + 6)
+        : results.length;
+    const renderedResults = useMemo(
+        () => results.slice(virtualStartIndex, virtualEndIndex),
+        [results, virtualEndIndex, virtualStartIndex],
+    );
+    const footerText = results.length > 0
+        ? `${results.length} résultat${results.length > 1 ? 's' : ''} affiché${results.length > 1 ? 's' : ''}`
+        : 'Tapez pour affiner votre recherche';
+
     const handleResultClick = (url) => {
         if (!url) {
             return;
@@ -618,8 +688,6 @@ function GlobalSearchVisual() {
         closeAndResetSearch();
         window.location.assign(url);
     };
-
-    const showDropdown = isOpen && (query.trim().length >= 2 || isLoading || errorMessage !== '' || hasSearched);
 
     return (
         <div ref={containerRef} className="relative h-10">
@@ -657,36 +725,57 @@ function GlobalSearchVisual() {
             </button>
 
             {showDropdown ? (
-                <div className="absolute right-0 top-11 z-50 w-[min(26rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-2 shadow-xl">
-                    {isLoading ? (
-                        <p className="rounded-xl px-3 py-2 text-sm text-[var(--app-muted)]">Chargement...</p>
-                    ) : null}
+                <div className="fixed left-3 right-3 top-[calc(var(--app-navbar-height,72px)_+_0.5rem)] z-50 flex max-h-[calc(100vh_-_var(--app-navbar-height,72px)_-_1rem)] flex-col overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[min(26rem,calc(100vw-1rem))] sm:max-h-[calc(100vh_-_7rem)]">
+                    <div
+                        ref={resultListRef}
+                        onScroll={(event) => setResultScrollTop(event.currentTarget.scrollTop)}
+                        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"
+                    >
+                        {isLoading ? (
+                            <p className="rounded-xl px-3 py-2 text-sm text-[var(--app-muted)]">Chargement...</p>
+                        ) : null}
 
-                    {!isLoading && errorMessage !== '' ? (
-                        <p className="rounded-xl px-3 py-2 text-sm text-red-600">{errorMessage}</p>
-                    ) : null}
+                        {!isLoading && errorMessage !== '' ? (
+                            <p className="rounded-xl px-3 py-2 text-sm text-red-600">{errorMessage}</p>
+                        ) : null}
 
-                    {!isLoading && errorMessage === '' && results.length === 0 && hasSearched ? (
-                        <p className="rounded-xl px-3 py-2 text-sm text-[var(--app-muted)]">Aucun résultat</p>
-                    ) : null}
+                        {!isLoading && errorMessage === '' && results.length === 0 && hasSearched ? (
+                            <p className="rounded-xl px-3 py-2 text-sm text-[var(--app-muted)]">Aucun résultat</p>
+                        ) : null}
 
-                    {!isLoading && errorMessage === '' && results.length > 0 ? (
-                        <ul className="space-y-1">
-                            {results.map((result, index) => (
-                                <li key={`${result.type || 'result'}-${result.url || ''}-${index}`}>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleResultClick(result.url)}
-                                        className="block w-full rounded-xl px-3 py-2 text-left transition hover:bg-[var(--app-surface-soft)]"
+                        {!isLoading && errorMessage === '' && results.length > 0 ? (
+                            <ul className="space-y-1">
+                                {shouldVirtualizeResults && virtualStartIndex > 0 ? (
+                                    <li aria-hidden="true" style={{ height: virtualStartIndex * resultItemHeight }} />
+                                ) : null}
+
+                                {renderedResults.map((result, index) => (
+                                    <li
+                                        key={`${result.type || 'result'}-${result.url || ''}-${virtualStartIndex + index}`}
+                                        className="min-h-[74px]"
                                     >
-                                        <p className="text-sm font-semibold text-[var(--app-text)]">{highlightText(result.label || '-', query)}</p>
-                                        <p className="mt-0.5 text-xs text-[var(--app-muted)]">{highlightText(result.description || '', query)}</p>
-                                        <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-muted)]">{result.type || ''}</p>
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                    ) : null}
+                                        <button
+                                            type="button"
+                                            onClick={() => handleResultClick(result.url)}
+                                            className="block w-full rounded-xl px-3 py-2 text-left transition hover:bg-[var(--app-surface-soft)]"
+                                        >
+                                            <p className="text-sm font-semibold text-[var(--app-text)]">{highlightText(result.label || '-', query)}</p>
+                                            <p className="mt-0.5 text-xs text-[var(--app-muted)]">{highlightText(result.description || '', query)}</p>
+                                            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-muted)]">{result.type || ''}</p>
+                                        </button>
+                                    </li>
+                                ))}
+
+                                {shouldVirtualizeResults && virtualEndIndex < results.length ? (
+                                    <li aria-hidden="true" style={{ height: (results.length - virtualEndIndex) * resultItemHeight }} />
+                                ) : null}
+                            </ul>
+                        ) : null}
+                    </div>
+
+                    <div className="flex-shrink-0 border-t border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-[11px] font-semibold text-[var(--app-muted)]">
+                        {footerText}
+                    </div>
                 </div>
             ) : null}
         </div>

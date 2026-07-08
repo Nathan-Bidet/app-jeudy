@@ -4,12 +4,19 @@ namespace App\Http\Controllers;
 
 use App\Models\AprevoirTask;
 use App\Models\Depot;
+use App\Models\TaskTiersImportConfig;
+use App\Models\TaskTiersRecord;
 use App\Models\Transporter;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Support\Access\AccessManager;
+use App\Support\Tiers\TiersColumnFormat;
+use App\Support\Tiers\TiersSearchText;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class GlobalSearchController extends Controller
 {
@@ -47,17 +54,23 @@ class GlobalSearchController extends Controller
             return response()->json([]);
         }
 
+        $searchStartedAt = microtime(true);
+        $timings = [];
         $results = [];
-        $results = [...$results, ...$this->searchUsers($terms, $normalizedQuery)];
+        $results = [...$results, ...$this->timedSearch('directory_search_ms', $timings, fn (): array => $this->searchUsers($terms, $normalizedQuery))];
 
         if ($this->canAccessTaskData($actor)) {
-            $results = [...$results, ...$this->searchVehicles($terms, $normalizedQuery)];
-            $results = [...$results, ...$this->searchTransporters($terms, $normalizedQuery)];
-            $results = [...$results, ...$this->searchDepots($terms, $normalizedQuery)];
+            $results = [...$results, ...$this->timedSearch('vehicles_search_ms', $timings, fn (): array => $this->searchVehicles($terms, $normalizedQuery))];
+            $results = [...$results, ...$this->timedSearch('transporters_search_ms', $timings, fn (): array => $this->searchTransporters($terms, $normalizedQuery))];
+            $results = [...$results, ...$this->timedSearch('depots_search_ms', $timings, fn (): array => $this->searchDepots($terms, $normalizedQuery))];
         }
 
         if ($this->canAccessAprevoir($actor)) {
-            $results = [...$results, ...$this->searchAprevoirTasks($terms, $normalizedQuery)];
+            $results = [...$results, ...$this->timedSearch('a_prevoir_search_ms', $timings, fn (): array => $this->searchAprevoirTasks($terms, $normalizedQuery))];
+        }
+
+        if ($this->canAccessTiers($actor)) {
+            $results = [...$results, ...$this->timedSearch('tiers_search_ms', $timings, fn (): array => $this->searchTiers($terms, $normalizedQuery, $query))];
         }
 
         usort($results, function (array $a, array $b): int {
@@ -69,6 +82,13 @@ class GlobalSearchController extends Controller
 
             return $scoreB <=> $scoreA;
         });
+
+        $timings['total_search_ms'] = round((microtime(true) - $searchStartedAt) * 1000, 2);
+        Log::info('global_search_timings', [
+            'query_length' => mb_strlen($query),
+            'results_count' => count($results),
+            ...$timings,
+        ]);
 
         return response()->json(array_map(
             fn (array $item): array => [
@@ -530,9 +550,318 @@ class GlobalSearchController extends Controller
         return $this->accessManager->can($user, 'a_prevoir.view');
     }
 
+    private function canAccessTiers(User $user): bool
+    {
+        return $this->accessManager->can($user, 'task.tiers.view');
+    }
+
+    /**
+     * @param  array<string, float>  $timings
+     */
+    private function timedSearch(string $key, array &$timings, callable $callback): array
+    {
+        $startedAt = microtime(true);
+        $results = $callback();
+        $timings[$key] = round((microtime(true) - $startedAt) * 1000, 2);
+
+        return is_array($results) ? $results : [];
+    }
+
+    private function searchTiers(array $terms, string $normalizedQuery, string $rawQuery): array
+    {
+        $query = TaskTiersRecord::query()
+            ->select(['id', 'primary_identifier', 'reference_value', 'data', 'search_text']);
+
+        $driver = DB::connection()->getDriverName();
+
+        foreach ($terms as $term) {
+            $normalizedTerm = TiersSearchText::normalize($term);
+            if ($normalizedTerm === '') {
+                continue;
+            }
+
+            $pattern = $this->likePattern($normalizedTerm);
+            $booleanTerm = $this->fullTextBooleanTerm($normalizedTerm);
+            $query->where(function ($builder) use ($driver, $pattern, $booleanTerm, $normalizedTerm): void {
+                $builder
+                    ->whereRaw($this->normalizedTextExpression('primary_identifier').' LIKE ?', [$pattern])
+                    ->orWhereRaw($this->normalizedTextExpression('reference_value').' LIKE ?', [$pattern]);
+
+                if (in_array($driver, ['mysql', 'mariadb'], true) && mb_strlen($normalizedTerm) >= 4) {
+                    $builder
+                        ->orWhereRaw('MATCH(search_text) AGAINST (? IN BOOLEAN MODE)', [$booleanTerm])
+                        ->orWhere(function ($fallback) use ($pattern): void {
+                            $fallback
+                                ->where(function ($emptySearchText): void {
+                                    $emptySearchText
+                                        ->whereNull('search_text')
+                                        ->orWhere('search_text', '');
+                                })
+                                ->whereRaw($this->normalizedTiersDataExpression().' LIKE ?', [$pattern]);
+                        });
+                    return;
+                }
+
+                $builder
+                    ->orWhere('search_text', 'LIKE', $pattern)
+                    ->orWhere(function ($fallback) use ($pattern): void {
+                        $fallback
+                            ->where(function ($emptySearchText): void {
+                                $emptySearchText
+                                    ->whereNull('search_text')
+                                    ->orWhere('search_text', '');
+                            })
+                            ->whereRaw($this->normalizedTiersDataExpression().' LIKE ?', [$pattern]);
+                    });
+            });
+        }
+
+        $records = $query
+            ->orderByRaw(
+                'CASE WHEN LOWER(COALESCE(primary_identifier, \'\')) = ? OR LOWER(COALESCE(reference_value, \'\')) = ? THEN 0 ELSE 1 END',
+                [$normalizedQuery, $normalizedQuery],
+            )
+            ->latest('id')
+            ->limit(self::LIMIT_PER_CATEGORY)
+            ->get();
+
+        if ($records->isEmpty()) {
+            return [];
+        }
+
+        $columns = $this->tiersColumnsByKey();
+
+        return $records
+            ->map(function (TaskTiersRecord $record) use ($terms, $columns, $rawQuery): array {
+                $data = (array) ($record->data ?? []);
+                $label = $this->tiersResultLabel($data, $record);
+                $description = $this->tiersResultDescription($data, $columns);
+                $searchValue = $this->tiersResultSearchValue($data, $record, $rawQuery);
+
+                return [
+                    'score' => $this->computeRankingScore(
+                        $terms,
+                        'tiers',
+                        [
+                            ['value' => $label, 'weight' => 28],
+                            ['value' => (string) $record->primary_identifier, 'weight' => 26],
+                            ['value' => (string) $record->reference_value, 'weight' => 22],
+                            ['value' => implode(' ', array_map('strval', $data)), 'weight' => 12],
+                        ],
+                        false,
+                    ),
+                    'type' => 'Tiers',
+                    'label' => $label,
+                    'description' => $description !== '' ? $description : 'Tiers',
+                    'url' => route('task.tiers.index', ['search' => $searchValue]),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<string, array{key: string, label: string, format: string}>
+     */
+    private function tiersColumnsByKey(): array
+    {
+        $columns = [];
+
+        TaskTiersImportConfig::query()
+            ->latest('id')
+            ->limit(50)
+            ->get(['columns', 'options'])
+            ->each(function (TaskTiersImportConfig $config) use (&$columns): void {
+                foreach ((array) ($config->columns ?? []) as $column) {
+                    if (! (bool) ($column['import'] ?? false)) {
+                        continue;
+                    }
+
+                    $key = $this->tiersColumnKey($column);
+                    if ($key === '' || isset($columns[$key])) {
+                        continue;
+                    }
+
+                    $columns[$key] = [
+                        'key' => $key,
+                        'label' => $this->tiersColumnLabel($column),
+                        'format' => (string) ($column['format_model'] ?? ''),
+                    ];
+                }
+
+                foreach ((array) (($config->options ?? [])['manual_columns'] ?? []) as $manualColumn) {
+                    $key = trim((string) ($manualColumn['key'] ?? ''));
+                    if ($key === '') {
+                        continue;
+                    }
+
+                    $columns[$key] = [
+                        'key' => $key,
+                        'label' => trim((string) ($manualColumn['label'] ?? $key)) ?: $key,
+                        'format' => (string) ($manualColumn['format'] ?? ''),
+                    ];
+                }
+            });
+
+        return $columns;
+    }
+
+    private function tiersColumnKey(array $column): string
+    {
+        $existingColumn = trim((string) ($column['existing_column'] ?? ''));
+        if ($existingColumn !== '') {
+            return $existingColumn;
+        }
+
+        return Str::slug((string) ($column['application_name'] ?? $column['source_name'] ?? ''), '_');
+    }
+
+    private function tiersColumnLabel(array $column): string
+    {
+        $applicationName = trim((string) ($column['application_name'] ?? ''));
+        if ($applicationName !== '') {
+            return $applicationName;
+        }
+
+        $sourceName = trim((string) ($column['source_name'] ?? ''));
+
+        return $sourceName !== '' ? $sourceName : 'Colonne';
+    }
+
+    private function tiersResultLabel(array $data, TaskTiersRecord $record): string
+    {
+        foreach (['name', 'nom', 'nom_raison_sociale', 'raison_sociale', 'nom_ou_raison_sociale', 'societe', 'company', 'client', 'tiers'] as $key) {
+            $value = trim((string) ($data[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        $identifier = trim((string) ($record->primary_identifier ?: $record->reference_value));
+        if ($identifier !== '') {
+            return $identifier;
+        }
+
+        foreach ($data as $value) {
+            $value = trim((string) $value);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return 'Tiers #'.$record->id;
+    }
+
+    /**
+     * @param  array<string, array{key: string, label: string, format: string}>  $columns
+     */
+    private function tiersResultDescription(array $data, array $columns): string
+    {
+        $preferredKeys = ['code_tiers', 'reference', 'type_adresse', 'address', 'adresse', 'postal_code', 'code_postal', 'city', 'ville', 'phone', 'telephone', 'telephone_fixe', 'mobile', 'email', 'mail'];
+        $parts = [];
+
+        foreach ($preferredKeys as $key) {
+            if (! array_key_exists($key, $data)) {
+                continue;
+            }
+
+            $value = $this->tiersFormattedValue($key, $data[$key], $columns);
+            if ($value === '') {
+                continue;
+            }
+
+            $parts[] = $this->tiersColumnDisplayLabel($key, $columns).': '.$value;
+            if (count($parts) >= 4) {
+                break;
+            }
+        }
+
+        if (count($parts) < 4) {
+            foreach ($data as $key => $value) {
+                if (in_array((string) $key, $preferredKeys, true)) {
+                    continue;
+                }
+
+                $value = $this->tiersFormattedValue((string) $key, $value, $columns);
+                if ($value === '') {
+                    continue;
+                }
+
+                $parts[] = $this->tiersColumnDisplayLabel((string) $key, $columns).': '.$value;
+                if (count($parts) >= 4) {
+                    break;
+                }
+            }
+        }
+
+        return $this->truncate(implode(' · ', $parts), 180);
+    }
+
+    private function tiersResultSearchValue(array $data, TaskTiersRecord $record, string $fallback): string
+    {
+        foreach (['code_tiers', 'reference', 'id', 'identifiant'] as $key) {
+            $value = trim((string) ($data[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        $identifier = trim((string) ($record->primary_identifier ?: $record->reference_value));
+
+        return $identifier !== '' ? $identifier : trim($fallback);
+    }
+
+    /**
+     * @param  array<string, array{key: string, label: string, format: string}>  $columns
+     */
+    private function tiersFormattedValue(string $key, mixed $value, array $columns): string
+    {
+        return TiersColumnFormat::formatForDisplay($value, $columns[$key]['format'] ?? '');
+    }
+
+    /**
+     * @param  array<string, array{key: string, label: string, format: string}>  $columns
+     */
+    private function tiersColumnDisplayLabel(string $key, array $columns): string
+    {
+        return $columns[$key]['label'] ?? Str::headline(str_replace('_', ' ', $key));
+    }
+
+    private function normalizedTiersDataExpression(): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        $expression = match ($driver) {
+            'pgsql' => 'data::text',
+            'sqlite' => 'data',
+            default => 'CAST(data AS CHAR)',
+        };
+
+        return $this->normalizedTextExpression($expression);
+    }
+
     private function likePattern(string $query): string
     {
         return '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query).'%';
+    }
+
+    private function fullTextBooleanTerm(string $term): string
+    {
+        $tokens = preg_split('/\s+/u', $term) ?: [];
+        $tokens = array_values(array_filter($tokens, static fn (string $token): bool => $token !== ''));
+
+        if ($tokens === []) {
+            return $term;
+        }
+
+        $booleanTokens = array_filter(array_map(
+            static fn (string $token): string => preg_replace('/[^\pL\pN_]+/u', '', $token) ?? '',
+            $tokens,
+        ), static fn (string $token): bool => $token !== '');
+
+        return $booleanTokens === []
+            ? $term
+            : implode(' ', array_map(static fn (string $token): string => '+'.$token.'*', $booleanTokens));
     }
 
     private function extractTerms(string $query): array
@@ -918,6 +1247,7 @@ class GlobalSearchController extends Controller
             'transporter' => 25,
             'vehicle' => 20,
             'depot' => 15,
+            'tiers' => 14,
             'task' => 10,
             default => 0,
         };
