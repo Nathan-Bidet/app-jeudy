@@ -491,7 +491,12 @@ class TaskFuelController extends Controller
         $direction = in_array($direction, ['asc', 'desc'], true) ? $direction : '';
 
         if ($key === '' || $direction === '') {
-            $query->latest('id');
+            $query
+                ->orderByRaw('CASE WHEN delivery_date IS NULL THEN 0 ELSE 1 END ASC')
+                ->orderByRaw('CASE WHEN delivery_date IS NULL THEN created_at ELSE NULL END ASC')
+                ->orderBy('delivery_date', 'asc')
+                ->orderBy('site', 'asc')
+                ->orderBy('created_at', 'asc');
             return;
         }
 
