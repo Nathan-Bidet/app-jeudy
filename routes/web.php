@@ -183,6 +183,27 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/tasks/fuel', [TaskFuelController::class, 'index'])
         ->middleware('sector.access:task.fuel.view')
         ->name('task.fuel.index');
+    Route::post('/tasks/fuel', [TaskFuelController::class, 'store'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.store');
+    Route::patch('/tasks/fuel/{delivery}', [TaskFuelController::class, 'update'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.update');
+    Route::delete('/tasks/fuel/{delivery}', [TaskFuelController::class, 'destroy'])
+        ->middleware('sector.access:task.fuel.delete')
+        ->name('task.fuel.destroy');
+    Route::get('/tasks/fuel/tiers-search', [TaskFuelController::class, 'tiersSearch'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.tiers-search');
+    Route::post('/tasks/fuel/options', [TaskFuelController::class, 'storeOption'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.options.store');
+    Route::put('/tasks/fuel/options/{option}', [TaskFuelController::class, 'updateOption'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.options.update');
+    Route::delete('/tasks/fuel/options/{option}', [TaskFuelController::class, 'destroyOption'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.options.destroy');
 
     Route::get('/tasks/tiers', [TaskTiersController::class, 'index'])
         ->middleware('sector.access:task.tiers.view')

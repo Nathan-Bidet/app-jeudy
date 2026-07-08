@@ -35,7 +35,8 @@ export default function AppLayout({ title, header, children }) {
     const isWidePlanningSection = route().current('a_prevoir.*')
         || route().current('engrais.*')
         || route().current('ldt.*')
-        || route().current('task.archive.*');
+        || route().current('task.archive.*')
+        || route().current('task.fuel.*');
 
     const [mobileOpen, setMobileOpen] = useState(false);
     const [theme, setTheme] = useState(getInitialTheme);
