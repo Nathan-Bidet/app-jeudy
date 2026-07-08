@@ -2,7 +2,7 @@ import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import { Head, router } from '@inertiajs/react';
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Filter, Pencil, Plus, Search, Settings, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 const PAGE_SIZE = 50;
 const EMPTY_ORDER = { fuel_type: '', volume: '', urgent: false };
@@ -89,6 +89,20 @@ function normalizeDeliveryPayload(deliveries) {
             total: deliveries?.meta?.total || 0,
         },
     };
+}
+
+function applyDefaultSort(rows) {
+    return [...rows].sort((a, b) => {
+        const aNoDate = !a.delivery_date_value;
+        const bNoDate = !b.delivery_date_value;
+        if (aNoDate !== bNoDate) return aNoDate ? -1 : 1;
+        if (aNoDate) return (a.created_at_iso || '').localeCompare(b.created_at_iso || '');
+        const byDate = (a.delivery_date_value || '').localeCompare(b.delivery_date_value || '');
+        if (byDate !== 0) return byDate;
+        const bySite = (a.site || '').localeCompare(b.site || '', undefined, { sensitivity: 'base' });
+        if (bySite !== 0) return bySite;
+        return (a.created_at_iso || '').localeCompare(b.created_at_iso || '');
+    });
 }
 
 function csrfToken() {
@@ -1493,7 +1507,7 @@ function FuelTable({
                                 </tr>
                             ) : (
                                 rows.map((row) => (
-                                    <tr key={row.id} className="border-t border-[var(--app-border)] align-middle">
+                                    <tr key={row.id} data-fuel-row={row.id} className="border-t border-[var(--app-border)] align-middle">
                                         {COLUMNS.map((column) => {
                                             if (column.key === 'delivery_date') {
                                                 return (
@@ -1621,7 +1635,7 @@ function FuelTable({
                     </div>
                 ) : (
                     rows.map((row) => (
-                        <article key={row.id} className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
+                        <article key={row.id} data-fuel-row={row.id} className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
                                     <p className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">
@@ -1716,6 +1730,7 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
     const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const searchDebounceReadyRef = useRef(false);
+    const pendingFlipRef = useRef(null);
 
     useEffect(() => {
         const nextDeliveries = normalizeDeliveryPayload(deliveries);
@@ -1730,6 +1745,52 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
     const activeSiteOptions = useMemo(() => (fuelOptions.sites || []).filter((option) => option.active), [fuelOptions.sites]);
     const activeProductTypeOptions = useMemo(() => (fuelOptions.product_types || []).filter((option) => option.active), [fuelOptions.product_types]);
     const filtersActive = hasAnyFilter(filters);
+    const isDefaultSortActive = sort.key === '' && sort.direction === '' && !filtersActive && search.trim() === '';
+
+    const captureFlipPositions = () => {
+        const positions = {};
+        document.querySelectorAll('[data-fuel-row]').forEach((el) => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0) positions[el.dataset.fuelRow] = rect.top;
+        });
+        return positions;
+    };
+
+    const setRowsWithFlip = (nextRowsOrFn) => {
+        pendingFlipRef.current = captureFlipPositions();
+        setRows(nextRowsOrFn);
+    };
+
+    useLayoutEffect(() => {
+        const firstPositions = pendingFlipRef.current;
+        if (!firstPositions) return;
+        pendingFlipRef.current = null;
+
+        const timers = [];
+        document.querySelectorAll('[data-fuel-row]').forEach((el) => {
+            const first = firstPositions[el.dataset.fuelRow];
+            if (first === undefined) return;
+            const last = el.getBoundingClientRect().top;
+            const delta = first - last;
+            if (Math.abs(delta) < 1) return;
+
+            el.style.transform = `translateY(${delta}px)`;
+            el.style.transition = 'none';
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    el.style.transform = '';
+                    el.style.transition = 'transform 360ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                    timers.push(setTimeout(() => {
+                        el.style.transform = '';
+                        el.style.transition = '';
+                    }, 400));
+                });
+            });
+        });
+
+        return () => timers.forEach(clearTimeout);
+    }, [rows]);
 
     const loadFuelPage = (overrides = {}) => {
         router.get('/tasks/fuel', {
@@ -1793,7 +1854,13 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
         });
 
         if (data?.delivery) {
-            setRows((current) => current.map((row) => (row.id === id ? data.delivery : row)));
+            if (isDefaultSortActive) {
+                setRowsWithFlip((current) =>
+                    applyDefaultSort(current.map((row) => (row.id === id ? data.delivery : row)))
+                );
+            } else {
+                setRows((current) => current.map((row) => (row.id === id ? data.delivery : row)));
+            }
             setEditingDelivery((current) => (current?.id === id ? data.delivery : current));
         }
 
@@ -1833,7 +1900,11 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
         });
 
         const newRows = Array.isArray(data?.deliveries) ? data.deliveries : [];
-        setRows((current) => [...newRows, ...current]);
+        if (isDefaultSortActive) {
+            setRowsWithFlip((current) => applyDefaultSort([...newRows, ...current]));
+        } else {
+            setRows((current) => [...newRows, ...current]);
+        }
         setPaginationMeta((current) => ({
             ...current,
             total: (current.total || 0) + newRows.length,

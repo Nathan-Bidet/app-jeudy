@@ -404,6 +404,7 @@ class TaskFuelController extends Controller
             'volume_liters' => $delivery->volume_liters,
             'volume' => $delivery->volume_liters !== null ? $delivery->volume_liters.' L' : '',
             'comment' => $delivery->comment ?? '',
+            'created_at_iso' => $delivery->created_at?->toIso8601String() ?? '',
             'created_at_label' => $delivery->created_at?->format('d/m/Y H:i') ?? '',
             'created_by' => $delivery->createdBy?->name ?? '',
             'urgent' => (bool) $delivery->urgent,
