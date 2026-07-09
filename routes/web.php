@@ -320,6 +320,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::post('/annonces/{announcement}/duplicate', [AnnouncementController::class, 'duplicate'])
         ->middleware('sector.access:annonces.create')
         ->name('annonces.duplicate');
+    Route::patch('/annonces/{announcement}/dashboard', [AnnouncementController::class, 'updateDashboard'])
+        ->middleware('sector.access:annonces.create')
+        ->name('annonces.dashboard');
     Route::post('/annonces/{announcement}/poll-response', [AnnouncementController::class, 'respondPoll'])
         ->name('annonces.poll-response');
     Route::post('/annonces/groups', [AnnouncementController::class, 'storeGroup'])

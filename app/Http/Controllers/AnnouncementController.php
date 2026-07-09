@@ -339,6 +339,42 @@ class AnnouncementController extends Controller
         return back()->with('success', 'Votre réponse a été enregistrée.');
     }
 
+    public function updateDashboard(Request $request, Announcement $announcement): RedirectResponse
+    {
+        $user = $request->user();
+        $access = app(AccessManager::class);
+        abort_unless($user && $access->can($user, 'annonces.create'), 403);
+        $this->authorizeOwnership($user, $announcement);
+
+        $validated = $request->validate([
+            'show_on_dashboard' => ['required', 'boolean'],
+            'dashboard_expires_at' => ['nullable', 'date'],
+        ]);
+
+        $show = (bool) $validated['show_on_dashboard'];
+        $expiresAt = ! empty($validated['dashboard_expires_at'])
+            ? Carbon::parse($validated['dashboard_expires_at'])->toDateString()
+            : null;
+
+        if ($show) {
+            Announcement::query()
+                ->whereKeyNot($announcement->id)
+                ->where('show_on_dashboard', true)
+                ->update(['show_on_dashboard' => false, 'dashboard_expires_at' => null]);
+        }
+
+        $announcement->update([
+            'show_on_dashboard' => $show,
+            'dashboard_expires_at' => $show ? $expiresAt : null,
+        ]);
+
+        $this->logAction($announcement, 'update_dashboard_visibility');
+
+        $message = $show ? 'Annonce affichée sur l\'accueil.' : 'Annonce retirée de l\'accueil.';
+
+        return back()->with('success', $message);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -355,6 +391,8 @@ class AnnouncementController extends Controller
             'excluded_user_ids' => ['nullable', 'array'],
             'excluded_user_ids.*' => ['integer', 'exists:users,id'],
             'scheduled_at' => ['nullable', 'date'],
+            'show_on_dashboard' => ['nullable', 'boolean'],
+            'dashboard_expires_at' => ['nullable', 'date'],
             'has_poll' => ['nullable', 'boolean'],
             'poll' => ['nullable', 'array'],
             'poll.poll_type' => ['required_if:has_poll,true', Rule::in(['single', 'multiple'])],
@@ -416,6 +454,11 @@ class AnnouncementController extends Controller
             ]);
         }
 
+        $showOnDashboard = (bool) ($validated['show_on_dashboard'] ?? false);
+        $dashboardExpiresAt = ! empty($validated['dashboard_expires_at'])
+            ? Carbon::parse($validated['dashboard_expires_at'])->toDateString()
+            : null;
+
         return [
             'mode' => $mode,
             'title' => trim((string) ($validated['title'] ?? '')),
@@ -424,6 +467,8 @@ class AnnouncementController extends Controller
             'user_ids' => $userIds,
             'excluded_user_ids' => $excludedUserIds,
             'scheduled_at' => $mode === 'schedule' ? $scheduledAt : null,
+            'show_on_dashboard' => $showOnDashboard,
+            'dashboard_expires_at' => $showOnDashboard ? $dashboardExpiresAt : null,
             'has_poll' => $hasPoll,
             'poll_type' => $validated['poll']['poll_type'] ?? AnnouncementPoll::TYPE_SINGLE,
             'poll_allow_other' => $pollAllowOther,
@@ -444,6 +489,13 @@ class AnnouncementController extends Controller
                 default => Announcement::STATUS_DRAFT,
             };
 
+            if ($validated['show_on_dashboard']) {
+                Announcement::query()
+                    ->when($announcement, fn ($q) => $q->whereKeyNot($announcement->id))
+                    ->where('show_on_dashboard', true)
+                    ->update(['show_on_dashboard' => false, 'dashboard_expires_at' => null]);
+            }
+
             $attributes = [
                 'created_by_user_id' => $announcement?->created_by_user_id ?? $actorId,
                 'title' => $validated['title'] !== '' ? $validated['title'] : null,
@@ -454,6 +506,8 @@ class AnnouncementController extends Controller
                 'excluded_user_ids' => $validated['excluded_user_ids'],
                 'scheduled_at' => $validated['scheduled_at'],
                 'sent_at' => $status === Announcement::STATUS_SENT ? now() : null,
+                'show_on_dashboard' => $validated['show_on_dashboard'],
+                'dashboard_expires_at' => $validated['dashboard_expires_at'],
             ];
 
             if ($announcement) {
@@ -541,6 +595,12 @@ class AnnouncementController extends Controller
             }
         }
 
+        $isDashboardActive = (bool) $announcement->show_on_dashboard
+            && (
+                ! $announcement->dashboard_expires_at
+                || $announcement->dashboard_expires_at->gte(now()->startOfDay())
+            );
+
         return [
             'id' => $announcement->id,
             'title' => $announcement->title,
@@ -555,6 +615,9 @@ class AnnouncementController extends Controller
             'created_at' => $announcement->created_at?->toIso8601String(),
             'created_by' => $announcement->creator ? $this->userLabel($announcement->creator) : null,
             'created_by_user_id' => $announcement->created_by_user_id,
+            'show_on_dashboard' => (bool) $announcement->show_on_dashboard,
+            'dashboard_expires_at' => $announcement->dashboard_expires_at?->toDateString(),
+            'is_dashboard_active' => $isDashboardActive,
             'poll' => $poll,
         ];
     }

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Announcement;
 use App\Services\AuditLogService;
+use App\Support\RichText\SimpleHtmlSanitizer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,12 +20,26 @@ class NotificationController extends Controller
     {
         $user = $request->user();
 
-        $notifications = $user->notifications()
+        $rawNotifications = $user->notifications()
             ->orderByRaw('CASE WHEN read_at IS NULL THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
             ->limit(10)
-            ->get()
-            ->map(fn ($notification) => $this->mapNotification($notification))
+            ->get();
+
+        $announcementIds = $rawNotifications
+            ->filter(fn ($n) => ($n->data['type'] ?? $n->type) === 'announcement' && !isset($n->data['title']))
+            ->map(fn ($n) => $n->data['announcement_id'] ?? null)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $announcements = count($announcementIds) > 0
+            ? Announcement::whereIn('id', $announcementIds)->get()->keyBy('id')
+            : collect();
+
+        $notifications = $rawNotifications
+            ->map(fn ($notification) => $this->mapNotification($notification, $announcements))
             ->values()
             ->all();
 
@@ -99,16 +115,33 @@ class NotificationController extends Controller
         return back();
     }
 
-    private function mapNotification(object $notification): array
+    private function mapNotification(object $notification, \Illuminate\Support\Collection $announcements = null): array
     {
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
         $announcementId = $notification->data['announcement_id'] ?? null;
 
+        $title = isset($notification->data['title']) ? (string) $notification->data['title'] : null;
+        $fullMessage = isset($notification->data['full_message']) ? (string) $notification->data['full_message'] : null;
+
+        if ($type === 'announcement' && $announcementId && $announcements) {
+            $announcement = $announcements->get($announcementId);
+            if ($announcement) {
+                if ($title === null) {
+                    $title = $announcement->title ?? null;
+                }
+                if ($fullMessage === null && $announcement->body_html) {
+                    $fullMessage = SimpleHtmlSanitizer::toPlainText($announcement->body_html) ?: null;
+                }
+            }
+        }
+
         return [
             'id' => (string) $notification->id,
             'type' => $type,
+            'title' => $title,
             'message' => (string) ($notification->data['message'] ?? 'Notification'),
+            'full_message' => $fullMessage,
             'period' => [
                 'start_at' => $notification->data['period']['start_at'] ?? null,
                 'end_at' => $notification->data['period']['end_at'] ?? null,

@@ -32,7 +32,9 @@ class AnnouncementNotification extends Notification
         return [
             'type' => 'announcement',
             'announcement_id' => (int) $this->announcement->id,
+            'title' => $this->announcement->title ?? null,
             'message' => $excerpt !== '' ? $excerpt : 'Nouvelle annonce.',
+            'full_message' => $plainText !== '' ? $plainText : null,
             'has_poll' => $this->announcement->poll()->exists(),
         ];
     }

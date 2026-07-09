@@ -24,6 +24,8 @@ class Announcement extends Model
         'excluded_user_ids',
         'scheduled_at',
         'sent_at',
+        'show_on_dashboard',
+        'dashboard_expires_at',
     ];
 
     protected function casts(): array
@@ -34,6 +36,8 @@ class Announcement extends Model
             'excluded_user_ids' => 'array',
             'scheduled_at' => 'datetime',
             'sent_at' => 'datetime',
+            'show_on_dashboard' => 'boolean',
+            'dashboard_expires_at' => 'date',
         ];
     }
 

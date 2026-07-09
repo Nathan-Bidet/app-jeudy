@@ -24,9 +24,10 @@ import {
     ShieldUser,
     Sun,
     Wrench,
+    X,
 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Menu as HeadlessMenu, MenuButton, MenuItem, MenuItems, Transition } from '@headlessui/react';
+import { Dialog, DialogPanel, Menu as HeadlessMenu, MenuButton, MenuItem, MenuItems, Transition, TransitionChild } from '@headlessui/react';
 
 function safeHasRoute(name) {
     try {
@@ -934,7 +935,24 @@ function NotificationsMenu() {
     const initialUnreadCount = Number(notificationsProp?.unread_count ?? initialNotifications.filter((notification) => !notification?.read_at).length);
     const [notifications, setNotifications] = useState(initialNotifications);
     const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
+    const [expandedNotificationIds, setExpandedNotificationIds] = useState(new Set());
+    const [announcementModal, setAnnouncementModal] = useState(null);
     const hasUnread = unreadCount > 0;
+
+    const openAnnouncementModal = (notification) => setAnnouncementModal(notification);
+
+    const toggleExpanded = (notificationId, event) => {
+        event.stopPropagation();
+        setExpandedNotificationIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(notificationId)) {
+                next.delete(notificationId);
+            } else {
+                next.add(notificationId);
+            }
+            return next;
+        });
+    };
 
     useEffect(() => {
         const nextNotifications = Array.isArray(notificationsProp?.items) ? notificationsProp.items : [];
@@ -1150,6 +1168,7 @@ function NotificationsMenu() {
     };
 
     return (
+        <>
         <HeadlessMenu as="div" className="relative">
             <MenuButton className={classNames(
                 'relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] transition hover:border-[var(--brand-brown)]',
@@ -1195,54 +1214,100 @@ function NotificationsMenu() {
                     <div className="p-3">
                         {notifications.length > 0 ? (
                             <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                                {notifications.map((notification) => (
-                                    <div
-                                        key={notification.id}
-                                        role="button"
-                                        tabIndex={0}
-                                        onClick={() => handleNotificationClick(notification)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter' || event.key === ' ') {
-                                                event.preventDefault();
-                                                handleNotificationClick(notification).catch(() => null);
-                                            }
-                                        }}
-                                        className={classNames(notificationItemClassName(notification), notification?.url ? 'cursor-pointer' : '')}
-                                    >
-                                        <p className="text-sm text-[var(--app-text)]">
-                                            {buildLeaveNotificationMessage(notification)}
-                                        </p>
-                                        <p className="mt-1 text-xs text-[var(--app-muted)]">
-                                            {formatNotificationDate(notification.created_at)}
-                                            {!notification.read_at ? ' • Non lue' : ''}
-                                        </p>
-                                        {!notification.read_at ? (
-                                            <button
-                                                type="button"
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    markAsRead(notification.id).then(() => {
-                                                        refreshNotifications().catch(() => null);
-                                                    });
-                                                }}
-                                                className="mt-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
-                                            >
-                                                Marquer comme lu
-                                            </button>
-                                        ) : (
-                                            <button
-                                                type="button"
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    deleteNotification(notification.id);
-                                                }}
-                                                className="mt-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
-                                            >
-                                                Effacer
-                                            </button>
-                                        )}
-                                    </div>
-                                ))}
+                                {notifications.map((notification) => {
+                                    const isAnnouncement = notification.type === 'announcement';
+                                    const isExpanded = expandedNotificationIds.has(notification.id);
+                                    const canExpand = isAnnouncement && (
+                                        notification.full_message
+                                        || String(notification.message ?? '').endsWith('…')
+                                    );
+
+                                    return (
+                                        <div
+                                            key={notification.id}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => {
+                                                if (isAnnouncement) {
+                                                    openAnnouncementModal(notification);
+                                                } else {
+                                                    handleNotificationClick(notification);
+                                                }
+                                            }}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    if (isAnnouncement) {
+                                                        openAnnouncementModal(notification);
+                                                    } else {
+                                                        handleNotificationClick(notification).catch(() => null);
+                                                    }
+                                                }
+                                            }}
+                                            className={classNames(notificationItemClassName(notification), 'cursor-pointer')}
+                                        >
+                                            {isAnnouncement ? (
+                                                <>
+                                                    {notification.title ? (
+                                                        <p className="text-sm font-bold leading-snug text-[var(--app-text)]">{notification.title}</p>
+                                                    ) : null}
+                                                    <p className={classNames(
+                                                        'text-sm leading-[1.25rem] text-[var(--app-text)] whitespace-pre-line',
+                                                        notification.title ? 'mt-0.5' : '',
+                                                        !isExpanded ? 'line-clamp-3' : '',
+                                                    )}>
+                                                        {isExpanded
+                                                            ? (notification.full_message || notification.message)
+                                                            : notification.message}
+                                                    </p>
+                                                    {canExpand ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => toggleExpanded(notification.id, event)}
+                                                            className="mt-0.5 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
+                                                        >
+                                                            {isExpanded ? 'Réduire' : 'Lire plus'}
+                                                        </button>
+                                                    ) : null}
+                                                </>
+                                            ) : (
+                                                <p className="text-sm text-[var(--app-text)]">
+                                                    {buildLeaveNotificationMessage(notification)}
+                                                </p>
+                                            )}
+                                            <p className="mt-1 text-xs text-[var(--app-muted)]">
+                                                {formatNotificationDate(notification.created_at)}
+                                                {!notification.read_at ? ' • Non lue' : ''}
+                                            </p>
+                                            {!notification.read_at && !isAnnouncement ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        markAsRead(notification.id).then(() => {
+                                                            refreshNotifications().catch(() => null);
+                                                        });
+                                                    }}
+                                                    className="mt-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
+                                                >
+                                                    Marquer comme lu
+                                                </button>
+                                            ) : null}
+                                            {notification.read_at && !isAnnouncement ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        deleteNotification(notification.id);
+                                                    }}
+                                                    className="mt-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
+                                                >
+                                                    Effacer
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         ) : (
                             <div className="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-4 text-sm text-[var(--app-muted)]">
@@ -1253,6 +1318,78 @@ function NotificationsMenu() {
                 </MenuItems>
             </Transition>
         </HeadlessMenu>
+
+        <Transition show={announcementModal !== null} leave="duration-200">
+            <Dialog
+                as="div"
+                className="fixed inset-0 z-[200] flex transform items-start overflow-y-auto px-3 py-4 transition-all sm:items-center sm:px-4 sm:py-6"
+                onClose={() => setAnnouncementModal(null)}
+            >
+                <TransitionChild
+                    enter="ease-out duration-300"
+                    enterFrom="opacity-0"
+                    enterTo="opacity-100"
+                    leave="ease-in duration-200"
+                    leaveFrom="opacity-100"
+                    leaveTo="opacity-0"
+                >
+                    <div className="fixed inset-0 bg-gray-500/75" />
+                </TransitionChild>
+
+                <TransitionChild
+                    enter="ease-out duration-300"
+                    enterFrom="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                    enterTo="opacity-100 translate-y-0 sm:scale-100"
+                    leave="ease-in duration-200"
+                    leaveFrom="opacity-100 translate-y-0 sm:scale-100"
+                    leaveTo="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                >
+                    <DialogPanel className="relative mx-auto w-full max-w-[calc(100vw-1.5rem)] transform overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl transition-all sm:max-w-md">
+                        <div className="flex items-start justify-between gap-3 border-b border-[var(--app-border)] px-5 py-4">
+                            <div className="min-w-0">
+                                <p className="text-base font-bold leading-snug text-[var(--app-text)]">
+                                    {announcementModal?.title || 'Annonce'}
+                                </p>
+                                <p className="mt-0.5 text-xs text-[var(--app-muted)]">
+                                    {formatNotificationDate(announcementModal?.created_at)}
+                                    {!announcementModal?.read_at ? ' • Non lue' : ''}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setAnnouncementModal(null)}
+                                className="mt-0.5 flex-shrink-0 rounded-lg p-1 text-[var(--app-muted)] transition hover:bg-[var(--app-surface-soft)] hover:text-[var(--app-text)]"
+                                aria-label="Fermer"
+                            >
+                                <X className="h-4 w-4" strokeWidth={2} />
+                            </button>
+                        </div>
+                        <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+                            <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--app-text)]">
+                                {announcementModal?.full_message || announcementModal?.message}
+                            </p>
+                        </div>
+                        {!announcementModal?.read_at ? (
+                            <div className="border-t border-[var(--app-border)] px-5 py-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        markAsRead(announcementModal.id).then(() => {
+                                            setAnnouncementModal((prev) => prev ? { ...prev, read_at: new Date().toISOString() } : null);
+                                            refreshNotifications().catch(() => null);
+                                        });
+                                    }}
+                                    className="text-sm font-semibold text-[#0F6930] transition hover:opacity-80"
+                                >
+                                    Marquer comme lu
+                                </button>
+                            </div>
+                        ) : null}
+                    </DialogPanel>
+                </TransitionChild>
+            </Dialog>
+        </Transition>
+        </>
     );
 }
 

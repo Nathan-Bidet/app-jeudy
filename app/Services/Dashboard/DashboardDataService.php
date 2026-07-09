@@ -2,10 +2,12 @@
 
 namespace App\Services\Dashboard;
 
+use App\Models\Announcement;
 use App\Models\AprevoirTask;
 use App\Models\CotationSetting;
 use App\Models\LdtEntry;
 use App\Models\User;
+use App\Support\RichText\SimpleHtmlSanitizer;
 use App\Support\Access\AccessManager;
 use App\Support\Cotations\CotationPdfFormatter;
 use Carbon\Carbon;
@@ -33,6 +35,7 @@ class DashboardDataService
                 $this->cotationsWidget($user),
                 $this->quickAccessWidget($user),
             ])),
+            'dashboard_announcement' => $this->activeDashboardAnnouncement(),
         ];
     }
 
@@ -277,6 +280,39 @@ class DashboardDataService
             'gazole' => [
                 'label' => trim((string) ($decoded['gazole']['label'] ?? '')) ?: 'GAZOLE',
             ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function activeDashboardAnnouncement(): ?array
+    {
+        $announcement = Announcement::query()
+            ->where('show_on_dashboard', true)
+            ->where(fn ($q) => $q
+                ->whereNull('dashboard_expires_at')
+                ->orWhereDate('dashboard_expires_at', '>=', now()->toDateString())
+            )
+            ->with('creator:id,name,first_name,last_name')
+            ->orderByDesc('sent_at')
+            ->first();
+
+        if (! $announcement) {
+            return null;
+        }
+
+        $creatorName = null;
+        if ($announcement->creator) {
+            $first = trim((string) $announcement->creator->first_name.' '.(string) $announcement->creator->last_name);
+            $creatorName = $first !== '' ? $first : (trim((string) $announcement->creator->name) ?: null);
+        }
+
+        return [
+            'id' => $announcement->id,
+            'title' => $announcement->title,
+            'body_text' => SimpleHtmlSanitizer::toPlainText($announcement->body_html),
+            'created_by' => $creatorName,
         ];
     }
 

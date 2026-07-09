@@ -29,7 +29,7 @@ function accentClasses(accent) {
     const map = {
         yellow: 'border-[var(--brand-yellow-dark)]/60',
         red: 'border-red-500/50',
-        green: 'border-green-500/50',
+        green: 'border-[#F1BF0C]',
         brown: 'border-[var(--brand-brown)]/60',
     };
 
