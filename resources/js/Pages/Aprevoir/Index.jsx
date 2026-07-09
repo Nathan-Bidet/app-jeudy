@@ -6,7 +6,7 @@ import Modal from '@/Components/Modal';
 import AppLayout from '@/Layouts/AppLayout';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { Head, router, useForm } from '@inertiajs/react';
-import { ArrowUp, Check, Filter, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUp, Check, Filter, Plus, Search, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_TASK_FORM = {
@@ -1023,6 +1023,9 @@ export default function AprevoirIndex({
     const [lastHandledFocusId, setLastHandledFocusId] = useState(null);
     const quickSearchPanelRef = useRef(null);
     const quickSearchButtonRef = useRef(null);
+    const floatingSearchWrapperRef = useRef(null);
+    const floatingSearchInputRef = useRef(null);
+    const [floatingSearchOpen, setFloatingSearchOpen] = useState(false);
     const searchDebounceRef = useRef(null);
     const searchEffectReadyRef = useRef(false);
     const pendingScrollToTableRef = useRef(false);
@@ -1059,7 +1062,7 @@ export default function AprevoirIndex({
 
     useEffect(() => {
         const onScroll = () => {
-            setShowFloatingActions(window.scrollY > 180);
+            setShowFloatingActions(window.scrollY > 0);
         };
 
         onScroll();
@@ -1097,6 +1100,31 @@ export default function AprevoirIndex({
             document.removeEventListener('keydown', handleEscape);
         };
     }, [showQuickSearch]);
+
+    useEffect(() => {
+        if (!floatingSearchOpen) return undefined;
+
+        floatingSearchInputRef.current?.focus();
+
+        const handlePointerDown = (event) => {
+            if (floatingSearchWrapperRef.current?.contains(event.target)) return;
+            setFloatingSearchOpen(false);
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') setFloatingSearchOpen(false);
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('touchstart', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('touchstart', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [floatingSearchOpen]);
 
     useEffect(() => {
         if (!searchEffectReadyRef.current) {
@@ -2474,15 +2502,45 @@ export default function AprevoirIndex({
                         </button>
                     ) : null}
 
-                    <button
-                        ref={quickSearchButtonRef}
-                        type="button"
-                        onClick={() => setShowQuickSearch((current) => !current)}
-                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] shadow-lg shadow-black/10 lg:hidden"
-                    >
-                        <Search className="h-3.5 w-3.5" strokeWidth={2.4} />
-                        <span>Recherche</span>
-                    </button>
+                    <div ref={floatingSearchWrapperRef} className="flex items-center justify-end">
+                        <div
+                            className={`overflow-hidden transition-all duration-200 ease-out ${
+                                floatingSearchOpen ? 'w-[min(22rem,calc(100vw-5.5rem))] opacity-100' : 'w-0 opacity-0'
+                            }`}
+                        >
+                            <div className="relative overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-lg shadow-black/10 transition focus-within:border-[var(--brand-yellow-dark)]">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" strokeWidth={2.1} />
+                                <input
+                                    ref={floatingSearchInputRef}
+                                    type="text"
+                                    value={filterState.search}
+                                    onChange={(event) => onSearchChange(event.target.value)}
+                                    placeholder="Rechercher..."
+                                    className="h-9 w-full bg-transparent py-2 pl-9 pr-9 text-sm font-medium outline-none placeholder:text-[var(--app-muted)]"
+                                />
+                                {filterState.search ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onSearchChange('')}
+                                        className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--app-muted)] transition hover:bg-[var(--app-surface-soft)] hover:text-[var(--app-text)]"
+                                        aria-label="Effacer la recherche"
+                                    >
+                                        <X className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
+                        {!floatingSearchOpen ? (
+                            <button
+                                type="button"
+                                onClick={() => setFloatingSearchOpen(true)}
+                                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] shadow-lg shadow-black/10 transition hover:border-[var(--brand-yellow-dark)]"
+                            >
+                                <Search className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                <span>Recherche</span>
+                            </button>
+                        ) : null}
+                    </div>
 
                     <button
                         type="button"

@@ -1,7 +1,7 @@
 import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import { Head, router } from '@inertiajs/react';
-import { AlertTriangle, BarChart2, Check, ChevronDown, ChevronUp, Filter, Pencil, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowUp, BarChart2, Check, ChevronDown, ChevronUp, Filter, Pencil, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -650,18 +650,18 @@ function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd
     }
 
     return (
-        <div className="fixed bottom-24 right-3 z-40 flex items-end gap-2 md:bottom-6 md:right-6">
+        <div className="fixed bottom-24 right-3 z-40 flex items-center gap-2 md:bottom-6 md:right-6">
             <button
                 type="button"
                 onClick={onToggleStats}
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-full border shadow-xl transition ${
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border shadow-lg shadow-black/10 transition ${
                     showStats
                         ? 'border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-dark)] text-[var(--color-black)]'
                         : 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:border-[var(--brand-yellow-dark)]'
                 }`}
                 aria-label={showStats ? 'Masquer les statistiques' : 'Statistiques'}
             >
-                <BarChart2 className="h-5 w-5" strokeWidth={2.3} />
+                <BarChart2 className="h-4 w-4" strokeWidth={2.3} />
             </button>
 
             <div ref={wrapperRef} className="flex items-center justify-end">
@@ -670,24 +670,24 @@ function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd
                         searchOpen ? 'w-[min(22rem,calc(100vw-5.5rem))] opacity-100' : 'w-0 opacity-0'
                     }`}
                 >
-                    <div className="relative overflow-hidden rounded-full border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl transition focus-within:border-[var(--brand-yellow-dark)]">
-                        <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#0F6930]" strokeWidth={2.1} />
+                    <div className="relative overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-lg shadow-black/10 transition focus-within:border-[var(--brand-yellow-dark)]">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#0F6930]" strokeWidth={2.1} />
                         <input
                             ref={inputRef}
                             type="text"
                             value={search}
                             onChange={(event) => onSearchChange(event.target.value)}
                             placeholder="Rechercher..."
-                            className="h-12 w-full bg-transparent py-2 pl-12 pr-10 text-sm font-medium outline-none placeholder:text-[var(--app-muted)]"
+                            className="h-9 w-full bg-transparent py-2 pl-9 pr-9 text-sm font-medium outline-none placeholder:text-[var(--app-muted)]"
                         />
                         {search ? (
                             <button
                                 type="button"
                                 onClick={() => onSearchChange('')}
-                                className="absolute right-2.5 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[var(--app-muted)] transition hover:bg-[var(--app-surface-soft)] hover:text-[var(--app-text)]"
+                                className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--app-muted)] transition hover:bg-[var(--app-surface-soft)] hover:text-[var(--app-text)]"
                                 aria-label="Effacer la recherche"
                             >
-                                <X className="h-4 w-4" strokeWidth={2.2} />
+                                <X className="h-3.5 w-3.5" strokeWidth={2.2} />
                             </button>
                         ) : null}
                     </div>
@@ -696,10 +696,10 @@ function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd
                     <button
                         type="button"
                         onClick={() => setSearchOpen(true)}
-                        className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] shadow-xl transition hover:border-[var(--brand-yellow-dark)]"
-                        aria-label="Rechercher"
+                        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] shadow-lg shadow-black/10 transition hover:border-[var(--brand-yellow-dark)]"
                     >
-                        <Search className="h-5 w-5" strokeWidth={2.3} />
+                        <Search className="h-3.5 w-3.5" strokeWidth={2.3} />
+                        <span>Recherche</span>
                     </button>
                 ) : null}
             </div>
@@ -708,12 +708,22 @@ function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd
                 <button
                     type="button"
                     onClick={onAdd}
-                    className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] text-[var(--color-black)] shadow-xl transition hover:brightness-95"
-                    aria-label="Ajouter"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-[var(--color-black)] shadow-lg shadow-black/10 transition hover:brightness-95"
                 >
-                    <Plus className="h-5 w-5" strokeWidth={2.4} />
+                    <Plus className="h-3.5 w-3.5" strokeWidth={2.4} />
+                    <span>Ajouter</span>
                 </button>
             ) : null}
+
+            <button
+                type="button"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] shadow-lg shadow-black/10 transition hover:border-[var(--brand-yellow-dark)]"
+                title="Remonter en haut"
+                aria-label="Remonter en haut"
+            >
+                <ArrowUp className="h-4 w-4" strokeWidth={2.4} />
+            </button>
         </div>
     );
 }
