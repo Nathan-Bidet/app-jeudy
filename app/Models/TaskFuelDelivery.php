@@ -10,7 +10,13 @@ class TaskFuelDelivery extends Model
 {
     use SoftDeletes;
     protected $fillable = [
+        'recurring_id',
+        'recurring_occurrence_date',
         'delivery_date',
+        'actual_delivery_date',
+        'delivered_driver_user_id',
+        'delivered_at',
+        'delivered_pointed_by_user_id',
         'site',
         'tiers_record_id',
         'code_tiers',
@@ -30,13 +36,24 @@ class TaskFuelDelivery extends Model
     protected function casts(): array
     {
         return [
+            'recurring_id' => 'integer',
+            'recurring_occurrence_date' => 'date',
             'delivery_date' => 'date',
+            'actual_delivery_date' => 'date',
+            'delivered_at' => 'datetime',
+            'delivered_driver_user_id' => 'integer',
+            'delivered_pointed_by_user_id' => 'integer',
             'tiers_record_id' => 'integer',
             'volume_liters' => 'integer',
             'urgent' => 'boolean',
             'created_by_user_id' => 'integer',
             'updated_by_user_id' => 'integer',
         ];
+    }
+
+    public function recurring(): BelongsTo
+    {
+        return $this->belongsTo(TaskFuelRecurring::class, 'recurring_id');
     }
 
     public function tiersRecord(): BelongsTo
@@ -52,5 +69,15 @@ class TaskFuelDelivery extends Model
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by_user_id');
+    }
+
+    public function deliveryDriver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'delivered_driver_user_id');
+    }
+
+    public function deliveryPointedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'delivered_pointed_by_user_id');
     }
 }

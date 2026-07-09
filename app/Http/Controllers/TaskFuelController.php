@@ -4,15 +4,20 @@ namespace App\Http\Controllers;
 
 use App\Models\Depot;
 use App\Models\TaskFuelDelivery;
+use App\Models\TaskFuelNewClient;
 use App\Models\TaskFuelOption;
+use App\Models\TaskFuelRecurring;
 use App\Models\TaskTiersRecord;
 use App\Models\TaskTiersImportConfig;
+use App\Models\User;
+use Carbon\Carbon;
 use App\Support\Access\AccessManager;
 use App\Support\Tiers\TiersColumnFormat;
 use App\Support\Tiers\TiersSearchText;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -27,36 +32,41 @@ class TaskFuelController extends Controller
     {
         $user = $request->user();
         $search = trim((string) $request->query('search', ''));
-        $filters = (array) $request->query('filters', []);
+        $filters = $request->query->has('filters')
+            ? (array) $request->query('filters', [])
+            : $this->defaultFuelFilters();
         $sort = (array) $request->query('sort', []);
 
         $deliveriesQuery = TaskFuelDelivery::query()
-            ->with('createdBy:id,name');
+            ->with([
+                'createdBy:id,name',
+                'deliveryDriver:id,name',
+                'deliveryPointedBy:id,name',
+            ]);
 
         $this->applyFuelSearch($deliveriesQuery, $search);
         $this->applyFuelFilters($deliveriesQuery, $filters);
         $this->applyFuelSort($deliveriesQuery, $sort);
 
-        $deliveries = $deliveriesQuery
-            ->paginate(50)
-            ->withQueryString();
+        $this->generateRecurringDeliveries();
+
+        $deliveries = $deliveriesQuery->get();
 
         return Inertia::render('Tasks/Fuel/Index', [
             'permissions' => [
                 'can_update' => (bool) ($user && $this->accessManager->can($user, 'task.fuel.update')),
                 'can_delete' => (bool) ($user && $this->accessManager->can($user, 'task.fuel.delete')),
+                'can_manage_new_clients' => (bool) ($user
+                    && $this->accessManager->can($user, 'task.fuel.update')
+                    && $this->accessManager->can($user, 'task.tiers.update')),
+                'can_manage_recurrings' => (bool) ($user && $this->accessManager->can($user, 'task.fuel.update')),
             ],
             'deliveries' => [
-                'data' => $deliveries->getCollection()
+                'data' => $deliveries
                     ->map(fn (TaskFuelDelivery $delivery): array => $this->fuelDeliveryPayload($delivery))
                     ->values(),
                 'meta' => [
-                    'current_page' => $deliveries->currentPage(),
-                    'from' => $deliveries->firstItem(),
-                    'last_page' => $deliveries->lastPage(),
-                    'per_page' => $deliveries->perPage(),
-                    'to' => $deliveries->lastItem(),
-                    'total' => $deliveries->total(),
+                    'total' => $deliveries->count(),
                 ],
             ],
             'options' => $this->fuelOptionsPayload(),
@@ -66,6 +76,16 @@ class TaskFuelController extends Controller
                 ->get(['id', 'name'])
                 ->map(fn (Depot $depot): array => ['id' => $depot->id, 'name' => $depot->name])
                 ->values(),
+            'fuelDrivers' => $this->fuelDriversPayload(),
+            'recurrings' => ($user && $this->accessManager->can($user, 'task.fuel.update'))
+                ? $this->recurringsPayload()
+                : [],
+            'monthlyStats' => $this->computeMonthlyStats(),
+            'newClients' => ($user
+                && $this->accessManager->can($user, 'task.fuel.update')
+                && $this->accessManager->can($user, 'task.tiers.update'))
+                ? $this->pendingFuelNewClientsPayload()
+                : [],
             'query' => [
                 'search' => $search,
                 'filters' => $this->normalizeFuelFiltersForFrontend($filters),
@@ -206,6 +226,33 @@ class TaskFuelController extends Controller
         ]);
     }
 
+    public function point(Request $request, TaskFuelDelivery $delivery): JsonResponse
+    {
+        $validated = $request->validate([
+            'actual_delivery_date' => ['required', 'date'],
+            'delivered_driver_user_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
+
+        $delivery->forceFill([
+            'actual_delivery_date' => $validated['actual_delivery_date'],
+            'delivered_driver_user_id' => (int) $validated['delivered_driver_user_id'],
+            'delivered_at' => now(),
+            'delivered_pointed_by_user_id' => $request->user()?->id,
+            'updated_by_user_id' => $request->user()?->id,
+        ])->save();
+
+        $delivery->load([
+            'createdBy:id,name',
+            'deliveryDriver:id,name',
+            'deliveryPointedBy:id,name',
+        ]);
+
+        return response()->json([
+            'message' => 'Livraison pointée.',
+            'delivery' => $this->fuelDeliveryPayload($delivery),
+        ]);
+    }
+
     public function tiersSearch(Request $request): JsonResponse
     {
         $search = trim((string) $request->query('q', ''));
@@ -255,6 +302,109 @@ class TaskFuelController extends Controller
                 ->map(fn (TaskTiersRecord $record): array => $this->fuelTiersResult($record))
                 ->values()
         );
+    }
+
+    public function storeNewClient(Request $request): JsonResponse
+    {
+        abort_unless(
+            $request->user() && $this->accessManager->can($request->user(), 'task.tiers.update'),
+            403,
+            'Vous n\'avez pas la permission de créer un client Tiers.'
+        );
+
+        $validated = $request->validate([
+            'client' => ['required', 'array'],
+            'client.code' => ['nullable', 'string', 'max:255'],
+            'client.name' => ['nullable', 'string', 'max:255'],
+            'client.phone' => ['nullable', 'string', 'max:255'],
+            'client.address' => ['nullable', 'string', 'max:5000'],
+            'client.postal_code' => ['nullable', 'string', 'max:255'],
+            'client.city' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $client = $this->normalizeFuelClientPayload((array) $validated['client']);
+
+        if (! collect($client)->filter(fn (string $value): bool => $value !== '')->isNotEmpty()) {
+            return response()->json(['message' => 'Renseignez au moins une information client.'], 422);
+        }
+
+        if ($client['code'] !== '' && $this->fuelClientCodeExists($client['code'])) {
+            return response()->json(['message' => 'Ce code tiers existe déjà dans les Tiers.'], 422);
+        }
+
+        if ($this->fuelClientIdentityExists($client)) {
+            return response()->json(['message' => 'Un client avec le même nom, la même adresse et le même code postal existe déjà dans les Tiers.'], 422);
+        }
+
+        $record = DB::transaction(function () use ($request, $client): TaskTiersRecord {
+            $config = $this->writableFuelTiersConfig($request);
+            $this->ensureFuelClientTiersColumns($config);
+
+            $data = [
+                'code_tiers' => $client['code'],
+                'nom_raison_sociale' => $client['name'],
+                'telephone' => $client['phone'],
+                'adresse' => $client['address'],
+                'code_postal' => $client['postal_code'],
+                'commune' => $client['city'],
+            ];
+
+            $record = TaskTiersRecord::query()->create([
+                'import_config_id' => $config->id,
+                'source_row_hash' => hash('sha256', json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
+                'primary_identifier' => $client['code'] ?: null,
+                'reference_value' => $client['name'] ?: null,
+                'data' => $data,
+                'search_text' => TiersSearchText::build($data, $client['code'], $client['name']),
+                'imported_by_user_id' => $request->user()?->id,
+                'imported_at' => now(),
+            ]);
+
+            TaskFuelNewClient::query()->create([
+                'task_tiers_record_id' => $record->id,
+                'created_by_user_id' => $request->user()?->id,
+            ]);
+
+            return $record;
+        });
+
+        return response()->json([
+            'message' => 'Client créé.',
+            'tiers' => $this->fuelTiersResult($record),
+            'new_clients' => $this->pendingFuelNewClientsPayload(),
+        ], 201);
+    }
+
+    public function newClients(Request $request): JsonResponse
+    {
+        abort_unless(
+            $request->user() && $this->accessManager->can($request->user(), 'task.tiers.update'),
+            403,
+            'Vous n\'avez pas la permission de consulter les nouveaux clients.'
+        );
+
+        return response()->json([
+            'new_clients' => $this->pendingFuelNewClientsPayload(),
+        ]);
+    }
+
+    public function validateNewClient(Request $request, TaskFuelNewClient $newClient): JsonResponse
+    {
+        abort_unless(
+            $request->user() && $this->accessManager->can($request->user(), 'task.tiers.update'),
+            403,
+            'Vous n\'avez pas la permission de valider ce client.'
+        );
+
+        $newClient->forceFill([
+            'validated_at' => now(),
+            'validated_by_user_id' => $request->user()?->id,
+        ])->save();
+
+        return response()->json([
+            'message' => 'Client validé.',
+            'new_clients' => $this->pendingFuelNewClientsPayload(),
+        ]);
     }
 
     public function storeOption(Request $request): JsonResponse
@@ -349,6 +499,315 @@ class TaskFuelController extends Controller
         return response()->json([
             'message' => 'Valeur supprimée.',
         ]);
+    }
+
+    public function storeRecurring(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user && $this->accessManager->can($user, 'task.fuel.update'), 403);
+
+        $validated = $request->validate([
+            'client_name' => ['nullable', 'string', 'max:255'],
+            'code_tiers' => ['nullable', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:255'],
+            'address' => ['nullable', 'string', 'max:5000'],
+            'postal_code' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:255'],
+            'site' => ['nullable', 'string', 'max:255'],
+            'fuel_type' => ['nullable', 'string', 'max:255'],
+            'volume_liters' => ['nullable', 'integer', 'min:0'],
+            'urgent' => ['boolean'],
+            'comment' => ['nullable', 'string', 'max:50000'],
+            'first_delivery_date' => ['required', 'date'],
+            'recurrence_type' => ['required', 'string', 'in:daily,weekly,weekdays,monthly'],
+            'recurrence_config' => ['nullable', 'array'],
+            'recurrence_config.interval' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'recurrence_config.days' => ['nullable', 'array'],
+            'recurrence_config.days.*' => ['integer', 'min:0', 'max:6'],
+            'days_before' => ['integer', 'min:0', 'max:365'],
+            'active' => ['boolean'],
+        ]);
+
+        $recurring = TaskFuelRecurring::create([
+            'client_name' => trim((string) ($validated['client_name'] ?? '')) ?: null,
+            'code_tiers' => trim((string) ($validated['code_tiers'] ?? '')) ?: null,
+            'phone' => trim((string) ($validated['phone'] ?? '')) ?: null,
+            'address' => trim((string) ($validated['address'] ?? '')) ?: null,
+            'postal_code' => trim((string) ($validated['postal_code'] ?? '')) ?: null,
+            'city' => trim((string) ($validated['city'] ?? '')) ?: null,
+            'site' => trim((string) ($validated['site'] ?? '')) ?: null,
+            'fuel_type' => trim((string) ($validated['fuel_type'] ?? '')) ?: null,
+            'volume_liters' => isset($validated['volume_liters']) ? (int) $validated['volume_liters'] : null,
+            'urgent' => (bool) ($validated['urgent'] ?? false),
+            'comment' => trim((string) ($validated['comment'] ?? '')) ?: null,
+            'first_delivery_date' => $validated['first_delivery_date'],
+            'recurrence_type' => $validated['recurrence_type'],
+            'recurrence_config' => $validated['recurrence_config'] ?? null,
+            'days_before' => (int) ($validated['days_before'] ?? 0),
+            'active' => (bool) ($validated['active'] ?? true),
+            'created_by_user_id' => $user->id,
+            'updated_by_user_id' => $user->id,
+        ]);
+
+        $this->generateRecurringDeliveries();
+
+        return response()->json([
+            'message' => 'Récurrence créée.',
+            'recurring' => $this->recurringPayload($recurring),
+        ], 201);
+    }
+
+    public function updateRecurring(Request $request, TaskFuelRecurring $recurring): JsonResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user && $this->accessManager->can($user, 'task.fuel.update'), 403);
+
+        $validated = $request->validate([
+            'client_name' => ['nullable', 'string', 'max:255'],
+            'code_tiers' => ['nullable', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:255'],
+            'address' => ['nullable', 'string', 'max:5000'],
+            'postal_code' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:255'],
+            'site' => ['nullable', 'string', 'max:255'],
+            'fuel_type' => ['nullable', 'string', 'max:255'],
+            'volume_liters' => ['nullable', 'integer', 'min:0'],
+            'urgent' => ['boolean'],
+            'comment' => ['nullable', 'string', 'max:50000'],
+            'first_delivery_date' => ['required', 'date'],
+            'recurrence_type' => ['required', 'string', 'in:daily,weekly,weekdays,monthly'],
+            'recurrence_config' => ['nullable', 'array'],
+            'recurrence_config.interval' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'recurrence_config.days' => ['nullable', 'array'],
+            'recurrence_config.days.*' => ['integer', 'min:0', 'max:6'],
+            'days_before' => ['integer', 'min:0', 'max:365'],
+            'active' => ['boolean'],
+        ]);
+
+        $recurring->forceFill([
+            'client_name' => trim((string) ($validated['client_name'] ?? '')) ?: null,
+            'code_tiers' => trim((string) ($validated['code_tiers'] ?? '')) ?: null,
+            'phone' => trim((string) ($validated['phone'] ?? '')) ?: null,
+            'address' => trim((string) ($validated['address'] ?? '')) ?: null,
+            'postal_code' => trim((string) ($validated['postal_code'] ?? '')) ?: null,
+            'city' => trim((string) ($validated['city'] ?? '')) ?: null,
+            'site' => trim((string) ($validated['site'] ?? '')) ?: null,
+            'fuel_type' => trim((string) ($validated['fuel_type'] ?? '')) ?: null,
+            'volume_liters' => isset($validated['volume_liters']) ? (int) $validated['volume_liters'] : null,
+            'urgent' => (bool) ($validated['urgent'] ?? false),
+            'comment' => trim((string) ($validated['comment'] ?? '')) ?: null,
+            'first_delivery_date' => $validated['first_delivery_date'],
+            'recurrence_type' => $validated['recurrence_type'],
+            'recurrence_config' => $validated['recurrence_config'] ?? null,
+            'days_before' => (int) ($validated['days_before'] ?? 0),
+            'active' => (bool) ($validated['active'] ?? true),
+            'updated_by_user_id' => $user->id,
+        ])->save();
+
+        $this->generateRecurringDeliveries();
+
+        return response()->json([
+            'message' => 'Récurrence mise à jour.',
+            'recurring' => $this->recurringPayload($recurring->fresh()),
+        ]);
+    }
+
+    public function destroyRecurring(Request $request, TaskFuelRecurring $recurring): JsonResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user && $this->accessManager->can($user, 'task.fuel.delete'), 403);
+
+        $recurring->delete();
+
+        return response()->json([
+            'message' => 'Récurrence supprimée.',
+        ]);
+    }
+
+    private function generateRecurringDeliveries(): void
+    {
+        $today = now()->startOfDay();
+        $horizon = $today->copy()->addDays(60);
+
+        TaskFuelRecurring::where('active', true)->get()->each(function (TaskFuelRecurring $recurring) use ($today, $horizon): void {
+            $computeFrom = $recurring->first_delivery_date->gte($today->copy()->subDays(30))
+                ? $recurring->first_delivery_date->copy()
+                : $today->copy()->subDays(30);
+
+            $computeTo = $horizon;
+
+            $occurrences = $this->computeOccurrences($recurring, $computeFrom, $computeTo);
+
+            foreach ($occurrences as $occurrence) {
+                $displayDate = $occurrence->copy()->subDays($recurring->days_before);
+                if ($displayDate->gt($today)) {
+                    continue;
+                }
+
+                $occurrenceStr = $occurrence->format('Y-m-d');
+
+                $exists = TaskFuelDelivery::withTrashed()
+                    ->where('recurring_id', $recurring->id)
+                    ->where('recurring_occurrence_date', $occurrenceStr)
+                    ->exists();
+
+                if ($exists) {
+                    continue;
+                }
+
+                TaskFuelDelivery::create([
+                    'recurring_id' => $recurring->id,
+                    'recurring_occurrence_date' => $occurrenceStr,
+                    'delivery_date' => $occurrenceStr,
+                    'site' => $recurring->site,
+                    'code_tiers' => $recurring->code_tiers,
+                    'client_name' => $recurring->client_name,
+                    'phone' => $recurring->phone,
+                    'address' => $recurring->address,
+                    'postal_code' => $recurring->postal_code,
+                    'city' => $recurring->city,
+                    'fuel_type' => $recurring->fuel_type,
+                    'volume_liters' => $recurring->volume_liters,
+                    'urgent' => $recurring->urgent,
+                    'comment' => $recurring->comment,
+                    'created_by_user_id' => null,
+                    'updated_by_user_id' => null,
+                ]);
+            }
+        });
+    }
+
+    private function computeOccurrences(TaskFuelRecurring $recurring, Carbon $from, Carbon $to): array
+    {
+        $occurrences = [];
+        $firstDate = Carbon::instance($recurring->first_delivery_date)->startOfDay();
+        $config = $recurring->recurrence_config ?? [];
+        $interval = max(1, (int) ($config['interval'] ?? 1));
+
+        switch ($recurring->recurrence_type) {
+            case 'daily':
+                $current = $firstDate->copy();
+                while ($current->lte($to)) {
+                    if ($current->gte($from)) {
+                        $occurrences[] = $current->copy();
+                    }
+                    $current->addDays($interval);
+                }
+                break;
+
+            case 'weekly':
+                $current = $firstDate->copy();
+                while ($current->lte($to)) {
+                    if ($current->gte($from)) {
+                        $occurrences[] = $current->copy();
+                    }
+                    $current->addWeeks($interval);
+                }
+                break;
+
+            case 'weekdays':
+                $days = array_map('intval', (array) ($config['days'] ?? []));
+                $isoDays = array_map(fn (int $d): int => $d + 1, $days); // 0=Mon→1, 6=Sun→7
+                $start = $firstDate->gt($from) ? $firstDate->copy() : $from->copy();
+                while ($start->lte($to)) {
+                    if (in_array($start->dayOfWeekIso, $isoDays, true)) {
+                        $occurrences[] = $start->copy();
+                    }
+                    $start->addDay();
+                }
+                break;
+
+            case 'monthly':
+                $targetDay = $firstDate->day;
+                $current = $firstDate->copy();
+                while ($current->lte($to)) {
+                    if ($current->gte($from)) {
+                        $occurrences[] = $current->copy();
+                    }
+                    $nextYear = $current->year;
+                    $nextMonth = $current->month + $interval;
+                    while ($nextMonth > 12) {
+                        $nextMonth -= 12;
+                        $nextYear++;
+                    }
+                    $daysInNextMonth = Carbon::create($nextYear, $nextMonth, 1)->daysInMonth;
+                    $current = Carbon::create($nextYear, $nextMonth, min($targetDay, $daysInNextMonth))->startOfDay();
+                }
+                break;
+        }
+
+        return $occurrences;
+    }
+
+    private function recurringsPayload(): array
+    {
+        return TaskFuelRecurring::query()
+            ->orderByDesc('active')
+            ->orderBy('client_name')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (TaskFuelRecurring $r): array => $this->recurringPayload($r))
+            ->values()
+            ->all();
+    }
+
+    private function recurringPayload(TaskFuelRecurring $recurring): array
+    {
+        $today = now()->startOfDay();
+        $nextOccurrence = null;
+        if ($recurring->active) {
+            $occurrences = $this->computeOccurrences($recurring, $today, $today->copy()->addDays(365));
+            $nextOccurrence = $occurrences[0] ?? null;
+        }
+
+        return [
+            'id' => $recurring->id,
+            'client_name' => $recurring->client_name ?? '',
+            'code_tiers' => $recurring->code_tiers ?? '',
+            'phone' => $recurring->phone ?? '',
+            'address' => $recurring->address ?? '',
+            'postal_code' => $recurring->postal_code ?? '',
+            'city' => $recurring->city ?? '',
+            'site' => $recurring->site ?? '',
+            'fuel_type' => $recurring->fuel_type ?? '',
+            'volume_liters' => $recurring->volume_liters,
+            'urgent' => (bool) $recurring->urgent,
+            'comment' => $recurring->comment ?? '',
+            'first_delivery_date' => $recurring->first_delivery_date?->format('Y-m-d') ?? '',
+            'recurrence_type' => $recurring->recurrence_type ?? '',
+            'recurrence_config' => $recurring->recurrence_config ?? [],
+            'days_before' => $recurring->days_before ?? 0,
+            'active' => (bool) $recurring->active,
+            'recurrence_label' => $this->recurrenceLabel($recurring),
+            'next_occurrence' => $nextOccurrence?->format('Y-m-d'),
+            'next_occurrence_label' => $nextOccurrence?->format('d/m/Y'),
+        ];
+    }
+
+    private function recurrenceLabel(TaskFuelRecurring $recurring): string
+    {
+        $config = $recurring->recurrence_config ?? [];
+        $interval = max(1, (int) ($config['interval'] ?? 1));
+
+        return match ($recurring->recurrence_type) {
+            'daily' => $interval === 1 ? 'Tous les jours' : "Tous les {$interval} jours",
+            'weekly' => $interval === 1 ? 'Toutes les semaines' : "Toutes les {$interval} semaines",
+            'weekdays' => $this->weekdaysLabel((array) ($config['days'] ?? [])),
+            'monthly' => $interval === 1 ? 'Tous les mois' : "Tous les {$interval} mois",
+            default => $recurring->recurrence_type ?? '',
+        };
+    }
+
+    private function weekdaysLabel(array $days): string
+    {
+        $names = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+        sort($days);
+        $labels = array_filter(array_map(fn (int $d): string => $names[$d] ?? '', $days));
+
+        return implode(', ', $labels) ?: 'Aucun jour';
     }
 
     private function fuelTiersResult(TaskTiersRecord $record): array
@@ -459,7 +918,210 @@ class TaskFuelController extends Controller
             'created_at_label' => $delivery->created_at?->format('d/m/Y H:i') ?? '',
             'created_by' => $delivery->createdBy?->name ?? '',
             'urgent' => (bool) $delivery->urgent,
+            'is_recurring' => $delivery->recurring_id !== null,
+            'recurring_id' => $delivery->recurring_id,
+            'is_delivered' => $delivery->delivered_at !== null,
+            'actual_delivery_date' => $delivery->actual_delivery_date?->format('d/m/Y') ?? '',
+            'actual_delivery_date_value' => $delivery->actual_delivery_date?->format('Y-m-d') ?? '',
+            'delivered_at_label' => $delivery->delivered_at?->format('d/m/Y H:i') ?? '',
+            'delivered_driver_id' => $delivery->delivered_driver_user_id,
+            'delivered_driver_name' => $delivery->deliveryDriver?->name ?? '',
+            'delivered_pointed_by' => $delivery->deliveryPointedBy?->name ?? '',
         ];
+    }
+
+    private function fuelDriversPayload(): array
+    {
+        return User::query()
+            ->with(['depot:id,name', 'depots:id,name'])
+            ->whereHas('sector', fn (Builder $query) => $query->whereRaw("LOWER(name) = 'chauffeur carb'"))
+            ->where(function (Builder $query): void {
+                $query
+                    ->whereNull('is_active')
+                    ->orWhere('is_active', true);
+            })
+            ->where(function (Builder $query): void {
+                $query
+                    ->whereNotNull('depot_id')
+                    ->orWhereHas('depots');
+            })
+            ->orderBy('name')
+            ->get(['id', 'name', 'depot_id'])
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'depot_id' => $user->depot_id,
+                'depot_ids' => collect([$user->depot_id])
+                    ->merge($user->depots->pluck('id'))
+                    ->filter()
+                    ->map(fn ($id): int => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all(),
+                'depot_name' => $user->depot?->name ?? '',
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function pendingFuelNewClientsPayload(): array
+    {
+        return TaskFuelNewClient::query()
+            ->with([
+                'tiersRecord:id,data,primary_identifier,reference_value',
+                'createdBy:id,name',
+            ])
+            ->whereNull('validated_at')
+            ->latest('created_at')
+            ->get()
+            ->map(fn (TaskFuelNewClient $newClient): array => $this->fuelNewClientPayload($newClient))
+            ->values()
+            ->all();
+    }
+
+    private function fuelNewClientPayload(TaskFuelNewClient $newClient): array
+    {
+        $record = $newClient->tiersRecord;
+        $data = (array) ($record?->data ?? []);
+
+        return [
+            'id' => $newClient->id,
+            'tiers_record_id' => $record?->id,
+            'code' => (string) ($data['code_tiers'] ?? $record?->primary_identifier ?? ''),
+            'name' => (string) ($data['nom_raison_sociale'] ?? $record?->reference_value ?? ''),
+            'phone' => (string) ($data['telephone'] ?? ''),
+            'address' => (string) ($data['adresse'] ?? ''),
+            'postal_code' => (string) ($data['code_postal'] ?? ''),
+            'city' => (string) ($data['commune'] ?? ''),
+            'created_at' => $newClient->created_at?->format('d/m/Y H:i') ?? '',
+            'created_by' => $newClient->createdBy?->name ?? '',
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $client
+     * @return array{code: string, name: string, phone: string, address: string, postal_code: string, city: string}
+     */
+    private function normalizeFuelClientPayload(array $client): array
+    {
+        return [
+            'code' => trim((string) ($client['code'] ?? '')),
+            'name' => trim((string) ($client['name'] ?? '')),
+            'phone' => trim((string) ($client['phone'] ?? '')),
+            'address' => trim((string) ($client['address'] ?? '')),
+            'postal_code' => trim((string) ($client['postal_code'] ?? '')),
+            'city' => trim((string) ($client['city'] ?? '')),
+        ];
+    }
+
+    private function fuelClientCodeExists(string $code): bool
+    {
+        $normalizedCode = TiersSearchText::normalize($code);
+
+        return TaskTiersRecord::query()
+            ->where(function (Builder $query) use ($code, $normalizedCode): void {
+                $query
+                    ->whereRaw('LOWER(COALESCE(primary_identifier, \'\')) = ?', [Str::lower($code)])
+                    ->orWhereRaw('COALESCE(search_text, \'\') LIKE ?', ['%'.$this->escapeLike($normalizedCode).'%'])
+                    ->orWhereRaw('LOWER(CAST(data AS CHAR)) LIKE ?', ['%'.$this->escapeLike(Str::lower($code)).'%']);
+            })
+            ->get(['id', 'primary_identifier', 'data'])
+            ->contains(function (TaskTiersRecord $record) use ($normalizedCode): bool {
+                $result = $this->fuelTiersResult($record);
+                return TiersSearchText::normalize($result['code'] ?? '') === $normalizedCode;
+            });
+    }
+
+    /**
+     * @param  array{code: string, name: string, phone: string, address: string, postal_code: string, city: string}  $client
+     */
+    private function fuelClientIdentityExists(array $client): bool
+    {
+        if ($client['name'] === '' || $client['address'] === '' || $client['postal_code'] === '') {
+            return false;
+        }
+
+        $name = TiersSearchText::normalize($client['name']);
+        $address = TiersSearchText::normalize($client['address']);
+        $postalCode = TiersSearchText::normalize($client['postal_code']);
+
+        return TaskTiersRecord::query()
+            ->where('search_text', 'LIKE', '%'.$this->escapeLike($name).'%')
+            ->where('search_text', 'LIKE', '%'.$this->escapeLike($address).'%')
+            ->where('search_text', 'LIKE', '%'.$this->escapeLike($postalCode).'%')
+            ->limit(25)
+            ->get(['id', 'primary_identifier', 'reference_value', 'data'])
+            ->contains(function (TaskTiersRecord $record) use ($name, $address, $postalCode): bool {
+                $result = $this->fuelTiersResult($record);
+
+                return TiersSearchText::normalize($result['name'] ?? '') === $name
+                    && TiersSearchText::normalize($result['address'] ?? '') === $address
+                    && TiersSearchText::normalize($result['postal_code'] ?? '') === $postalCode;
+            });
+    }
+
+    private function writableFuelTiersConfig(Request $request): TaskTiersImportConfig
+    {
+        $config = TaskTiersImportConfig::query()->latest('id')->first();
+
+        if ($config) {
+            return $config;
+        }
+
+        return TaskTiersImportConfig::query()->create([
+            'name' => 'Configuration Tiers manuelle',
+            'original_filename' => null,
+            'columns' => [],
+            'identification_column' => null,
+            'reference_column' => null,
+            'options' => [
+                'status' => 'manual',
+                'manual_columns' => [],
+            ],
+            'created_by_user_id' => $request->user()?->id,
+        ]);
+    }
+
+    private function ensureFuelClientTiersColumns(TaskTiersImportConfig $config): void
+    {
+        $requiredColumns = [
+            ['key' => 'code_tiers', 'label' => 'Code tiers'],
+            ['key' => 'nom_raison_sociale', 'label' => 'Nom / Raison sociale'],
+            ['key' => 'telephone', 'label' => 'Téléphone'],
+            ['key' => 'adresse', 'label' => 'Adresse'],
+            ['key' => 'code_postal', 'label' => 'Code postal'],
+            ['key' => 'commune', 'label' => 'Commune'],
+        ];
+
+        $options = (array) ($config->options ?? []);
+        $manualColumns = collect((array) ($options['manual_columns'] ?? []));
+        $existingKeys = $manualColumns
+            ->pluck('key')
+            ->merge(collect((array) ($config->columns ?? []))->map(fn (array $column): string => $this->tiersColumnKey($column)))
+            ->filter()
+            ->map(fn ($key): string => (string) $key)
+            ->all();
+
+        foreach ($requiredColumns as $column) {
+            if (in_array($column['key'], $existingKeys, true)) {
+                continue;
+            }
+
+            $manualColumns->push([
+                'key' => $column['key'],
+                'label' => $column['label'],
+                'format' => $column['key'] === 'code_postal' ? 'postal_code' : '',
+            ]);
+            $existingKeys[] = $column['key'];
+        }
+
+        $options['manual_columns'] = $manualColumns->values()->all();
+        $options['deleted_columns'] = collect((array) ($options['deleted_columns'] ?? []))
+            ->reject(fn ($key): bool => in_array((string) $key, collect($requiredColumns)->pluck('key')->all(), true))
+            ->values()
+            ->all();
+
+        $config->forceFill(['options' => $options])->save();
     }
 
     private function applyFuelSearch(Builder $query, string $search): void
@@ -468,19 +1130,33 @@ class TaskFuelController extends Controller
             return;
         }
 
-        $needle = '%'.$this->escapeLike(Str::lower($search)).'%';
+        $terms = collect(preg_split('/\s+/', Str::lower($search)) ?: [])
+            ->map(fn (string $term): string => trim($term))
+            ->filter()
+            ->unique()
+            ->values();
 
-        $query->where(function (Builder $searchQuery) use ($needle): void {
-            $searchQuery
-                ->whereRaw("LOWER(COALESCE(site, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(client_name, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(code_tiers, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(phone, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(postal_code, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(city, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(fuel_type, '')) LIKE ?", [$needle])
-                ->orWhereRaw("LOWER(COALESCE(comment, '')) LIKE ?", [$needle])
-                ->orWhereHas('createdBy', fn (Builder $userQuery) => $userQuery->whereRaw("LOWER(COALESCE(name, '')) LIKE ?", [$needle]));
+        if ($terms->isEmpty()) {
+            return;
+        }
+
+        $query->where(function (Builder $searchQuery) use ($terms): void {
+            $terms->each(function (string $term) use ($searchQuery): void {
+                $needle = '%'.$this->escapeLike($term).'%';
+
+                $searchQuery->where(function (Builder $termQuery) use ($needle): void {
+                    $termQuery
+                        ->whereRaw("LOWER(COALESCE(site, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(client_name, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(code_tiers, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(phone, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(postal_code, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(city, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(fuel_type, '')) LIKE ?", [$needle])
+                        ->orWhereRaw("LOWER(COALESCE(comment, '')) LIKE ?", [$needle])
+                        ->orWhereHas('createdBy', fn (Builder $userQuery) => $userQuery->whereRaw("LOWER(COALESCE(name, '')) LIKE ?", [$needle]));
+                });
+            });
         });
     }
 
@@ -533,6 +1209,12 @@ class TaskFuelController extends Controller
             $query->where('urgent', true);
         } elseif (($info['urgent'] ?? '') === 'no') {
             $query->where('urgent', false);
+        }
+
+        if (($info['delivered'] ?? '') === 'yes') {
+            $query->whereNotNull('delivered_at');
+        } elseif (($info['delivered'] ?? '') === 'no') {
+            $query->whereNull('delivered_at');
         }
     }
 
@@ -614,6 +1296,15 @@ class TaskFuelController extends Controller
             'volume' => (array) ($filters['volume'] ?? []),
             'comment' => (string) ($filters['comment'] ?? ''),
             'info' => (array) ($filters['info'] ?? []),
+        ];
+    }
+
+    private function defaultFuelFilters(): array
+    {
+        return [
+            'info' => [
+                'delivered' => 'no',
+            ],
         ];
     }
 
@@ -820,6 +1511,78 @@ class TaskFuelController extends Controller
         $sourceName = trim((string) ($column['source_name'] ?? ''));
 
         return $sourceName !== '' ? $sourceName : 'Colonne';
+    }
+
+    private function computeMonthlyStats(): array
+    {
+        $now = Carbon::now();
+
+        // Current month (M0)
+        $currentStart = $now->copy()->startOfMonth()->toDateString();
+        $currentEnd = $now->copy()->endOfMonth()->toDateString();
+
+        // Last completed month (M-1)
+        $lastMonthDate = $now->copy()->subMonthNoOverflow();
+        $lastStart = $lastMonthDate->copy()->startOfMonth()->toDateString();
+        $lastEnd = $lastMonthDate->copy()->endOfMonth()->toDateString();
+
+        // Last 3 completed months: M-3 to M-1
+        $threeStart = $now->copy()->subMonths(3)->startOfMonth()->toDateString();
+
+        // Last 6 completed months: M-6 to M-1
+        $sixStart = $now->copy()->subMonths(6)->startOfMonth()->toDateString();
+
+        // Prior 3 months: M-6 to M-4 (for trend comparison against the last 3 months)
+        $priorThreeEnd = $now->copy()->subMonths(4)->endOfMonth()->toDateString();
+
+        $currentDeliveries = TaskFuelDelivery::query()
+            ->whereBetween('delivery_date', [$currentStart, $currentEnd])
+            ->get(['fuel_type', 'volume_liters']);
+
+        $lastDeliveries = TaskFuelDelivery::query()
+            ->whereBetween('delivery_date', [$lastStart, $lastEnd])
+            ->get(['fuel_type', 'volume_liters']);
+
+        $threeMonthsDeliveries = TaskFuelDelivery::query()
+            ->whereBetween('delivery_date', [$threeStart, $lastEnd])
+            ->get(['fuel_type', 'volume_liters']);
+
+        $sixMonthsDeliveries = TaskFuelDelivery::query()
+            ->whereBetween('delivery_date', [$sixStart, $lastEnd])
+            ->get(['fuel_type', 'volume_liters']);
+
+        $priorThreeDeliveries = TaskFuelDelivery::query()
+            ->whereBetween('delivery_date', [$sixStart, $priorThreeEnd])
+            ->get(['fuel_type', 'volume_liters']);
+
+        return [
+            'current_month_label' => ucfirst($now->locale('fr')->isoFormat('MMMM YYYY')),
+            'last_month_label' => ucfirst($lastMonthDate->locale('fr')->isoFormat('MMMM YYYY')),
+            'current' => $this->aggregateMonthlyDeliveries($currentDeliveries),
+            'last' => $this->aggregateMonthlyDeliveries($lastDeliveries),
+            'three_months' => $this->aggregateMonthlyDeliveries($threeMonthsDeliveries),
+            'six_months' => $this->aggregateMonthlyDeliveries($sixMonthsDeliveries),
+            'prior_three_months' => $this->aggregateMonthlyDeliveries($priorThreeDeliveries),
+        ];
+    }
+
+    private function aggregateMonthlyDeliveries(\Illuminate\Support\Collection $deliveries): array
+    {
+        $byProduct = [];
+        $totalVolume = 0;
+
+        foreach ($deliveries as $d) {
+            $vol = (int) ($d->volume_liters ?? 0);
+            $totalVolume += $vol;
+            $type = (string) ($d->fuel_type ?: '(sans type)');
+            $byProduct[$type] = ($byProduct[$type] ?? 0) + $vol;
+        }
+
+        return [
+            'count' => $deliveries->count(),
+            'total_volume' => $totalVolume,
+            'by_product' => $byProduct,
+        ];
     }
 
     private function normalizeKey(string $value): string
