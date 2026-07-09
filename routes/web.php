@@ -19,6 +19,8 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SecurityProfileController;
 use App\Http\Controllers\DirectoryController;
 use App\Http\Controllers\EngraisController;
+use App\Http\Controllers\TaskFuelController;
+use App\Http\Controllers\TaskTiersController;
 use App\Http\Controllers\TasksDataController;
 use App\Http\Controllers\UserFileController;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -177,6 +179,102 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/tasks/data', [TasksDataController::class, 'index'])
         ->middleware('sector.access:task.data.view')
         ->name('task.data.index');
+
+    Route::get('/tasks/fuel', [TaskFuelController::class, 'index'])
+        ->middleware('sector.access:task.fuel.view')
+        ->name('task.fuel.index');
+    Route::post('/tasks/fuel', [TaskFuelController::class, 'store'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.store');
+    Route::patch('/tasks/fuel/{delivery}/point', [TaskFuelController::class, 'point'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.point');
+    Route::patch('/tasks/fuel/{delivery}', [TaskFuelController::class, 'update'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.update');
+    Route::delete('/tasks/fuel/{delivery}', [TaskFuelController::class, 'destroy'])
+        ->middleware('sector.access:task.fuel.delete')
+        ->name('task.fuel.destroy');
+    Route::get('/tasks/fuel/tiers-search', [TaskFuelController::class, 'tiersSearch'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.tiers-search');
+    Route::get('/tasks/fuel/new-clients', [TaskFuelController::class, 'newClients'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.new-clients');
+    Route::post('/tasks/fuel/new-clients', [TaskFuelController::class, 'storeNewClient'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.new-clients.store');
+    Route::patch('/tasks/fuel/new-clients/{newClient}/validate', [TaskFuelController::class, 'validateNewClient'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.new-clients.validate');
+    Route::post('/tasks/fuel/options', [TaskFuelController::class, 'storeOption'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.options.store');
+    Route::put('/tasks/fuel/options/{option}', [TaskFuelController::class, 'updateOption'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.options.update');
+    Route::delete('/tasks/fuel/options/{option}', [TaskFuelController::class, 'destroyOption'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.options.destroy');
+
+    Route::post('/tasks/fuel/recurrings', [TaskFuelController::class, 'storeRecurring'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.recurrings.store');
+    Route::put('/tasks/fuel/recurrings/{recurring}', [TaskFuelController::class, 'updateRecurring'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.recurrings.update');
+    Route::delete('/tasks/fuel/recurrings/{recurring}', [TaskFuelController::class, 'destroyRecurring'])
+        ->middleware('sector.access:task.fuel.delete')
+        ->name('task.fuel.recurrings.destroy');
+
+    Route::get('/tasks/tiers', [TaskTiersController::class, 'index'])
+        ->middleware('sector.access:task.tiers.view')
+        ->name('task.tiers.index');
+    Route::get('/tasks/tiers/records', [TaskTiersController::class, 'records'])
+        ->middleware('sector.access:task.tiers.view')
+        ->name('task.tiers.records');
+    Route::post('/tasks/tiers/records', [TaskTiersController::class, 'storeRecord'])
+        ->middleware('sector.access:task.tiers.update')
+        ->name('task.tiers.records.store');
+    Route::put('/tasks/tiers/records/{record}', [TaskTiersController::class, 'updateRecord'])
+        ->middleware('sector.access:task.tiers.update')
+        ->name('task.tiers.records.update');
+    Route::delete('/tasks/tiers/records/{record}', [TaskTiersController::class, 'destroyRecord'])
+        ->middleware('sector.access:task.tiers.update')
+        ->name('task.tiers.records.destroy');
+    Route::post('/tasks/tiers/columns', [TaskTiersController::class, 'storeColumn'])
+        ->middleware('sector.access:task.tiers.update')
+        ->name('task.tiers.columns.store');
+    Route::put('/tasks/tiers/columns/{columnKey}', [TaskTiersController::class, 'updateColumn'])
+        ->middleware('sector.access:task.tiers.update')
+        ->name('task.tiers.columns.update');
+    Route::delete('/tasks/tiers/columns/{columnKey}', [TaskTiersController::class, 'destroyColumn'])
+        ->middleware('sector.access:task.tiers.update')
+        ->name('task.tiers.columns.destroy');
+    Route::post('/tasks/tiers/preview-header', [TaskTiersController::class, 'previewHeader'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.preview-header');
+    Route::post('/tasks/tiers/import-config', [TaskTiersController::class, 'storeImportConfig'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.import-config.store');
+    Route::post('/tasks/tiers/import', [TaskTiersController::class, 'import'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.import');
+    Route::get('/tasks/tiers/import-history', [TaskTiersController::class, 'importHistory'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.import.history');
+    Route::get('/tasks/tiers/import/{importJob}/status', [TaskTiersController::class, 'importStatus'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.import.status');
+    Route::get('/tasks/tiers/import/{importJob}/report', [TaskTiersController::class, 'importReport'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.import.report');
+    Route::post('/tasks/tiers/import/{importJob}/resolve', [TaskTiersController::class, 'resolveImportError'])
+        ->middleware('sector.access:task.tiers.import')
+        ->name('task.tiers.import.resolve');
+    Route::delete('/tasks/tiers/data', [TaskTiersController::class, 'destroyData'])
+        ->middleware('sector.access:task.tiers.delete')
+        ->name('task.tiers.data.destroy');
 
     Route::get('/tasks/archive', [ArchiveController::class, 'index'])
         ->middleware('sector.access:task.archive.view')

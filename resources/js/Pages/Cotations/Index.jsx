@@ -25,13 +25,21 @@ import {
     Underline,
     X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 const BASE_CEREALS = [
     { code: 'ECO', name: 'Colza' },
     { code: 'EBM', name: 'Blé' },
     { code: 'EMA', name: 'Maïs' },
 ];
+
+const DEFAULT_CEREAL_TABLE_LABELS = {
+    free_text: 'Livraison',
+    maturity: 'Échéance',
+    matif: 'MATIF',
+    base: 'Base',
+    final_price: 'Prix final',
+};
 
 const COTATION_TABLE_CLASS = 'w-full table-fixed text-[12px] leading-normal sm:text-sm';
 const COTATION_HEADER_ROW_CLASS = 'text-xs font-black uppercase leading-4 tracking-[0.08em] text-[var(--app-muted)]';
@@ -43,12 +51,51 @@ const COTATION_ROW_LABEL_CLASS = 'text-xs font-black leading-4 sm:text-sm sm:lea
 const COTATION_HARVEST_TITLE_CLASS = 'border-b border-[var(--app-border)] bg-[#FACC51] px-3 py-2 text-[13px] font-black uppercase leading-4 tracking-[0.08em] text-[var(--color-black)]';
 const TRANSPORT_HEADER_LABEL_CLASS = 'text-sm font-black leading-5';
 const TRANSPORT_HEADER_INPUT_CLASS = 'text-sm font-black leading-5';
+const CUSTOM_MATURITY_SENTINEL = 'Option personnalisée';
 
-function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3', defaultOpen = false }) {
+function maturityShortLabel(value) {
+    const source = String(value || '').trim();
+    if (!source) return '';
+    if (source.toLowerCase() === CUSTOM_MATURITY_SENTINEL.toLowerCase()) return '';
+
+    const normalized = source
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+    const monthMap = {
+        janvier: 'janv',
+        fevrier: 'fev',
+        mars: 'mars',
+        avril: 'avr',
+        mai: 'mai',
+        juin: 'juin',
+        juillet: 'juil',
+        aout: 'aout',
+        septembre: 'sept',
+        octobre: 'oct',
+        novembre: 'nov',
+        decembre: 'dec',
+    };
+
+    return normalized
+        .replace(/\b(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\b/g, (match) => monthMap[match] || match)
+        .replace(/\s*[-/]\s*/g, ' - ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function customMaturityInputValue(value) {
+    const source = String(value || '').trim();
+
+    return source.toLowerCase() === CUSTOM_MATURITY_SENTINEL.toLowerCase() ? '' : source;
+}
+
+function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3', defaultOpen = false, compactMobile = false }) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
 
     return (
-        <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
+        <section className={`w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-sm ${compactMobile ? 'p-3 sm:p-4' : 'p-4'}`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 {titleEditor ? (
                     <div
@@ -380,6 +427,35 @@ function lineTypeFor(row) {
     return row?.line_type || (row?.market_identity_hash ? 'matif' : 'custom');
 }
 
+function resolveFinalPriceFromRows(rowsByKey, referenceKey, stack = [], resolved = new Map()) {
+    if (resolved.has(referenceKey)) return resolved.get(referenceKey);
+    if (!referenceKey || stack.includes(referenceKey) || !rowsByKey.has(referenceKey)) {
+        resolved.set(referenceKey, null);
+        return null;
+    }
+
+    const row = rowsByKey.get(referenceKey);
+    let matif = lineTypeFor(row) === 'matif'
+        ? parseDecimal(row.matif)
+        : parseDecimal(row.manual_matif ?? row.matif);
+    const sourceReference = String(row.final_price_reference_key || '').trim();
+
+    if (sourceReference) {
+        matif = resolveFinalPriceFromRows(rowsByKey, sourceReference, [...stack, referenceKey], resolved);
+    }
+
+    if (matif === null) {
+        resolved.set(referenceKey, null);
+        return null;
+    }
+
+    const margin = Math.abs(parseDecimal(row.margin) ?? 0);
+    const finalPrice = matif - margin;
+    resolved.set(referenceKey, finalPrice);
+
+    return finalPrice;
+}
+
 function transportDefaultGrid() {
     const defaultSection = {
         id: 'transport_1',
@@ -514,12 +590,24 @@ function normalizeFuelGrid(grid = {}) {
     };
 }
 
-function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, options = [] }) {
+function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, options = [], finalPriceOptions = [] }) {
     const draft = findManualDraft(form.data.manual_prices || [], row) || row;
     const lineType = lineTypeFor(draft);
     const isMatifLine = lineType === 'matif';
     const selectedOption = isMatifLine ? options.find((option) => option.identity_hash === draft.market_identity_hash) : null;
-    const matifValue = isMatifLine ? (selectedOption?.matif ?? draft.matif ?? row.matif ?? '') : (draft.manual_matif ?? row.manual_matif ?? '');
+    const finalPriceReferenceOptions = finalPriceOptions.filter((option) => option.product_code !== (draft.product_code || row.product_code));
+    const finalPriceReferenceKey = !isMatifLine ? String(draft.final_price_reference_key ?? row.final_price_reference_key ?? '').trim() : '';
+    const selectedFinalPriceReference = finalPriceReferenceKey
+        ? finalPriceReferenceOptions.find((option) => option.key === finalPriceReferenceKey)
+        : null;
+    const linkedMaturityLabel = selectedFinalPriceReference?.maturity_label
+        || draft.maturity_label
+        || row.maturity_label
+        || row.label
+        || '';
+    const matifValue = isMatifLine
+        ? (selectedOption?.matif ?? draft.matif ?? row.matif ?? '')
+        : (selectedFinalPriceReference?.final_price ?? draft.manual_matif ?? row.manual_matif ?? '');
     const rawMarginValue = draft.margin ?? row.margin ?? '';
     const marginValue = rawMarginValue === '' || rawMarginValue === null || rawMarginValue === undefined
         ? ''
@@ -532,16 +620,28 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
         <tr className="border-t border-[var(--app-border)]">
             <td className={COTATION_BODY_CELL_CLASS}>
                 {canManage ? (
-                    <div className="grid gap-1.5">
-                        <input
-                            type="text"
-                            value={draft.display_label ?? draft.label ?? draft.maturity_label ?? ''}
-                            onChange={(event) => setManualPrice(row, {
-                                display_label: event.target.value,
-                            })}
-                            placeholder="Nom personnalisé"
-                            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
-                        />
+                    <input
+                        type="text"
+                        value={draft.display_label ?? ''}
+                        onChange={(event) => setManualPrice(row, {
+                            display_label: event.target.value,
+                        })}
+                        placeholder="Texte libre"
+                        className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
+                    />
+                ) : (
+                    <div className={`${COTATION_ROW_LABEL_CLASS} break-words [overflow-wrap:anywhere]`}>
+                        {row.display_label || '-'}
+                    </div>
+                )}
+            </td>
+            <td className={COTATION_BODY_CELL_CLASS}>
+                {canManage && !isMatifLine && finalPriceReferenceKey ? (
+                    <div className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-1.5 text-xs font-bold text-[var(--app-text)] sm:text-sm">
+                        {maturityShortLabel(linkedMaturityLabel)}
+                    </div>
+                ) : canManage ? (
+                    <div className="grid gap-1">
                         <select
                             value={isMatifLine ? draft.market_identity_hash || '' : 'custom'}
                             onChange={(event) => {
@@ -555,16 +655,18 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                     maturity_year: option.maturity_year ?? row.harvest_year ?? '',
                                     harvest_year: option.harvest_year ?? row.harvest_year ?? '',
                                     manual_matif: '',
+                                    final_price_reference_key: '',
                                     matif: option.matif,
                                     has_euronext: true,
                                 } : {
                                     line_type: 'custom',
                                     market_identity_hash: '',
                                     contract_code: '',
-                                    maturity_label: draft.display_label || draft.maturity_label || '',
+                                    maturity_label: '',
                                     maturity_month: '',
                                     maturity_year: draft.maturity_year || row.harvest_year || '',
                                     manual_matif: draft.manual_matif || '',
+                                    final_price_reference_key: draft.final_price_reference_key || '',
                                     matif: '',
                                     has_euronext: false,
                                 });
@@ -578,26 +680,63 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                 </option>
                             ))}
                         </select>
+                        {!isMatifLine ? (
+                            <input
+                                type="text"
+                                value={customMaturityInputValue(draft.maturity_label)}
+                                onChange={(event) => setManualPrice(row, {
+                                    maturity_label: event.target.value,
+                                })}
+                                placeholder="Libellé d'échéance"
+                                className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
+                            />
+                        ) : null}
                     </div>
                 ) : (
-                    <>
-                        <div className={`${COTATION_ROW_LABEL_CLASS} break-words [overflow-wrap:anywhere]`}>{row.display_label || row.label || row.maturity_label || 'Échéance'}</div>
-                    </>
+                    <div className={`${COTATION_ROW_LABEL_CLASS} break-words [overflow-wrap:anywhere]`}>
+                        {maturityShortLabel(row.maturity_label || row.label)}
+                    </div>
                 )}
-                {!isMatifLine && canManage ? (
-                    <div className="mt-1 text-[9px] font-black uppercase tracking-[0.04em] text-[var(--app-muted)] sm:text-[10px]">Manuel</div>
-                ) : null}
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage && !isMatifLine ? (
-                    <input
-                        type="number"
-                        step="0.0001"
-                        min="0"
-                        value={matifValue}
-                        onChange={(event) => setManualPrice(row, 'manual_matif', event.target.value)}
-                        className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
-                    />
+                    <div className="grid gap-1">
+                        <input
+                            type="number"
+                            step="0.0001"
+                            min="0"
+                            value={matifValue}
+                            disabled={Boolean(finalPriceReferenceKey)}
+                            onChange={(event) => setManualPrice(row, {
+                                manual_matif: event.target.value,
+                                final_price_reference_key: '',
+                            })}
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center disabled:bg-[var(--app-surface-soft)] disabled:text-[var(--app-muted)] ${COTATION_VALUE_CLASS}`}
+                        />
+                        <select
+                            value={finalPriceReferenceKey}
+                            onChange={(event) => {
+                                const option = finalPriceReferenceOptions.find((item) => item.key === event.target.value);
+                                setManualPrice(row, option ? {
+                                    final_price_reference_key: option.key,
+                                    manual_matif: '',
+                                    maturity_label: customMaturityInputValue(option.maturity_label || option.label || ''),
+                                    maturity_month: option.maturity_month ?? '',
+                                    maturity_year: option.maturity_year ?? draft.maturity_year ?? row.harvest_year ?? '',
+                                } : {
+                                    final_price_reference_key: '',
+                                });
+                            }}
+                            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1 text-[10px] font-semibold"
+                        >
+                            <option value="">Prix final existant</option>
+                            {finalPriceReferenceOptions.map((option) => (
+                                <option key={option.key} value={option.key}>
+                                    {option.label} - {formatPrice(option.final_price)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 ) : (
                     <span className={COTATION_VALUE_CLASS}>{formatPrice(matifValue)}</span>
                 )}
@@ -621,7 +760,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                 )}
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-right`}>
-                <span className={COTATION_FINAL_VALUE_CLASS}>{formatPrice(finalPrice)}</span>
+                <span className={COTATION_FINAL_VALUE_CLASS}>{formatRoundedPrice(finalPrice)}</span>
             </td>
             {canManage ? (
                 <td className={`${COTATION_BODY_CELL_CLASS} text-right`}>
@@ -639,7 +778,20 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
     );
 }
 
-function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManualRow, deleteManualRow, options = [] }) {
+function HeaderLabel({ value, fallback, align = 'left', canManage, onChange }) {
+    if (!canManage) return value || fallback;
+
+    return (
+        <input
+            type="text"
+            value={value || fallback}
+            onChange={(event) => onChange(event.target.value)}
+            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1 text-xs font-black uppercase tracking-[0.04em] text-[var(--app-text)] ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}`}
+        />
+    );
+}
+
+function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManualRow, deleteManualRow, options = [], finalPriceOptions = [], tableLabels = DEFAULT_CEREAL_TABLE_LABELS, setTableLabel }) {
     const deletedIds = form.data.deleted_manual_price_ids || [];
     const persistedRows = (harvest?.rows || []).filter((row) => !deletedIds.includes(Number(row.manual_id)));
     const localRows = (form.data.manual_prices || []).filter((row) => (
@@ -660,18 +812,30 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                 <div className="w-full max-w-full overflow-hidden">
                     <table className={COTATION_TABLE_CLASS}>
                         <colgroup>
-                            <col className={canManage ? 'w-[31%]' : 'w-[34%]'} />
-                            <col className={canManage ? 'w-[21%]' : 'w-[23%]'} />
-                            <col className={canManage ? 'w-[17%]' : 'w-[18%]'} />
-                            <col className={canManage ? 'w-[23%]' : 'w-[25%]'} />
-                            {canManage ? <col className="w-[8%]" /> : null}
+                            <col className={canManage ? 'w-[24%]' : 'w-[24%]'} />
+                            <col className={canManage ? 'w-[24%]' : 'w-[22%]'} />
+                            <col className={canManage ? 'w-[18%]' : 'w-[20%]'} />
+                            <col className={canManage ? 'w-[14%]' : 'w-[16%]'} />
+                            <col className={canManage ? 'w-[14%]' : 'w-[18%]'} />
+                            {canManage ? <col className="w-[6%]" /> : null}
                         </colgroup>
                         <thead>
                             <tr className={COTATION_HEADER_ROW_CLASS}>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-left`}>Échéance</th>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>Matif</th>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>Base</th>
-                                <th className={`${COTATION_HEADER_CELL_CLASS} text-right`}>Prix final</th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-left`}>
+                                    <HeaderLabel value={tableLabels.free_text} fallback={DEFAULT_CEREAL_TABLE_LABELS.free_text} canManage={canManage} onChange={(value) => setTableLabel?.('free_text', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-left`}>
+                                    <HeaderLabel value={tableLabels.maturity} fallback={DEFAULT_CEREAL_TABLE_LABELS.maturity} canManage={canManage} onChange={(value) => setTableLabel?.('maturity', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>
+                                    <HeaderLabel value={tableLabels.matif} fallback={DEFAULT_CEREAL_TABLE_LABELS.matif} align="center" canManage={canManage} onChange={(value) => setTableLabel?.('matif', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>
+                                    <HeaderLabel value={tableLabels.base} fallback={DEFAULT_CEREAL_TABLE_LABELS.base} align="center" canManage={canManage} onChange={(value) => setTableLabel?.('base', value)} />
+                                </th>
+                                <th className={`${COTATION_HEADER_CELL_CLASS} text-right`}>
+                                    <HeaderLabel value={tableLabels.final_price} fallback={DEFAULT_CEREAL_TABLE_LABELS.final_price} align="right" canManage={canManage} onChange={(value) => setTableLabel?.('final_price', value)} />
+                                </th>
                                 {canManage ? <th className={`${COTATION_HEADER_CELL_CLASS} text-right`} /> : null}
                             </tr>
                         </thead>
@@ -685,6 +849,7 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                                     setManualPrice={setManualPrice}
                                     deleteManualRow={deleteManualRow}
                                     options={options}
+                                    finalPriceOptions={finalPriceOptions}
                                 />
                             ))}
                         </tbody>
@@ -708,20 +873,32 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
     );
 }
 
-function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, dragHandle = null, defaultOpen = false }) {
+function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, setCerealLabel, setCerealTableLabel, cerealLabels = {}, tableLabels = DEFAULT_CEREAL_TABLE_LABELS, finalPriceOptions = [], dragHandle = null, defaultOpen = false }) {
     const leftHarvest = group?.harvests?.left || {};
     const rightHarvest = group?.harvests?.right || {};
     const leftOptions = optionGroup?.harvests?.left?.rows || [];
     const rightOptions = optionGroup?.harvests?.right?.rows || [];
+    const baseCereal = BASE_CEREALS.find((cereal) => cereal.code === group?.code);
     const canEditCustomCereal = Boolean(canManage && customCereal);
-    const titleEditor = canEditCustomCereal ? (
-        <input
-            type="text"
-            value={customCereal.name ?? ''}
-            onChange={(event) => setCustomCereal(customCereal, 'name', event.target.value)}
-            placeholder="Nom personnalisé"
-            className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-xl font-black uppercase tracking-[0.04em] text-[var(--app-text)] sm:max-w-[28rem]"
-        />
+    const canEditCerealTitle = Boolean(canManage && (customCereal || baseCereal));
+    const titleEditor = canEditCerealTitle ? (
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+                type="text"
+                value={customCereal ? (customCereal.name ?? '') : (cerealLabels[group.code] ?? group.name ?? '')}
+                onChange={(event) => {
+                    if (customCereal) setCustomCereal(customCereal, 'name', event.target.value);
+                    else setCerealLabel(group.code, event.target.value);
+                }}
+                placeholder="Nom personnalisé"
+                className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-xl font-black uppercase tracking-[0.04em] text-[var(--app-text)] sm:max-w-[28rem]"
+            />
+            {baseCereal ? (
+                <span className="shrink-0 text-xs font-semibold normal-case tracking-normal text-[var(--app-muted)]">
+                    Céréale MATIF d'origine : {baseCereal.name}
+                </span>
+            ) : null}
+        </div>
     ) : null;
     const actions = canEditCustomCereal ? (
         <select
@@ -743,10 +920,10 @@ function CerealCard({ group, canManage, form, setManualPrice, addManualRow, dele
     ) : null;
 
     return (
-        <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3" defaultOpen={defaultOpen}>
-            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
-                <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} />
-                <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} />
+        <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3" defaultOpen={defaultOpen} compactMobile>
+            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-2 sm:gap-3 xl:grid-cols-2">
+                <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} finalPriceOptions={finalPriceOptions} tableLabels={tableLabels} setTableLabel={(key, value) => setCerealTableLabel(group.code, key, value)} />
+                <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} finalPriceOptions={finalPriceOptions} tableLabels={tableLabels} setTableLabel={(key, value) => setCerealTableLabel(group.code, key, value)} />
             </div>
         </CollapsibleSection>
     );
@@ -812,6 +989,29 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
     const firstColumnLabel = String(grid.first_column_label || '').trim() || 'TRANSPORT';
     const optionsByKey = Object.fromEntries(finalPriceOptions.map((option) => [option.key, option]));
     const cellKey = (rowId, columnId) => `${rowId}__${columnId}`;
+    const renderCompactTransportLabel = (value, fallback) => {
+        const label = String(value || fallback || '').trim();
+        if (!label) return fallback;
+
+        const greaterThanMatch = label.match(/^(.*?)\s+(>.*)$/);
+        const parts = greaterThanMatch
+            ? [...greaterThanMatch[1].split(/\s+/).filter(Boolean), greaterThanMatch[2]]
+            : label.split(/\s+/).filter(Boolean);
+
+        return (
+            <>
+                <span className="hidden sm:inline">{label}</span>
+                <span className="inline sm:hidden">
+                    {parts.map((part, index) => (
+                        <Fragment key={`${part}-${index}`}>
+                            {index > 0 ? <br /> : null}
+                            {part}
+                        </Fragment>
+                    ))}
+                </span>
+            </>
+        );
+    };
     const setGridField = (field, value) => setTransportSection({
         ...grid,
         [field]: value,
@@ -885,11 +1085,16 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                 </div>
             ) : null}
 
-            <div className="overflow-x-auto">
-                <table className={`${COTATION_TABLE_CLASS} min-w-full border-separate border-spacing-0`}>
+            <div
+                className="w-full max-w-full overflow-x-auto overscroll-x-contain"
+                style={{
+                    '--transport-first-col': canManage ? '8rem' : '7rem',
+                }}
+            >
+                <table className={`${COTATION_TABLE_CLASS.replace('table-fixed', 'table-auto sm:table-fixed')} min-w-max border-separate border-spacing-0 sm:min-w-full`}>
                     <thead>
                         <tr className={COTATION_HEADER_ROW_CLASS}>
-                            <th className={`sticky left-0 z-[1] rounded-tl-xl border border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-left text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
+                            <th className={`sticky left-0 z-30 w-[var(--transport-first-col)] min-w-[var(--transport-first-col)] max-w-[var(--transport-first-col)] rounded-tl-xl border border-[var(--app-border)] bg-[#FACC51] shadow-[2px_0_0_var(--app-border)] sm:w-auto sm:min-w-0 sm:max-w-none ${COTATION_HEADER_CELL_CLASS} whitespace-nowrap text-left text-[var(--color-black)] ${TRANSPORT_HEADER_LABEL_CLASS}`}>
                                 {canManage ? (
                                     <input
                                         type="text"
@@ -905,7 +1110,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                             {columns.map((column, index) => (
                                 <th
                                     key={column.id}
-                                    className={`min-w-[11rem] border-y border-r border-[var(--app-border)] bg-[#FACC51] ${COTATION_HEADER_CELL_CLASS} text-center text-[var(--color-black)] ${index === columns.length - 1 ? 'rounded-tr-xl' : ''}`}
+                                    className={`${canManage ? 'min-w-[13rem]' : 'min-w-[4.75rem]'} border-y border-r border-[var(--app-border)] bg-[#FACC51] sm:min-w-[11rem] ${COTATION_HEADER_CELL_CLASS} whitespace-nowrap text-center text-[var(--color-black)] ${index === columns.length - 1 ? 'rounded-tr-xl' : ''}`}
                                 >
                                     {canManage ? (
                                         <div className="grid gap-1">
@@ -949,7 +1154,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className={TRANSPORT_HEADER_LABEL_CLASS}>{column.label || `Colonne ${index + 1}`}</div>
+                                        <div className={`${TRANSPORT_HEADER_LABEL_CLASS} whitespace-nowrap`}>{column.label || `Colonne ${index + 1}`}</div>
                                     )}
                                 </th>
                             ))}
@@ -958,7 +1163,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                     <tbody>
                         {rows.map((row, rowIndex) => (
                             <tr key={row.id}>
-                                <th className={`sticky left-0 z-[1] min-w-[10rem] border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] ${COTATION_BODY_CELL_CLASS} text-left font-black ${rowIndex === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                                <th className={`sticky left-0 z-20 w-[var(--transport-first-col)] min-w-[var(--transport-first-col)] max-w-[var(--transport-first-col)] border-x border-b border-[var(--app-border)] bg-[var(--app-surface-soft)] shadow-[2px_0_0_var(--app-border)] sm:w-auto sm:min-w-[10rem] sm:max-w-none ${COTATION_BODY_CELL_CLASS} whitespace-normal break-words text-left font-black ${rowIndex === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
                                     {canManage ? (
                                         <div className="grid gap-1">
                                             <input
@@ -989,7 +1194,9 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className={TRANSPORT_HEADER_LABEL_CLASS}>{row.label || `Ligne ${rowIndex + 1}`}</div>
+                                        <div className={`${TRANSPORT_HEADER_LABEL_CLASS} whitespace-normal break-words`}>
+                                            {renderCompactTransportLabel(row.label, `Ligne ${rowIndex + 1}`)}
+                                        </div>
                                     )}
                                 </th>
                                 {columns.map((column, columnIndex) => {
@@ -1002,7 +1209,7 @@ function TransportGridTable({ grid, canManage, finalPriceOptions, setTransportSe
                                     return (
                                         <td
                                             key={`${row.id}-${column.id}`}
-                                            className={`border-b border-r border-[var(--app-border)] ${COTATION_BODY_CELL_CLASS} text-center ${rowIndex === rows.length - 1 && columnIndex === columns.length - 1 ? 'rounded-br-xl' : ''}`}
+                                            className={`min-w-[4.75rem] border-b border-r border-[var(--app-border)] sm:min-w-0 ${COTATION_BODY_CELL_CLASS} whitespace-nowrap text-center ${rowIndex === rows.length - 1 && columnIndex === columns.length - 1 ? 'rounded-br-xl' : ''}`}
                                         >
                                             {canManage ? (
                                                 <div className="grid gap-1">
@@ -1107,6 +1314,7 @@ function FuelGridSection({
     grid,
     canManage,
     canEdit = false,
+    defaultOpen = false,
     setFuelGrid,
     onStartEditing,
     onCancelEditing,
@@ -1587,7 +1795,6 @@ function FuelGridSection({
             {canExportPdf ? (
                 <a
                     href={exportPdfUrl}
-                    download
                     className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
                 >
                     <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
@@ -1598,7 +1805,7 @@ function FuelGridSection({
     );
 
     return (
-        <CollapsibleSection title="Prix carburant" icon={Fuel} actions={fuelActions}>
+        <CollapsibleSection title="Prix carburant" icon={Fuel} actions={fuelActions} defaultOpen={defaultOpen}>
             {isViewingHistory ? (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--brand-yellow-dark)] bg-[var(--brand-yellow-light)] px-3 py-2 text-xs font-black uppercase tracking-[0.06em] text-[var(--color-black)]">
                     <History className="h-4 w-4" strokeWidth={2.3} />
@@ -1697,13 +1904,14 @@ function flattenMarketRows(groups = []) {
             product_name: row.product_name || group.name,
             product_sort: row.product_sort || group.sort || 999,
             contract_code: row.code || '',
-            display_label: row.display_label ?? row.label ?? '',
+            display_label: row.display_label ?? '',
             maturity_label: row.maturity_label || row.label || '',
             maturity_month: row.maturity_month ?? '',
             maturity_year: row.maturity_year ?? row.harvest_year ?? '',
             harvest_year: row.harvest_year ?? group?.harvests?.[bucket]?.year ?? '',
             matif: row.matif ?? '',
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
+            final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
             sort_order: row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
@@ -1723,6 +1931,30 @@ function flattenCustomCereals(rows = []) {
     }));
 }
 
+function normalizeCerealLabels(labels = {}) {
+    return Object.fromEntries(BASE_CEREALS.map((cereal) => [
+        cereal.code,
+        String(labels?.[cereal.code] ?? cereal.name),
+    ]));
+}
+
+function normalizeCerealTableLabelSet(labels = {}) {
+    return {
+        ...DEFAULT_CEREAL_TABLE_LABELS,
+        ...(labels || {}),
+    };
+}
+
+function normalizeCerealTableLabels(labels = {}) {
+    return Object.fromEntries(Object.entries(labels || {})
+        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))
+        .map(([code, value]) => [code, normalizeCerealTableLabelSet(value)]));
+}
+
+function cerealTableLabelsFor(labels = {}, code = '') {
+    return normalizeCerealTableLabelSet(labels?.[code] || {});
+}
+
 function normalizeCerealOrder(order = [], groups = []) {
     const groupCodes = (Array.isArray(groups) ? groups : [])
         .map((group) => group?.code)
@@ -1739,6 +1971,8 @@ export default function CotationsIndex({
     transportGrid = transportDefaultGrid(),
     fuelGrid = fuelDefaultGrid(),
     marketData: initialMarketData = { groups: [], fetched_at: null },
+    cerealLabels = {},
+    cerealTableLabels = {},
     permissions = {},
     routes = {},
 }) {
@@ -1755,6 +1989,14 @@ export default function CotationsIndex({
     const canManage = Boolean(permissions?.can_manage);
     const canManageFuel = Boolean(permissions?.can_manage_fuel);
     const canViewFuelHistory = Boolean(permissions?.can_view_fuel_history);
+    const [targetCerealCode] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return new URLSearchParams(window.location.search).get('cereal') || '';
+    });
+    const [targetSection] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return new URLSearchParams(window.location.search).get('section') || '';
+    });
     const [fuelHistoryVersions, setFuelHistoryVersions] = useState([]);
     const [fuelHistoryLoading, setFuelHistoryLoading] = useState(false);
     const [fuelHistoryError, setFuelHistoryError] = useState('');
@@ -1764,6 +2006,8 @@ export default function CotationsIndex({
         manual_prices: flattenMarketRows(initialMarketData?.groups || []),
         custom_cereals: flattenCustomCereals(initialMarketData?.custom_cereals || []),
         cereal_order: normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []),
+        cereal_labels: normalizeCerealLabels(initialMarketData?.cereal_labels || cerealLabels),
+        cereal_table_labels: normalizeCerealTableLabels(initialMarketData?.cereal_table_labels || cerealTableLabels),
         cereal_info_html: initialMarketData?.cereal_info_html || '',
         transport_grid: normalizeTransportGrid(transportGrid),
         fuel_grid: normalizeFuelGrid(fuelGrid),
@@ -1780,6 +2024,8 @@ export default function CotationsIndex({
             form.setData('manual_prices', flattenMarketRows(initialMarketData?.groups || []));
             form.setData('custom_cereals', flattenCustomCereals(initialMarketData?.custom_cereals || []));
             form.setData('cereal_order', normalizeCerealOrder(initialMarketData?.cereal_order || [], initialMarketData?.groups || []));
+            form.setData('cereal_labels', normalizeCerealLabels(initialMarketData?.cereal_labels || cerealLabels));
+            form.setData('cereal_table_labels', normalizeCerealTableLabels(initialMarketData?.cereal_table_labels || cerealTableLabels));
             form.setData('cereal_info_html', initialMarketData?.cereal_info_html || '');
         }
     }, [initialMarketData]);
@@ -1803,6 +2049,34 @@ export default function CotationsIndex({
 
         return () => window.clearTimeout(timeout);
     }, [lastAddedCerealCode]);
+
+    useEffect(() => {
+        if (!targetCerealCode || loading) return undefined;
+
+        const timeout = window.setTimeout(() => {
+            Array.from(document.querySelectorAll('[data-cereal-code]'))
+                .find((element) => element.getAttribute('data-cereal-code') === targetCerealCode)
+                ?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                });
+        }, 80);
+
+        return () => window.clearTimeout(timeout);
+    }, [targetCerealCode, loading, marketData]);
+
+    useEffect(() => {
+        if (targetSection !== 'fuel') return undefined;
+
+        const timeout = window.setTimeout(() => {
+            document.querySelector('[data-cotation-section="fuel"]')?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            });
+        }, 80);
+
+        return () => window.clearTimeout(timeout);
+    }, [targetSection]);
 
     const fetchMarketData = async ({ initial = false } = {}) => {
         if (!canViewCereals || !routes.market_data) return;
@@ -1858,13 +2132,14 @@ export default function CotationsIndex({
             product_name: row.product_name,
             product_sort: row.product_sort || 999,
             contract_code: row.code || row.contract_code || '',
-            display_label: row.display_label || row.label || '',
+            display_label: row.display_label ?? '',
             maturity_label: row.maturity_label || row.label || '',
             maturity_month: row.maturity_month ?? '',
             maturity_year: row.maturity_year ?? row.harvest_year ?? '',
             harvest_year: row.harvest_year ?? '',
             matif: row.matif ?? '',
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
+            final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
             sort_order: row.sort_order ?? row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
@@ -1905,6 +2180,7 @@ export default function CotationsIndex({
                 harvest_year: harvest.year,
                 matif: '',
                 manual_matif: '',
+                final_price_reference_key: '',
                 margin: '',
                 sort_order: form.data.manual_prices?.length || 0,
                 has_euronext: false,
@@ -1922,6 +2198,23 @@ export default function CotationsIndex({
         form.setData('custom_cereals', (form.data.custom_cereals || []).map((item) => (
             (item.form_key || item.code || item.id) === key ? { ...item, [field]: value } : item
         )));
+    };
+
+    const setCerealLabel = (code, value) => {
+        form.setData('cereal_labels', {
+            ...(form.data.cereal_labels || {}),
+            [code]: value,
+        });
+    };
+
+    const setCerealTableLabel = (code, key, value) => {
+        form.setData('cereal_table_labels', {
+            ...(form.data.cereal_table_labels || {}),
+            [code]: {
+                ...cerealTableLabelsFor(form.data.cereal_table_labels || {}, code),
+                [key]: value,
+            },
+        });
     };
 
     const addCustomCereal = () => {
@@ -1973,6 +2266,8 @@ export default function CotationsIndex({
             manual_prices: flattenMarketRows(data?.groups || []),
             custom_cereals: flattenCustomCereals(data?.custom_cereals || []),
             cereal_order: normalizeCerealOrder(data?.cereal_order || [], data?.groups || []),
+            cereal_labels: normalizeCerealLabels(data?.cereal_labels || cerealLabels),
+            cereal_table_labels: normalizeCerealTableLabels(data?.cereal_table_labels || cerealTableLabels),
             cereal_info_html: data?.cereal_info_html || '',
             transport_grid: normalizeTransportGrid(transportGrid),
             fuel_grid: normalizeFuelGrid(fuelGrid),
@@ -2110,7 +2405,10 @@ export default function CotationsIndex({
                     name: customCereal.name || group.name,
                     base_product_code: customCereal.base_product_code || group.base_product_code,
                     sort: customCereal.sort_order || group.sort,
-                } : group;
+                } : {
+                    ...group,
+                    name: form.data.cereal_labels?.[group.code] || group.name,
+                };
             });
             const existingCodes = new Set(mergedGroups.map((group) => group.code));
             const customGroups = (form.data.custom_cereals || [])
@@ -2137,7 +2435,7 @@ export default function CotationsIndex({
             (group?.harvests?.left?.rows || []).length > 0
             || (group?.harvests?.right?.rows || []).length > 0
         ));
-    }, [marketData, isEditing, form.data.custom_cereals, form.data.cereal_order]);
+    }, [marketData, isEditing, form.data.custom_cereals, form.data.cereal_order, form.data.cereal_labels]);
     const optionGroups = useMemo(() => marketData?.options || [], [marketData]);
     const optionGroupsByCode = useMemo(() => {
         const byCode = Object.fromEntries(optionGroups.map((group) => [group.code, group]));
@@ -2159,24 +2457,27 @@ export default function CotationsIndex({
             rowsByKey.set(transportReferenceKey(row), row);
         });
 
+        const resolved = new Map();
+
         return Array.from(rowsByKey.values())
             .map((row) => {
-                const matif = lineTypeFor(row) === 'matif'
-                    ? parseDecimal(row.matif)
-                    : parseDecimal(row.manual_matif ?? row.matif);
-                if (matif === null) return null;
+                const key = transportReferenceKey(row);
+                const finalPrice = resolveFinalPriceFromRows(rowsByKey, key, [], resolved);
+                if (finalPrice === null) return null;
 
-                const base = Math.abs(parseDecimal(row.margin) ?? 0);
-                const finalPrice = matif - base;
                 const labelParts = [
                     row.product_name || row.product_code || 'Céréale',
                     row.harvest_year ? `Récolte ${row.harvest_year}` : '',
-                    row.display_label || row.label || row.maturity_label || 'Échéance',
+                    customMaturityInputValue(row.maturity_label || row.label || '') || 'Échéance',
                 ].filter(Boolean);
 
                 return {
-                    key: transportReferenceKey(row),
-                    label: labelParts.join(' - '),
+                    key,
+                    product_code: row.product_code,
+                    label: labelParts.join(' — '),
+                    maturity_label: customMaturityInputValue(row.maturity_label || row.label || ''),
+                    maturity_month: row.maturity_month ?? '',
+                    maturity_year: row.maturity_year ?? row.harvest_year ?? '',
                     final_price: finalPrice,
                 };
             })
@@ -2209,7 +2510,6 @@ export default function CotationsIndex({
                 {canManage && routes.export_pdf ? (
                     <a
                         href={routes.export_pdf}
-                        download
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
                     >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
@@ -2268,7 +2568,7 @@ export default function CotationsIndex({
                                 Chargement des cours...
                             </div>
                         ) : cerealGroups.length ? (
-                            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-4">
+                            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-3 sm:gap-4">
                                 {isEditing ? (
                                     <button
                                         type="button"
@@ -2299,7 +2599,12 @@ export default function CotationsIndex({
                                             optionGroup={optionGroupsByCode[group.code]}
                                             customCereal={(form.data.custom_cereals || []).find((cereal) => cereal.code === group.code) || null}
                                             setCustomCereal={setCustomCereal}
-                                            defaultOpen={Boolean(group.code) && group.code === lastAddedCerealCode}
+                                            setCerealLabel={setCerealLabel}
+                                            setCerealTableLabel={setCerealTableLabel}
+                                            cerealLabels={form.data.cereal_labels || {}}
+                                            tableLabels={cerealTableLabelsFor(form.data.cereal_table_labels || {}, group.code)}
+                                            finalPriceOptions={finalPriceOptions}
+                                            defaultOpen={Boolean(group.code) && (group.code === lastAddedCerealCode || group.code === targetCerealCode)}
                                             dragHandle={isEditing ? (
                                                 <button
                                                     type="button"
@@ -2343,29 +2648,32 @@ export default function CotationsIndex({
                 ) : null}
 
                 {canViewFuel ? (
-                    <FuelGridSection
-                        grid={displayedFuelGrid}
-                        canManage={isFuelEditing && !isViewingFuelHistory}
-                        canEdit={canManageFuel && !isEditing && !isViewingFuelHistory}
-                        setFuelGrid={setFuelGrid}
-                        onStartEditing={startFuelEditing}
-                        onCancelEditing={cancelFuelEditing}
-                        onSave={saveFuelSettings}
-                        processing={form.processing}
-                        canViewHistory={canViewFuelHistory}
-                        isViewingHistory={isViewingFuelHistory}
-                        historyVersion={activeFuelHistoryVersion}
-                        historyHasOlder={fuelHistoryIndex !== null && fuelHistoryIndex < fuelHistoryVersions.length - 1}
-                        historyHasNewer={fuelHistoryIndex !== null}
-                        historyLoading={fuelHistoryLoading}
-                        historyError={fuelHistoryError}
-                        onOpenHistory={openFuelHistory}
-                        onCloseHistory={closeFuelHistory}
-                        onShowOlderHistory={showOlderFuelVersion}
-                        onShowNewerHistory={showNewerFuelVersion}
-                        canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
-                        exportPdfUrl={routes.export_fuel_pdf}
-                    />
+                    <div data-cotation-section="fuel">
+                        <FuelGridSection
+                            grid={displayedFuelGrid}
+                            canManage={isFuelEditing && !isViewingFuelHistory}
+                            canEdit={canManageFuel && !isEditing && !isViewingFuelHistory}
+                            defaultOpen={targetSection === 'fuel'}
+                            setFuelGrid={setFuelGrid}
+                            onStartEditing={startFuelEditing}
+                            onCancelEditing={cancelFuelEditing}
+                            onSave={saveFuelSettings}
+                            processing={form.processing}
+                            canViewHistory={canViewFuelHistory}
+                            isViewingHistory={isViewingFuelHistory}
+                            historyVersion={activeFuelHistoryVersion}
+                            historyHasOlder={fuelHistoryIndex !== null && fuelHistoryIndex < fuelHistoryVersions.length - 1}
+                            historyHasNewer={fuelHistoryIndex !== null}
+                            historyLoading={fuelHistoryLoading}
+                            historyError={fuelHistoryError}
+                            onOpenHistory={openFuelHistory}
+                            onCloseHistory={closeFuelHistory}
+                            onShowOlderHistory={showOlderFuelVersion}
+                            onShowNewerHistory={showNewerFuelVersion}
+                            canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
+                            exportPdfUrl={routes.export_fuel_pdf}
+                        />
+                    </div>
                 ) : null}
 
                 {canManage && isEditing ? (

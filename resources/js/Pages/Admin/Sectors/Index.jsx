@@ -14,6 +14,8 @@ const ABILITY_GROUP_ORDER = [
     'engrais',
     'ldt',
     'task.data',
+    'task.fuel',
+    'task.tiers',
     'task.formatting',
     'heures',
     'admin.users',
@@ -31,6 +33,8 @@ const ABILITY_GROUP_LABELS = {
     engrais: 'Engrais',
     ldt: 'Livre du Travail',
     'task.data': 'Tâches - Données',
+    'task.fuel': 'Tâches - Carburant',
+    'task.tiers': 'Tâches - Tiers',
     'task.formatting': 'Mise en forme',
     heures: 'Heures',
     'admin.users': 'Administration - Utilisateurs',
@@ -44,6 +48,8 @@ const ABILITY_GROUP_LABELS = {
 function abilityGroupKey(ability) {
     if (ability.startsWith('task.formatting.')) return 'task.formatting';
     if (ability.startsWith('task.data.')) return 'task.data';
+    if (ability.startsWith('task.fuel.')) return 'task.fuel';
+    if (ability.startsWith('task.tiers.')) return 'task.tiers';
     if (ability.startsWith('heures.')) return 'heures';
     if (ability.startsWith('admin.users.')) return 'admin.users';
     if (ability.startsWith('admin.sectors.')) return 'admin.sectors';

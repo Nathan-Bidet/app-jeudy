@@ -21,6 +21,7 @@ class CotationManualPrice extends Model
         'maturity_year',
         'harvest_year',
         'manual_matif',
+        'final_price_reference_key',
         'margin',
         'sort_order',
         'updated_by',

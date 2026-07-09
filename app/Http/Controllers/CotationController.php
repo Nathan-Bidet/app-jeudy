@@ -68,6 +68,8 @@ class CotationController extends Controller
 
             $manualSettings = $this->manualSettings();
             $displaySettings = $this->displaySettings();
+            $cerealLabels = $this->cerealLabelsConfig();
+            $cerealTableLabels = $this->cerealTableLabelsConfig();
             $transportGrid = $this->transportGridConfig();
 
             $can = [
@@ -84,6 +86,8 @@ class CotationController extends Controller
                 'fuel' => $fuelGrid,
                 'manualSettings' => $manualSettings,
                 'displaySettings' => $displaySettings,
+                'cerealLabels' => $cerealLabels,
+                'cerealTableLabels' => $cerealTableLabels,
                 'transportGrid' => $transportGrid,
                 'fuelGrid' => $fuelGrid,
                 'marketData' => $marketData,
@@ -158,22 +162,23 @@ class CotationController extends Controller
             'settings' => ['required', 'array'],
             'settings.*.id' => ['required', Rule::in($ids)],
             'settings.*.value' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
-            'settings.*.note' => ['nullable', 'string', 'max:1000'],
+            'settings.*.note' => ['nullable', 'string', 'max:5000'],
             'manual_prices' => ['nullable', 'array'],
             'manual_prices.*.manual_id' => ['nullable', 'integer'],
             'manual_prices.*.identity_hash' => ['nullable', 'string', 'size:40'],
             'manual_prices.*.market_identity_hash' => ['nullable', 'string', 'size:40'],
             'manual_prices.*.line_type' => ['nullable', Rule::in(['matif', 'custom'])],
             'manual_prices.*.product_code' => ['required_with:manual_prices', 'string', 'max:16'],
-            'manual_prices.*.product_name' => ['required_with:manual_prices', 'string', 'max:80'],
+            'manual_prices.*.product_name' => ['required_with:manual_prices', 'string', 'max:255'],
             'manual_prices.*.product_sort' => ['nullable', 'integer', 'min:0', 'max:999'],
-            'manual_prices.*.contract_code' => ['nullable', 'string', 'max:80'],
-            'manual_prices.*.display_label' => ['nullable', 'string', 'max:80'],
-            'manual_prices.*.maturity_label' => ['nullable', 'string', 'max:80'],
+            'manual_prices.*.contract_code' => ['nullable', 'string', 'max:255'],
+            'manual_prices.*.display_label' => ['nullable', 'string', 'max:255'],
+            'manual_prices.*.maturity_label' => ['nullable', 'string', 'max:255'],
             'manual_prices.*.maturity_month' => ['nullable', 'integer', 'min:1', 'max:12'],
             'manual_prices.*.maturity_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
             'manual_prices.*.harvest_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
             'manual_prices.*.manual_matif' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'manual_prices.*.final_price_reference_key' => ['nullable', 'string', 'max:180'],
             'manual_prices.*.margin' => ['nullable', 'integer', 'min:0', 'max:9999999'],
             'manual_prices.*.sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
             'deleted_manual_price_ids' => ['nullable', 'array'],
@@ -181,45 +186,54 @@ class CotationController extends Controller
             'custom_cereals' => ['nullable', 'array'],
             'custom_cereals.*.id' => ['nullable', 'integer'],
             'custom_cereals.*.code' => ['nullable', 'string', 'max:16'],
-            'custom_cereals.*.name' => ['required_with:custom_cereals', 'string', 'max:80'],
+            'custom_cereals.*.name' => ['required_with:custom_cereals', 'string', 'max:255'],
             'custom_cereals.*.base_product_code' => ['required_with:custom_cereals', Rule::in(['ECO', 'EBM', 'EMA'])],
             'custom_cereals.*.sort_order' => ['nullable', 'integer', 'min:100', 'max:9999'],
             'cereal_order' => ['nullable', 'array', 'max:100'],
             'cereal_order.*' => ['string', 'max:16'],
-            'cereal_info_html' => ['nullable', 'string', 'max:20000'],
+            'cereal_labels' => ['nullable', 'array'],
+            'cereal_labels.*' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels' => ['nullable', 'array'],
+            'cereal_table_labels.*' => ['nullable', 'array'],
+            'cereal_table_labels.*.free_text' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.maturity' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.matif' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.base' => ['nullable', 'string', 'max:255'],
+            'cereal_table_labels.*.final_price' => ['nullable', 'string', 'max:255'],
+            'cereal_info_html' => ['nullable', 'string', 'max:100000'],
             'transport_grid' => ['nullable', 'array'],
-            'transport_grid.title' => ['nullable', 'string', 'max:120'],
-            'transport_grid.first_column_label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.title' => ['nullable', 'string', 'max:255'],
+            'transport_grid.first_column_label' => ['nullable', 'string', 'max:255'],
             'transport_grid.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.columns' => ['nullable', 'array', 'max:12'],
             'transport_grid.columns.*.id' => ['required_with:transport_grid.columns', 'string', 'max:80'],
-            'transport_grid.columns.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.columns.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.columns.*.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.columns.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.rows' => ['nullable', 'array', 'max:30'],
             'transport_grid.rows.*.id' => ['required_with:transport_grid.rows', 'string', 'max:80'],
-            'transport_grid.rows.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.rows.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.rows.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.cells' => ['nullable', 'array'],
-            'transport_grid.cells.*.text' => ['nullable', 'string', 'max:120'],
+            'transport_grid.cells.*.text' => ['nullable', 'string', 'max:500'],
             'transport_grid.sections' => ['nullable', 'array', 'max:20'],
             'transport_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
-            'transport_grid.sections.*.title' => ['nullable', 'string', 'max:120'],
-            'transport_grid.sections.*.first_column_label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.title' => ['nullable', 'string', 'max:255'],
+            'transport_grid.sections.*.first_column_label' => ['nullable', 'string', 'max:255'],
             'transport_grid.sections.*.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.sections.*.columns' => ['nullable', 'array', 'max:12'],
             'transport_grid.sections.*.columns.*.id' => ['required_with:transport_grid.sections.*.columns', 'string', 'max:80'],
-            'transport_grid.sections.*.columns.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.columns.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.sections.*.columns.*.reference_key' => ['nullable', 'string', 'max:180'],
             'transport_grid.sections.*.columns.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
             'transport_grid.sections.*.rows.*.id' => ['required_with:transport_grid.sections.*.rows', 'string', 'max:80'],
-            'transport_grid.sections.*.rows.*.label' => ['nullable', 'string', 'max:80'],
+            'transport_grid.sections.*.rows.*.label' => ['nullable', 'string', 'max:255'],
             'transport_grid.sections.*.rows.*.base' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
             'transport_grid.sections.*.cells' => ['nullable', 'array'],
-            'transport_grid.sections.*.cells.*.text' => ['nullable', 'string', 'max:120'],
+            'transport_grid.sections.*.cells.*.text' => ['nullable', 'string', 'max:500'],
             ...$this->fuelGridValidationRules(),
-        ]);
+        ], $this->cotationValidationMessages(), $this->cotationValidationAttributes());
 
         $before = $settings->mapWithKeys(fn (CotationSetting $setting): array => [
             (string) $setting->id => $this->settingSnapshot($setting),
@@ -263,6 +277,8 @@ class CotationController extends Controller
         $deletedIds = array_values(array_unique(array_map('intval', $validated['deleted_manual_price_ids'] ?? [])));
         $customCerealChanges = $this->updateCustomCereals($validated['custom_cereals'] ?? [], $request);
         $cerealOrderChange = $this->updateCerealOrder($validated['cereal_order'] ?? null, $request);
+        $cerealLabelsChange = $this->updateCerealLabels($validated['cereal_labels'] ?? null, $request);
+        $cerealTableLabelsChange = $this->updateCerealTableLabels($validated['cereal_table_labels'] ?? null, $request);
         $cerealInfoChange = $this->updateCerealInfo($validated['cereal_info_html'] ?? null, $request);
         $transportGridChange = $this->updateTransportGrid($validated['transport_grid'] ?? null, $request, $transportGridBefore);
         $fuelGridChange = null;
@@ -280,7 +296,7 @@ class CotationController extends Controller
             ? CotationCustomCereal::query()->pluck('name', 'code')->all()
             : [];
         $manualChanges = $this->updateManualPrices($manualRows, $request, $customCerealNamesByCode);
-        $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $cerealInfoChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
+        $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $cerealLabelsChange !== null || $cerealTableLabelsChange !== null || $cerealInfoChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
 
         $this->auditLogService->log([
             'action' => $hasManualChanges ? 'update_cotation_settings_and_manual_prices' : 'update_cotation_settings',
@@ -295,6 +311,8 @@ class CotationController extends Controller
                 'deleted_manual_prices' => $manualDeletes,
                 'custom_cereals' => $customCerealChanges,
                 'cereal_order' => $cerealOrderChange,
+                'cereal_labels' => $cerealLabelsChange,
+                'cereal_table_labels' => $cerealTableLabelsChange,
                 'cereal_info' => $cerealInfoChange,
                 'transport_grid' => $transportGridChange,
                 'fuel_grid' => $fuelGridChange,
@@ -306,7 +324,11 @@ class CotationController extends Controller
 
     public function updateFuelSettings(Request $request): RedirectResponse
     {
-        $validated = $request->validate($this->fuelGridValidationRules(required: true));
+        $validated = $request->validate(
+            $this->fuelGridValidationRules(required: true),
+            $this->cotationValidationMessages(),
+            $this->cotationValidationAttributes(),
+        );
         $before = $this->fuelGridConfig();
         $fuelGridChange = $this->updateFuelGrid($validated['fuel_grid'] ?? null, $request, $before);
 
@@ -370,6 +392,7 @@ class CotationController extends Controller
                 $this->marketService->latestGroups($leftYear, $rightYear, false, false),
                 $cerealOrder,
             );
+            $groups = $this->applyCerealLabels($groups, $this->cerealLabelsConfig());
             $groups = array_values(array_filter($groups, static function (array $group): bool {
                 return count($group['harvests']['left']['rows'] ?? []) > 0
                     || count($group['harvests']['right']['rows'] ?? []) > 0;
@@ -385,40 +408,26 @@ class CotationController extends Controller
             }
 
             $viewData = [
-                'cerealHarvestTables' => $this->buildCerealHarvestTables($groups, ['left' => $leftYear, 'right' => $rightYear]),
+                'cerealHarvestTables' => $this->buildCerealHarvestTables($groups, ['left' => $leftYear, 'right' => $rightYear], $this->cerealTableLabelsConfig()),
                 'transportGrid' => $this->transportGridConfig(),
                 'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
                 'finalPriceByKey' => $finalPriceByKey,
                 'generatedAt' => now(),
+                'lastRefreshAt' => $this->marketService->lastRefresh()?->fetched_at,
+                'cerealInfoHtml' => $this->cerealInfoConfig(),
+                'logoPath' => public_path('Logo Jeudy.png'),
+                'pdfOrientation' => 'landscape',
             ];
 
-            // Page 1 = céréales + transport (le transport garde sa mise en
-            // forme normale, jamais resserrée), page 2 = carburant : 2 pages
-            // au total dans le cas standard. On ne resserre que la grille
-            // céréales (densité 0 -> 2) pour qu'elle tienne sur une seule
-            // page ; si malgré tout le contenu déborde (beaucoup de
-            // céréales/transport), on garde simplement le rendu le plus
-            // compact obtenu et le surplus se reporte naturellement sur une
-            // page supplémentaire.
-            $pdf = null;
-            $bestPageCount = null;
-            foreach ([0, 1, 2] as $density) {
-                $candidate = Pdf::loadView('cotations.pdf', [...$viewData, 'cerealDensity' => $density])
-                    ->setPaper('a4', 'landscape');
-                $candidate->render();
-                $pageCount = $candidate->getDomPDF()->getCanvas()->get_page_count();
+            $pdf = Pdf::loadView('cotations.pdf', $viewData)
+                ->setPaper('a4', 'landscape');
 
-                if ($bestPageCount === null || $pageCount < $bestPageCount) {
-                    $pdf = $candidate;
-                    $bestPageCount = $pageCount;
-                }
+            $filename = 'cotations-'.now()->format('Y-m-d-His').'.pdf';
 
-                if ($pageCount <= 2) {
-                    break;
-                }
-            }
-
-            return $pdf->download('cotations-'.now()->format('Y-m-d-His').'.pdf');
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            ]);
         } catch (Throwable $exception) {
             Log::error('cotations.export-pdf failed', [
                 'message' => $exception->getMessage(),
@@ -448,9 +457,15 @@ class CotationController extends Controller
             $pdf = Pdf::loadView('cotations.fuel-pdf', [
                 'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
                 'generatedAt' => now(),
+                'pdfOrientation' => 'landscape',
             ])->setPaper('a4', 'landscape');
 
-            return $pdf->download('prix-carburant-'.now()->format('Y-m-d-His').'.pdf');
+            $filename = 'prix-carburant-'.now()->format('Y-m-d-His').'.pdf';
+
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            ]);
         } catch (Throwable $exception) {
             Log::error('cotations.export-fuel-pdf failed', [
                 'message' => $exception->getMessage(),
@@ -475,10 +490,11 @@ class CotationController extends Controller
      * @param  array<string, int>  $harvestYears
      * @return array<string, array<string, mixed>>
      */
-    private function buildCerealHarvestTables(array $groups, array $harvestYears): array
+    private function buildCerealHarvestTables(array $groups, array $harvestYears, array $tableLabels = []): array
     {
         $tables = [];
         $stubWidth = 6;
+        $labelsByCode = $this->normalizeCerealTableLabels($tableLabels);
 
         foreach (['left', 'right'] as $bucket) {
             $cerealGroups = [];
@@ -492,7 +508,8 @@ class CotationController extends Controller
                 $columns = [];
                 foreach ($sourceRows as $row) {
                     $columns[] = [
-                        'label' => (string) ($row['label'] ?: 'Échéance'),
+                        'free_text' => (string) ($row['display_label'] ?? ''),
+                        'label' => $this->maturityShortLabel((string) ($row['maturity_label'] ?: ($row['label'] ?: 'Échéance'))),
                         'matif' => CotationPdfFormatter::price($row['matif'] ?? null),
                         'margin' => CotationPdfFormatter::margin($row['margin'] ?? null),
                         'final_price' => CotationPdfFormatter::price($row['final_price'] ?? null),
@@ -501,6 +518,7 @@ class CotationController extends Controller
 
                 $cerealGroups[] = [
                     'name' => (string) ($group['name'] ?? 'Céréale'),
+                    'labels' => $labelsByCode[(string) ($group['code'] ?? '')] ?? $this->defaultCerealTableLabels(),
                     'columns' => $columns,
                 ];
             }
@@ -513,6 +531,7 @@ class CotationController extends Controller
             $tables[$bucket] = [
                 'year' => $harvestYears[$bucket] ?? '',
                 'cereal_groups' => $cerealGroups,
+                'labels' => $this->defaultCerealTableLabels(),
                 'stub_width' => $stubWidth,
                 'column_width' => $totalColumns > 0 ? (100 - $stubWidth) / $totalColumns : 0,
                 'has_data' => $totalColumns > 0,
@@ -520,6 +539,45 @@ class CotationController extends Controller
         }
 
         return $tables;
+    }
+
+    private function maturityShortLabel(string $value): string
+    {
+        $label = trim($value);
+        if ($label === '') {
+            return '';
+        }
+        if (mb_strtolower($label, 'UTF-8') === 'option personnalisée') {
+            return '';
+        }
+
+        $replacements = [
+            '/\bjanvier\b/iu' => 'janv',
+            '/\bfévrier\b/iu' => 'fev',
+            '/\bfevrier\b/iu' => 'fev',
+            '/\bmars\b/iu' => 'mars',
+            '/\bavril\b/iu' => 'avr',
+            '/\bmai\b/iu' => 'mai',
+            '/\bjuin\b/iu' => 'juin',
+            '/\bjuillet\b/iu' => 'juil',
+            '/\baoût\b/iu' => 'aout',
+            '/\baout\b/iu' => 'aout',
+            '/\bseptembre\b/iu' => 'sept',
+            '/\boctobre\b/iu' => 'oct',
+            '/\bnovembre\b/iu' => 'nov',
+            '/\bdécembre\b/iu' => 'dec',
+            '/\bdecembre\b/iu' => 'dec',
+        ];
+
+        foreach ($replacements as $pattern => $replacement) {
+            $label = preg_replace($pattern, $replacement, $label) ?? $label;
+        }
+
+        $label = mb_strtolower($label, 'UTF-8');
+        $label = preg_replace('/\s*[-\/]\s*/u', ' - ', $label) ?? $label;
+        $label = preg_replace('/\s+/u', ' ', $label) ?? $label;
+
+        return trim($label);
     }
 
     /**
@@ -533,11 +591,18 @@ class CotationController extends Controller
         $user = $request?->user();
         $canManage = (bool) ($user && $access->can($user, 'cotations.cereals.edit'));
         $cerealOrder = $this->cerealOrderConfig();
+        $cerealLabels = $this->cerealLabelsConfig();
+        $cerealTableLabels = $this->cerealTableLabelsConfig();
         $groups = $this->applyCerealOrder($this->marketService->latestGroups(
             (int) ($displaySettings['harvest_left_year'] ?? now()->year),
             (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
             $canManage,
         ), $cerealOrder);
+        $groups = $this->applyCerealLabels($groups, $cerealLabels);
+        $options = $this->applyCerealLabels($this->marketService->marketOptions(
+            (int) ($displaySettings['harvest_left_year'] ?? now()->year),
+            (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
+        ), $cerealLabels);
 
         return [
             'source' => 'database',
@@ -556,11 +621,10 @@ class CotationController extends Controller
             ],
             'groups' => $groups,
             'cereal_order' => $this->normalizeCerealOrder($cerealOrder, $groups),
-            'options' => $this->marketService->marketOptions(
-                (int) ($displaySettings['harvest_left_year'] ?? now()->year),
-                (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
-            ),
+            'options' => $options,
             'custom_cereals' => $this->customCerealsPayload(),
+            'cereal_labels' => $cerealLabels,
+            'cereal_table_labels' => $cerealTableLabels,
             'cereal_info_html' => $this->cerealInfoConfig(),
         ];
     }
@@ -595,6 +659,8 @@ class CotationController extends Controller
             'cereal_order' => [],
             'options' => [],
             'custom_cereals' => [],
+            'cereal_labels' => $this->defaultCerealLabels(),
+            'cereal_table_labels' => [],
             'cereal_info_html' => '',
         ];
     }
@@ -616,6 +682,8 @@ class CotationController extends Controller
             'customCereals' => [],
             'custom_cereals' => [],
             'cereal_order' => [],
+            'cereal_labels' => $this->defaultCerealLabels(),
+            'cereal_table_labels' => [],
             'cereal_info_html' => '',
             'lastRefresh' => null,
             'last_refresh' => null,
@@ -728,6 +796,206 @@ class CotationController extends Controller
         $decoded = $note ? json_decode((string) $note, true) : null;
 
         return $this->normalizeCerealOrder(is_array($decoded) ? $decoded : []);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function defaultCerealLabels(): array
+    {
+        return [
+            'ECO' => 'Colza',
+            'EBM' => 'Blé',
+            'EMA' => 'Maïs',
+            'EOB' => 'Orge',
+            'EOR' => 'Orge',
+            'ERS' => 'Seigle',
+            'ETR' => 'Triticale',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function cerealLabelsConfig(): array
+    {
+        if (! Schema::hasTable('cotation_settings')) {
+            return $this->defaultCerealLabels();
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_display_labels')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+
+        return $this->normalizeCerealLabels(is_array($decoded) ? $decoded : []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $labels
+     * @return array<string, string>
+     */
+    private function normalizeCerealLabels(array $labels): array
+    {
+        $defaults = $this->defaultCerealLabels();
+        $normalized = $defaults;
+
+        foreach ($defaults as $code => $defaultLabel) {
+            $label = trim((string) ($labels[$code] ?? ''));
+            $normalized[$code] = $label !== '' ? $label : $defaultLabel;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function defaultCerealTableLabels(): array
+    {
+        return [
+            'free_text' => 'Livraison',
+            'maturity' => 'Échéance',
+            'matif' => 'MATIF',
+            'base' => 'Base',
+            'final_price' => 'Prix final',
+        ];
+    }
+
+    /**
+     * @return array<string, array<string, string>>
+     */
+    private function cerealTableLabelsConfig(): array
+    {
+        if (! Schema::hasTable('cotation_settings')) {
+            return [];
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_table_labels')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+
+        return $this->normalizeCerealTableLabels(is_array($decoded) ? $decoded : []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $labels
+     * @return array<string, array<string, string>>
+     */
+    private function normalizeCerealTableLabels(array $labels): array
+    {
+        $normalized = [];
+
+        foreach ($labels as $code => $groupLabels) {
+            if (! is_array($groupLabels)) {
+                continue;
+            }
+
+            $code = mb_strtoupper(trim((string) $code), 'UTF-8');
+            if ($code === '') {
+                continue;
+            }
+
+            $normalized[$code] = $this->normalizeCerealTableLabelSet($groupLabels);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $labels
+     * @return array<string, string>
+     */
+    private function normalizeCerealTableLabelSet(array $labels): array
+    {
+        $defaults = $this->defaultCerealTableLabels();
+        $normalized = $defaults;
+
+        foreach ($defaults as $key => $defaultLabel) {
+            $label = trim((string) ($labels[$key] ?? ''));
+            $normalized[$key] = $label !== '' ? $label : $defaultLabel;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<string, string>  $labels
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyCerealLabels(array $groups, array $labels): array
+    {
+        return array_map(static function (array $group) use ($labels): array {
+            $code = (string) ($group['code'] ?? '');
+            if (isset($labels[$code])) {
+                $group['original_name'] = $group['original_name'] ?? $group['name'] ?? $labels[$code];
+                $group['name'] = $labels[$code];
+            }
+
+            foreach (['left', 'right'] as $bucket) {
+                foreach (($group['harvests'][$bucket]['rows'] ?? []) as $index => $row) {
+                    if (isset($labels[$code])) {
+                        $group['harvests'][$bucket]['rows'][$index]['product_name'] = $labels[$code];
+                    }
+                }
+            }
+
+            return $group;
+        }, $groups);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $labels
+     * @return array<string, mixed>|null
+     */
+    private function updateCerealLabels(?array $labels, Request $request): ?array
+    {
+        if ($labels === null || ! Schema::hasTable('cotation_settings')) {
+            return null;
+        }
+
+        $before = $this->cerealLabelsConfig();
+        $normalized = $this->normalizeCerealLabels($labels);
+        $setting = CotationSetting::query()->firstOrNew(['key' => 'cereal_display_labels']);
+        $setting->forceFill([
+            'section' => 'display',
+            'label' => 'Libellés céréales MATIF',
+            'unit' => null,
+            'value' => null,
+            'note' => json_encode($normalized, JSON_UNESCAPED_UNICODE),
+            'sort_order' => 35,
+            'updated_by' => $request->user()?->id,
+        ])->save();
+
+        $after = $this->cerealLabelsConfig();
+
+        return $before !== $after ? ['before' => $before, 'after' => $after] : null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $labels
+     * @return array<string, mixed>|null
+     */
+    private function updateCerealTableLabels(?array $labels, Request $request): ?array
+    {
+        if ($labels === null || ! Schema::hasTable('cotation_settings')) {
+            return null;
+        }
+
+        $before = $this->cerealTableLabelsConfig();
+        $normalized = $this->normalizeCerealTableLabels($labels);
+        $setting = CotationSetting::query()->firstOrNew(['key' => 'cereal_table_labels']);
+        $setting->forceFill([
+            'section' => 'display',
+            'label' => 'Libellés colonnes céréales',
+            'unit' => null,
+            'value' => null,
+            'note' => json_encode($normalized, JSON_UNESCAPED_UNICODE),
+            'sort_order' => 36,
+            'updated_by' => $request->user()?->id,
+        ])->save();
+
+        $after = $this->cerealTableLabelsConfig();
+
+        return $before !== $after ? ['before' => $before, 'after' => $after] : null;
     }
 
     /**
@@ -931,24 +1199,84 @@ class CotationController extends Controller
             'fuel_grid.vat_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fuel_grid.sections' => ['nullable', 'array', 'max:10'],
             'fuel_grid.sections.*.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.sections.*.label' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.label' => ['nullable', 'string', 'max:255'],
             'fuel_grid.sections.*.rows' => ['nullable', 'array', 'max:30'],
             'fuel_grid.sections.*.rows.*.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.sections.*.rows.*.tranche' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.rows.*.tranche' => ['nullable', 'string', 'max:255'],
             'fuel_grid.sections.*.rows.*.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.sections.*.rows.*.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
-            'fuel_grid.sections.*.rows.*.text' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.sections.*.rows.*.text' => ['nullable', 'string', 'max:500'],
             'fuel_grid.gnr_tax' => ['nullable', 'array'],
             'fuel_grid.gnr_tax.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gnr_tax.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gazole' => ['nullable', 'array'],
             'fuel_grid.gazole.id' => ['nullable', 'string', 'max:80'],
-            'fuel_grid.gazole.label' => ['nullable', 'string', 'max:120'],
-            'fuel_grid.gazole.tranche' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gazole.label' => ['nullable', 'string', 'max:255'],
+            'fuel_grid.gazole.tranche' => ['nullable', 'string', 'max:255'],
             'fuel_grid.gazole.ht' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gazole.ttc' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'fuel_grid.gazole.gap' => ['nullable', 'numeric', 'min:-9999999', 'max:9999999'],
-            'fuel_grid.gazole.text' => ['nullable', 'string', 'max:120'],
+            'fuel_grid.gazole.text' => ['nullable', 'string', 'max:500'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function cotationValidationMessages(): array
+    {
+        return [
+            'required' => 'Le champ :attribute est obligatoire.',
+            'required_with' => 'Le champ :attribute est obligatoire.',
+            'array' => 'Le champ :attribute doit être une liste valide.',
+            'string' => 'Le champ :attribute doit être un texte.',
+            'numeric' => 'Le champ :attribute doit être un nombre.',
+            'integer' => 'Le champ :attribute doit être un nombre entier.',
+            'in' => 'La valeur sélectionnée pour :attribute est invalide.',
+            'size.string' => 'Le champ :attribute doit contenir exactement :size caractères.',
+            'max.string' => 'Le champ :attribute ne peut pas dépasser :max caractères.',
+            'max.array' => 'Le champ :attribute ne peut pas contenir plus de :max éléments.',
+            'max.numeric' => 'Le champ :attribute ne peut pas être supérieur à :max.',
+            'min.numeric' => 'Le champ :attribute doit être au moins égal à :min.',
+            'min.integer' => 'Le champ :attribute doit être au moins égal à :min.',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function cotationValidationAttributes(): array
+    {
+        return [
+            'settings.*.note' => 'note',
+            'manual_prices.*.product_name' => 'nom de la céréale',
+            'manual_prices.*.contract_code' => 'code contrat',
+            'manual_prices.*.display_label' => 'livraison',
+            'manual_prices.*.maturity_label' => 'libellé d’échéance',
+            'custom_cereals.*.name' => 'nom de la céréale personnalisée',
+            'cereal_labels.*' => 'nom de céréale',
+            'cereal_table_labels.*.free_text' => 'libellé Livraison',
+            'cereal_table_labels.*.maturity' => 'libellé Échéance',
+            'cereal_table_labels.*.matif' => 'libellé MATIF',
+            'cereal_table_labels.*.base' => 'libellé Base',
+            'cereal_table_labels.*.final_price' => 'libellé Prix final',
+            'cereal_info_html' => 'bloc Information',
+            'transport_grid.title' => 'titre du tableau transport',
+            'transport_grid.first_column_label' => 'première colonne transport',
+            'transport_grid.columns.*.label' => 'colonne transport',
+            'transport_grid.rows.*.label' => 'ligne transport',
+            'transport_grid.cells.*.text' => 'texte du tableau transport',
+            'transport_grid.sections.*.title' => 'titre de section transport',
+            'transport_grid.sections.*.first_column_label' => 'première colonne transport',
+            'transport_grid.sections.*.columns.*.label' => 'colonne transport',
+            'transport_grid.sections.*.rows.*.label' => 'ligne transport',
+            'transport_grid.sections.*.cells.*.text' => 'texte du tableau transport',
+            'fuel_grid.sections.*.label' => 'titre carburant',
+            'fuel_grid.sections.*.rows.*.tranche' => 'libellé carburant',
+            'fuel_grid.sections.*.rows.*.text' => 'texte carburant',
+            'fuel_grid.gazole.label' => 'titre gazole',
+            'fuel_grid.gazole.tranche' => 'libellé gazole',
+            'fuel_grid.gazole.text' => 'texte gazole',
         ];
     }
 
@@ -1127,6 +1455,7 @@ class CotationController extends Controller
             ->filter(fn ($row): bool => is_array($row))
             ->filter(function (array $row): bool {
                 return $this->hasDecimalInput($row['manual_matif'] ?? null)
+                    || $this->hasDecimalInput($row['final_price_reference_key'] ?? null)
                     || $this->hasDecimalInput($row['margin'] ?? null)
                     || $this->hasDecimalInput($row['manual_id'] ?? null)
                     || $this->hasDecimalInput($row['display_label'] ?? null)
@@ -1157,7 +1486,10 @@ class CotationController extends Controller
                 ? (int) $row['maturity_month']
                 : null;
             $displayLabel = trim((string) ($row['display_label'] ?? ''));
-            $maturityLabel = trim((string) ($row['maturity_label'] ?? '')) ?: $displayLabel;
+            $maturityLabel = trim((string) ($row['maturity_label'] ?? ''));
+            if ($maturityLabel === '') {
+                $maturityLabel = $lineType === 'custom' ? 'Option personnalisée' : 'Échéance personnalisée';
+            }
             $marketIdentityHash = $lineType === 'matif' && $this->hasDecimalInput($row['market_identity_hash'] ?? null)
                 ? (string) $row['market_identity_hash']
                 : null;
@@ -1176,7 +1508,7 @@ class CotationController extends Controller
 
             $before = $manual->exists ? $this->manualPriceSnapshot($manual) : null;
 
-            $manual->forceFill([
+            $values = [
                 'identity_hash' => $manual->identity_hash ?: $identityHash,
                 'market_identity_hash' => $marketIdentityHash,
                 'line_type' => $lineType,
@@ -1185,7 +1517,7 @@ class CotationController extends Controller
                 'product_sort' => (int) ($row['product_sort'] ?? 999),
                 'contract_code' => $lineType === 'matif' ? (trim((string) ($row['contract_code'] ?? '')) ?: null) : null,
                 'display_label' => $displayLabel ?: null,
-                'maturity_label' => $maturityLabel ?: 'Échéance personnalisée',
+                'maturity_label' => $maturityLabel,
                 'maturity_month' => $lineType === 'matif' ? $maturityMonth : null,
                 'maturity_year' => (int) $row['maturity_year'],
                 'harvest_year' => (int) $row['harvest_year'],
@@ -1193,7 +1525,15 @@ class CotationController extends Controller
                 'margin' => $this->nullablePositiveInteger($row['margin'] ?? null),
                 'sort_order' => (int) ($row['sort_order'] ?? 0),
                 'updated_by' => $request->user()?->id,
-            ])->save();
+            ];
+
+            if (Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key')) {
+                $values['final_price_reference_key'] = $lineType === 'custom'
+                    ? (trim((string) ($row['final_price_reference_key'] ?? '')) ?: null)
+                    : null;
+            }
+
+            $manual->forceFill($values)->save();
 
             $after = $this->manualPriceSnapshot($manual->refresh());
 
@@ -1356,6 +1696,7 @@ class CotationController extends Controller
             'maturity_year' => $manual->maturity_year,
             'harvest_year' => $manual->harvest_year,
             'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
+            'final_price_reference_key' => Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key') ? $manual->final_price_reference_key : null,
             'margin' => $manual->margin !== null ? (float) $manual->margin : null,
             'sort_order' => $manual->sort_order,
         ];
