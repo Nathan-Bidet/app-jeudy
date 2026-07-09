@@ -186,6 +186,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::post('/tasks/fuel', [TaskFuelController::class, 'store'])
         ->middleware('sector.access:task.fuel.update')
         ->name('task.fuel.store');
+    Route::patch('/tasks/fuel/{delivery}/point', [TaskFuelController::class, 'point'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.point');
     Route::patch('/tasks/fuel/{delivery}', [TaskFuelController::class, 'update'])
         ->middleware('sector.access:task.fuel.update')
         ->name('task.fuel.update');
@@ -195,6 +198,15 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/tasks/fuel/tiers-search', [TaskFuelController::class, 'tiersSearch'])
         ->middleware('sector.access:task.fuel.update')
         ->name('task.fuel.tiers-search');
+    Route::get('/tasks/fuel/new-clients', [TaskFuelController::class, 'newClients'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.new-clients');
+    Route::post('/tasks/fuel/new-clients', [TaskFuelController::class, 'storeNewClient'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.new-clients.store');
+    Route::patch('/tasks/fuel/new-clients/{newClient}/validate', [TaskFuelController::class, 'validateNewClient'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.new-clients.validate');
     Route::post('/tasks/fuel/options', [TaskFuelController::class, 'storeOption'])
         ->middleware('sector.access:task.fuel.update')
         ->name('task.fuel.options.store');
@@ -204,6 +216,16 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::delete('/tasks/fuel/options/{option}', [TaskFuelController::class, 'destroyOption'])
         ->middleware('sector.access:task.fuel.update')
         ->name('task.fuel.options.destroy');
+
+    Route::post('/tasks/fuel/recurrings', [TaskFuelController::class, 'storeRecurring'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.recurrings.store');
+    Route::put('/tasks/fuel/recurrings/{recurring}', [TaskFuelController::class, 'updateRecurring'])
+        ->middleware('sector.access:task.fuel.update')
+        ->name('task.fuel.recurrings.update');
+    Route::delete('/tasks/fuel/recurrings/{recurring}', [TaskFuelController::class, 'destroyRecurring'])
+        ->middleware('sector.access:task.fuel.delete')
+        ->name('task.fuel.recurrings.destroy');
 
     Route::get('/tasks/tiers', [TaskTiersController::class, 'index'])
         ->middleware('sector.access:task.tiers.view')

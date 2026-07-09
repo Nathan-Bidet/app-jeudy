@@ -333,6 +333,39 @@ html.theme-dark textarea::placeholder {
     will-change: box-shadow;
 }
 
+.fuel-filter-menu {
+    animation: fuel-filter-menu-in 0.14s ease-out both;
+    transform-origin: top center;
+}
+
+.fuel-filter-menu--closing {
+    animation: fuel-filter-menu-out 0.12s ease-in both;
+}
+
+@keyframes fuel-filter-menu-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes fuel-filter-menu-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.98);
+    }
+}
+
 /* iOS Safari auto-zooms focused inputs below 16px */
 @media (hover: none) and (pointer: coarse) {
     input,
