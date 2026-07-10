@@ -1,7 +1,9 @@
 import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import { Head, router } from '@inertiajs/react';
-import { AlertTriangle, ArrowUp, BarChart2, Building2, Check, ChevronDown, ChevronUp, Filter, Fuel, MapPin, Pencil, Phone, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
+import PhoneActionsLink from '@/Components/PhoneActionsLink';
+import PlaceActionsLink from '@/Components/PlaceActionsLink';
+import { AlertTriangle, ArrowUp, BarChart2, Building2, Check, ChevronDown, ChevronUp, Filter, Fuel, Pencil, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -3413,17 +3415,20 @@ function FuelTable({
                                         {row.volume || '—'}
                                     </span>
                                 </div>
-                                {row.delivery_city ? (
-                                    <div className="flex items-center gap-1.5 text-sm text-[var(--app-muted)]">
-                                        <MapPin className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                                        {row.delivery_city}
-                                    </div>
+                                {(row.delivery_city || row.address || row.postal_code) ? (
+                                    <PlaceActionsLink
+                                        text={[row.address, row.postal_code, row.delivery_city].filter(Boolean).join(', ')}
+                                        triggerLabel={row.delivery_city || null}
+                                        className="w-full"
+                                        buttonClassName="text-sm text-[var(--app-muted)] w-full"
+                                    />
                                 ) : null}
                                 {row.phone ? (
-                                    <div className="flex items-center gap-1.5 text-sm text-[var(--app-muted)]">
-                                        <Phone className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                                        {row.phone}
-                                    </div>
+                                    <PhoneActionsLink
+                                        number={row.phone}
+                                        className="w-full"
+                                        buttonClassName="text-sm text-[var(--app-muted)] w-full"
+                                    />
                                 ) : null}
                             </div>
 
