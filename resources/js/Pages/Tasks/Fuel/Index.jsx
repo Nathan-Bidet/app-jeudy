@@ -652,7 +652,7 @@ function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd
     }
 
     return (
-        <div ref={containerRef} className="fixed bottom-24 right-3 z-40 flex items-center gap-2 md:bottom-6 md:right-6">
+        <div ref={containerRef} className="fixed bottom-24 right-3 z-20 flex items-center gap-2 md:bottom-6 md:right-6">
             <button
                 type="button"
                 onClick={onToggleStats}

@@ -460,7 +460,7 @@ export default function DirectoryIndex({ directoryUsers, filters, sectors, viewe
             {isMobile ? (
                 <>
                     {shouldShowMobileActions ? (
-                        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-40 flex items-center gap-2">
+                        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-20 flex items-center gap-2">
                             <button
                                 ref={quickSearchButtonRef}
                                 type="button"
@@ -500,7 +500,7 @@ export default function DirectoryIndex({ directoryUsers, filters, sectors, viewe
 
                     <div
                         ref={quickSearchPanelRef}
-                        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+8.4rem)] right-3 z-40 w-[min(calc(100vw-2rem),22rem)] rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-3 shadow-2xl transition-all duration-200 ${
+                        className={`fixed bottom-[calc(env(safe-area-inset-bottom)+8.4rem)] right-3 z-20 w-[min(calc(100vw-2rem),22rem)] rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-3 shadow-2xl transition-all duration-200 ${
                             isQuickSearchOpen ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'
                         }`}
                         aria-hidden={!isQuickSearchOpen}
