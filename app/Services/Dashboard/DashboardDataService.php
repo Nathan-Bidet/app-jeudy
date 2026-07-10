@@ -35,7 +35,7 @@ class DashboardDataService
                 $this->cotationsWidget($user),
                 $this->quickAccessWidget($user),
             ])),
-            'dashboard_announcement' => $this->activeDashboardAnnouncement(),
+            'dashboard_announcement' => $this->activeDashboardAnnouncement($user),
         ];
     }
 
@@ -286,8 +286,11 @@ class DashboardDataService
     /**
      * @return array<string, mixed>|null
      */
-    private function activeDashboardAnnouncement(): ?array
+    private function activeDashboardAnnouncement(User $user): ?array
     {
+        $userId = (int) $user->id;
+        $sectorId = $user->sector_id ? (int) $user->sector_id : null;
+
         $announcement = Announcement::query()
             ->where('show_on_dashboard', true)
             ->where(fn ($q) => $q
@@ -296,7 +299,22 @@ class DashboardDataService
             )
             ->with('creator:id,name,first_name,last_name')
             ->orderByDesc('sent_at')
-            ->first();
+            ->get()
+            ->first(function (Announcement $a) use ($userId, $sectorId): bool {
+                $sectorIds = array_map('intval', (array) ($a->sector_ids ?? []));
+                $userIds = array_map('intval', (array) ($a->user_ids ?? []));
+                $excludedIds = array_map('intval', (array) ($a->excluded_user_ids ?? []));
+
+                if (in_array($userId, $excludedIds, true)) {
+                    return false;
+                }
+
+                if ($sectorId !== null && in_array($sectorId, $sectorIds, true)) {
+                    return true;
+                }
+
+                return in_array($userId, $userIds, true);
+            });
 
         if (! $announcement) {
             return null;
