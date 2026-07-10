@@ -3421,6 +3421,7 @@ function FuelTable({
                                         triggerLabel={row.delivery_city || null}
                                         className="w-full"
                                         buttonClassName="text-sm text-[var(--app-muted)] w-full"
+                                        triggerClassName="underline decoration-dotted underline-offset-2"
                                     />
                                 ) : null}
                                 {row.phone ? (

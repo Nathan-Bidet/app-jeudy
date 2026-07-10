@@ -49,7 +49,7 @@ export default function PhoneActionsLink({ number, className = '', buttonClassNa
                 className={`inline-flex items-center gap-1.5 text-left transition-opacity hover:opacity-70 active:opacity-70 ${buttonClassName}`}
             >
                 <Phone className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                <span>{number}</span>
+                <span className="underline decoration-dotted underline-offset-2">{number}</span>
             </button>
 
             {open ? (
