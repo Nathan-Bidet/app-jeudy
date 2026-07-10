@@ -142,6 +142,8 @@ export default function LdtIndex({
     const [mobileFilterDraft, setMobileFilterDraft] = useState(buildFilterState(filters));
     const [showMobileFilters, setShowMobileFilters] = useState(false);
     const [showFloatingActions, setShowFloatingActions] = useState(false);
+    const [floatingBarHeight, setFloatingBarHeight] = useState(0);
+    const floatingBarRef = useRef(null);
     const [showQuickSearch, setShowQuickSearch] = useState(false);
 
     const [commentSelectionByEntry, setCommentSelectionByEntry] = useState({});
@@ -326,6 +328,17 @@ export default function LdtIndex({
         window.addEventListener('scroll', onScroll, { passive: true });
         return () => window.removeEventListener('scroll', onScroll);
     }, []);
+
+    useEffect(() => {
+        const el = floatingBarRef.current;
+        if (!el) return undefined;
+        const observer = new ResizeObserver(([entry]) => {
+            setFloatingBarHeight(entry.contentRect.height);
+        });
+        observer.observe(el);
+        setFloatingBarHeight(el.getBoundingClientRect().height);
+        return () => observer.disconnect();
+    }, [showFloatingActions, showQuickSearch, showMobileFilters]);
 
     useEffect(() => {
         if (!showQuickSearch) return undefined;
@@ -610,6 +623,11 @@ export default function LdtIndex({
                     </div>
                 </section>
             </div>
+            {floatingBarHeight > 0 ? (
+                <div className="lg:hidden" style={{ height: `${floatingBarHeight + 24}px` }} aria-hidden="true" />
+            ) : (
+                <div className="h-16 lg:hidden" aria-hidden="true" />
+            )}
 
             <MobileFiltersModal
                 open={showMobileFilters}
@@ -654,7 +672,7 @@ export default function LdtIndex({
             </div>
 
             {showFloatingActions || showQuickSearch || showMobileFilters ? (
-                <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-20 flex items-center gap-2 md:bottom-4 md:right-4 lg:hidden">
+                <div ref={floatingBarRef} className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-20 flex items-center gap-2 md:bottom-4 md:right-4 lg:hidden">
                     <button
                         ref={quickSearchButtonRef}
                         type="button"

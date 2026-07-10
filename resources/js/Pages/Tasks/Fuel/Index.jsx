@@ -611,7 +611,7 @@ function FuelCountFooter({ meta }) {
     );
 }
 
-function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd, showStats, onToggleStats }) {
+function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd, showStats, onToggleStats, containerRef }) {
     const [searchOpen, setSearchOpen] = useState(false);
     const wrapperRef = useRef(null);
     const inputRef = useRef(null);
@@ -650,7 +650,7 @@ function FuelFloatingActions({ visible, canUpdate, search, onSearchChange, onAdd
     }
 
     return (
-        <div className="fixed bottom-24 right-3 z-40 flex items-center gap-2 md:bottom-6 md:right-6">
+        <div ref={containerRef} className="fixed bottom-24 right-3 z-40 flex items-center gap-2 md:bottom-6 md:right-6">
             <button
                 type="button"
                 onClick={onToggleStats}
@@ -2824,6 +2824,7 @@ function FuelTable({
     onDeleteRow,
     showStats = false,
     monthlyStats = null,
+    floatingBarHeight = 0,
 }) {
     const [copiedCodeId, setCopiedCodeId] = useState(null);
     const [openFilterKey, setOpenFilterKey] = useState(null);
@@ -3495,6 +3496,11 @@ function FuelTable({
             <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-sm lg:hidden">
                 <FuelCountFooter meta={meta} />
             </div>
+            {floatingBarHeight > 0 ? (
+                <div className="lg:hidden" style={{ height: `${floatingBarHeight + 24}px` }} aria-hidden="true" />
+            ) : (
+                <div className="h-16 lg:hidden" aria-hidden="true" />
+            )}
         </section>
     );
 }
@@ -3526,6 +3532,8 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
     const [isDeleting, setIsDeleting] = useState(false);
     const [showFloatingActions, setShowFloatingActions] = useState(false);
     const [showStats, setShowStats] = useState(false);
+    const [floatingBarHeight, setFloatingBarHeight] = useState(0);
+    const floatingActionsRef = useRef(null);
     const searchDebounceReadyRef = useRef(false);
     const pendingFlipRef = useRef(null);
 
@@ -3561,6 +3569,17 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
             window.removeEventListener('resize', updateFloatingActions);
         };
     }, []);
+
+    useEffect(() => {
+        const el = floatingActionsRef.current;
+        if (!el) return undefined;
+        const observer = new ResizeObserver(([entry]) => {
+            setFloatingBarHeight(entry.contentRect.height);
+        });
+        observer.observe(el);
+        setFloatingBarHeight(el.getBoundingClientRect().height);
+        return () => observer.disconnect();
+    }, [showFloatingActions]);
 
     const activeSiteOptions = useMemo(() => (fuelOptions.sites || []).filter((option) => option.active), [fuelOptions.sites]);
     const activeProductTypeOptions = useMemo(() => (fuelOptions.product_types || []).filter((option) => option.active), [fuelOptions.product_types]);
@@ -3909,6 +3928,7 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
                 onDeleteRow={setConfirmDeleteRow}
                 showStats={showStats}
                 monthlyStats={monthlyStats}
+                floatingBarHeight={floatingBarHeight}
             />
 
             <FuelFloatingActions
@@ -3919,6 +3939,7 @@ export default function TaskFuelIndex({ permissions = {}, deliveries = [], optio
                 onAdd={() => setShowCreateModal(true)}
                 showStats={showStats}
                 onToggleStats={() => setShowStats((v) => !v)}
+                containerRef={floatingActionsRef}
             />
 
             <FuelSettingsModal

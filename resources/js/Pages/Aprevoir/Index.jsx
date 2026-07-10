@@ -1017,6 +1017,8 @@ export default function AprevoirIndex({
     const [dragState, setDragState] = useState(null);
     const [dropPreview, setDropPreview] = useState(null);
     const [showFloatingActions, setShowFloatingActions] = useState(false);
+    const [floatingBarHeight, setFloatingBarHeight] = useState(0);
+    const floatingBarRef = useRef(null);
     const [highlightedTaskId, setHighlightedTaskId] = useState(null);
     const [showMobileFilters, setShowMobileFilters] = useState(false);
     const [showQuickSearch, setShowQuickSearch] = useState(false);
@@ -1069,6 +1071,17 @@ export default function AprevoirIndex({
         window.addEventListener('scroll', onScroll, { passive: true });
         return () => window.removeEventListener('scroll', onScroll);
     }, []);
+
+    useEffect(() => {
+        const el = floatingBarRef.current;
+        if (!el) return undefined;
+        const observer = new ResizeObserver(([entry]) => {
+            setFloatingBarHeight(entry.contentRect.height);
+        });
+        observer.observe(el);
+        setFloatingBarHeight(el.getBoundingClientRect().height);
+        return () => observer.disconnect();
+    }, [showFloatingActions, showQuickSearch, showMobileFilters]);
 
     useEffect(() => {
         if (!showQuickSearch) return undefined;
@@ -2424,6 +2437,11 @@ export default function AprevoirIndex({
                     </div>
                 )}
             </div>
+            {floatingBarHeight > 0 ? (
+                <div className="lg:hidden" style={{ height: `${floatingBarHeight + 24}px` }} aria-hidden="true" />
+            ) : (
+                <div className="h-16 lg:hidden" aria-hidden="true" />
+            )}
 
             <TaskModal
                 open={modalOpen}
@@ -2490,7 +2508,7 @@ export default function AprevoirIndex({
             </div>
 
             {showFloatingActions || showQuickSearch || showMobileFilters ? (
-                <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-20 flex items-center gap-2 md:bottom-4 md:right-4">
+                <div ref={floatingBarRef} className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-20 flex items-center gap-2 md:bottom-4 md:right-4">
                     {permissions?.can_create ? (
                         <button
                             type="button"
