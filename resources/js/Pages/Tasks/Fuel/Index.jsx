@@ -1,7 +1,7 @@
 import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import { Head, router } from '@inertiajs/react';
-import { AlertTriangle, ArrowUp, BarChart2, Check, ChevronDown, ChevronUp, Filter, Pencil, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowUp, BarChart2, Check, ChevronDown, ChevronUp, Filter, MapPin, Pencil, Phone, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -3331,22 +3331,47 @@ function FuelTable({
                         <article
                             key={row.id}
                             data-fuel-row={row.id}
-                            className={`rounded-2xl border border-[var(--app-border)] p-4 shadow-sm ${fuelRowStateClass(row) || 'bg-[var(--app-surface)]'} ${fuelCardRingClass(row)}`}
+                            className={`overflow-hidden rounded-2xl border border-[var(--app-border)] shadow-sm ${fuelRowStateClass(row) || 'bg-[var(--app-surface)]'} ${fuelCardRingClass(row)}`}
                         >
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <p className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                                        {row.delivery_date || 'Date à définir'}
-                                    </p>
-                                    <h2 className="mt-1 text-base font-black text-[var(--app-text)]">
-                                        {row.client_name || 'Client à définir'}
-                                    </h2>
+                            {/* En-tête : badges état + date */}
+                            <div className="flex items-start justify-between gap-2 px-4 pt-4">
+                                <div className="flex flex-wrap gap-1.5">
+                                    {row.urgent ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+                                            <AlertTriangle className="h-3 w-3" strokeWidth={2.2} />
+                                            Urgent
+                                        </span>
+                                    ) : null}
+                                    {row.is_recurring ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-400 bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-600">
+                                            <RefreshCw className="h-3 w-3" strokeWidth={2.2} />
+                                            Récurrent
+                                        </span>
+                                    ) : null}
+                                    {row.is_delivered ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600 bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                                            <Check className="h-3 w-3" strokeWidth={2.4} />
+                                            Livrée
+                                        </span>
+                                    ) : null}
+                                </div>
+                                <p className="shrink-0 text-xs font-bold text-[var(--app-muted)]">
+                                    {row.delivery_date || 'Date à définir'}
+                                </p>
+                            </div>
+
+                            {/* Client */}
+                            <div className="mt-2 px-4">
+                                <h2 className="text-base font-black leading-tight text-[var(--app-text)]">
+                                    {row.client_name || 'Client à définir'}
+                                </h2>
+                                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                                     {row.code_tiers ? (
-                                        <span className="relative mt-1 inline-flex items-center">
+                                        <span className="relative inline-flex items-center">
                                             <button
                                                 type="button"
                                                 onClick={() => copyCode(row)}
-                                                className="rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-1 text-xs font-bold text-[var(--app-muted)]"
+                                                className="rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-0.5 text-xs font-bold text-[var(--app-muted)]"
                                             >
                                                 {row.code_tiers}
                                             </button>
@@ -3359,70 +3384,94 @@ function FuelTable({
                                             </span>
                                         </span>
                                     ) : null}
+                                    {row.site ? (
+                                        <span className="text-xs text-[var(--app-muted)]">{row.site}</span>
+                                    ) : null}
                                 </div>
-                                <div className="flex flex-col items-end gap-2">
+                            </div>
+
+                            {/* Infos livraison */}
+                            <div className="mt-3 space-y-1.5 px-4">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm text-[var(--app-text)]">{row.fuel_type || '—'}</span>
+                                    <span className="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-0.5 text-xs font-bold">
+                                        {row.volume || '—'}
+                                    </span>
+                                </div>
+                                {row.delivery_city ? (
+                                    <div className="flex items-center gap-1.5 text-sm text-[var(--app-muted)]">
+                                        <MapPin className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                                        {row.delivery_city}
+                                    </div>
+                                ) : null}
+                                {row.phone ? (
+                                    <div className="flex items-center gap-1.5 text-sm text-[var(--app-muted)]">
+                                        <Phone className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                                        {row.phone}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            {/* Commentaire */}
+                            {row.comment ? (
+                                <div className="mx-4 mt-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm text-[var(--app-muted)]">
+                                    {row.comment}
+                                </div>
+                            ) : null}
+
+                            {/* Info création */}
+                            <p className="mt-3 px-4 text-xs text-[var(--app-muted)]">
+                                {[row.created_at_label, row.created_by ? `par ${row.created_by}` : ''].filter(Boolean).join(' · ')}
+                            </p>
+
+                            {/* Barre d'actions */}
+                            {(canUpdate || canDelete) ? (
+                                <div className="mt-3 flex border-t border-[var(--app-border)]">
                                     {canUpdate ? (
                                         <button
                                             type="button"
                                             onClick={() => onPointRow(row)}
-                                            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border ${
+                                            className={`flex flex-1 items-center justify-center gap-1.5 py-3 text-xs font-bold ${
                                                 row.is_delivered
-                                                    ? 'border-emerald-600 bg-emerald-600 text-white'
-                                                    : 'border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-text)]'
+                                                    ? 'bg-emerald-600 text-white'
+                                                    : 'text-[var(--app-text)]'
                                             }`}
                                             aria-label="Pointer"
                                         >
                                             <Check className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                            {row.is_delivered ? 'Pointée' : 'Pointer'}
                                         </button>
                                     ) : null}
                                     {canUpdate ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onEditRow(row)}
-                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-text)]"
-                                            aria-label="Modifier"
-                                        >
-                                            <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                        </button>
+                                        <>
+                                            <div className="w-px bg-[var(--app-border)]" />
+                                            <button
+                                                type="button"
+                                                onClick={() => onEditRow(row)}
+                                                className="flex flex-1 items-center justify-center gap-1.5 py-3 text-xs font-bold text-[var(--app-text)]"
+                                                aria-label="Modifier"
+                                            >
+                                                <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                                Modifier
+                                            </button>
+                                        </>
                                     ) : null}
                                     {canDelete ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onDeleteRow(row)}
-                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-500 bg-red-500 text-white"
-                                            aria-label="Supprimer"
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                        </button>
-                                    ) : null}
-                                    <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-1 text-xs font-bold">
-                                        {row.volume || '—'}
-                                    </span>
-                                    {row.is_recurring ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-400 bg-sky-50 px-2 py-1 text-xs font-bold text-sky-600">
-                                            <RefreshCw className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                            Récurrent
-                                        </span>
-                                    ) : null}
-                                    {row.urgent ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500 bg-amber-100 px-2 py-1 text-xs font-bold text-amber-700">
-                                            <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                            Urgent
-                                        </span>
-                                    ) : null}
-                                    {row.is_delivered ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                                            <Check className="h-3.5 w-3.5" strokeWidth={2.4} />
-                                            Livrée
-                                        </span>
+                                        <>
+                                            <div className="w-px bg-[var(--app-border)]" />
+                                            <button
+                                                type="button"
+                                                onClick={() => onDeleteRow(row)}
+                                                className="flex flex-1 items-center justify-center gap-1.5 py-3 text-xs font-bold text-red-500"
+                                                aria-label="Supprimer"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                                Supprimer
+                                            </button>
+                                        </>
                                     ) : null}
                                 </div>
-                            </div>
-                            <div className="mt-3 grid gap-2 text-sm text-[var(--app-muted)]">
-                                <div>{[row.fuel_type, row.delivery_city].filter(Boolean).join(' • ') || '—'}</div>
-                                {row.comment ? <div>{row.comment}</div> : null}
-                                <div>{[row.created_at_label, row.created_by ? `créé par ${row.created_by}` : ''].filter(Boolean).join(' • ')}</div>
-                            </div>
+                            ) : null}
                         </article>
                         );
                         return [statsCard, card].filter(Boolean);
