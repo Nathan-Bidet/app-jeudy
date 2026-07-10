@@ -1,7 +1,7 @@
 import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import { Head, router } from '@inertiajs/react';
-import { AlertTriangle, ArrowUp, BarChart2, Check, ChevronDown, ChevronUp, Filter, MapPin, Pencil, Phone, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowUp, BarChart2, Building2, Check, ChevronDown, ChevronUp, Filter, Fuel, MapPin, Pencil, Phone, Plus, RefreshCw, Search, Settings, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -3333,67 +3333,81 @@ function FuelTable({
                             data-fuel-row={row.id}
                             className={`overflow-hidden rounded-2xl border border-[var(--app-border)] shadow-sm ${fuelRowStateClass(row) || 'bg-[var(--app-surface)]'} ${fuelCardRingClass(row)}`}
                         >
-                            {/* En-tête : badges état + date */}
-                            <div className="flex items-start justify-between gap-2 px-4 pt-4">
-                                <div className="flex flex-wrap gap-1.5">
-                                    {row.urgent ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
-                                            <AlertTriangle className="h-3 w-3" strokeWidth={2.2} />
-                                            Urgent
-                                        </span>
-                                    ) : null}
-                                    {row.is_recurring ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-400 bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-600">
-                                            <RefreshCw className="h-3 w-3" strokeWidth={2.2} />
-                                            Récurrent
-                                        </span>
-                                    ) : null}
-                                    {row.is_delivered ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600 bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">
-                                            <Check className="h-3 w-3" strokeWidth={2.4} />
-                                            Livrée
-                                        </span>
-                                    ) : null}
-                                </div>
-                                <p className="shrink-0 text-xs font-bold text-[var(--app-muted)]">
-                                    {row.delivery_date || 'Date à définir'}
-                                </p>
-                            </div>
-
-                            {/* Client */}
-                            <div className="mt-2 px-4">
-                                <h2 className="text-base font-black leading-tight text-[var(--app-text)]">
+                            {/* En-tête : client (gauche) + date et badges (droite) */}
+                            <div className="flex items-start justify-between gap-3 px-4 pt-4">
+                                <h2 className="line-clamp-2 text-base font-black leading-tight text-[var(--app-text)]">
                                     {row.client_name || 'Client à définir'}
                                 </h2>
-                                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                                    {row.code_tiers ? (
-                                        <span className="relative inline-flex items-center">
-                                            <button
-                                                type="button"
-                                                onClick={() => copyCode(row)}
-                                                className="rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-0.5 text-xs font-bold text-[var(--app-muted)]"
-                                            >
-                                                {row.code_tiers}
-                                            </button>
-                                            <span
-                                                className={`pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap text-xs font-bold text-emerald-600 transition-opacity duration-200 ${
-                                                    copiedCodeId === row.id ? 'opacity-100' : 'opacity-0'
-                                                }`}
-                                            >
-                                                ✓ Copié
-                                            </span>
-                                        </span>
-                                    ) : null}
-                                    {row.site ? (
-                                        <span className="text-xs text-[var(--app-muted)]">{row.site}</span>
+                                <div className="shrink-0 text-right">
+                                    <p className="text-xs font-bold text-[var(--app-muted)]">
+                                        {row.delivery_date || 'Date à définir'}
+                                    </p>
+                                    {(row.urgent || row.is_recurring || row.is_delivered) ? (
+                                        <div className="mt-1.5 flex flex-col items-end gap-1">
+                                            {row.urgent ? (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+                                                    <AlertTriangle className="h-3 w-3" strokeWidth={2.2} />
+                                                    Urgent
+                                                </span>
+                                            ) : null}
+                                            {row.is_recurring ? (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-sky-400 bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-600">
+                                                    <RefreshCw className="h-3 w-3" strokeWidth={2.2} />
+                                                    Récurrent
+                                                </span>
+                                            ) : null}
+                                            {row.is_delivered ? (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600 bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                                                    <Check className="h-3 w-3" strokeWidth={2.4} />
+                                                    Livrée
+                                                </span>
+                                            ) : null}
+                                        </div>
                                     ) : null}
                                 </div>
                             </div>
 
+                            {/* Code tiers */}
+                            {row.code_tiers ? (
+                                <div className="mt-2 px-4">
+                                    <span className="relative inline-flex items-center">
+                                        <button
+                                            type="button"
+                                            onClick={() => copyCode(row)}
+                                            className="rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-0.5 text-xs font-bold text-[var(--app-muted)]"
+                                        >
+                                            {row.code_tiers}
+                                        </button>
+                                        <span
+                                            className={`pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap text-xs font-bold text-emerald-600 transition-opacity duration-200 ${
+                                                copiedCodeId === row.id ? 'opacity-100' : 'opacity-0'
+                                            }`}
+                                        >
+                                            ✓ Copié
+                                        </span>
+                                    </span>
+                                </div>
+                            ) : null}
+
                             {/* Infos livraison */}
-                            <div className="mt-3 space-y-1.5 px-4">
+                            <div className="mt-3 space-y-2 px-4">
+                                {row.site ? (
+                                    <div className="flex items-center gap-1.5">
+                                        <Building2 className="h-3.5 w-3.5 shrink-0 text-[var(--app-muted)]" strokeWidth={2} />
+                                        <span className="text-sm text-[var(--app-text)]">
+                                            <span className="text-[var(--app-muted)]">Site : </span>
+                                            {row.site}
+                                        </span>
+                                    </div>
+                                ) : null}
                                 <div className="flex items-center justify-between gap-2">
-                                    <span className="text-sm text-[var(--app-text)]">{row.fuel_type || '—'}</span>
+                                    <div className="flex items-center gap-1.5">
+                                        <Fuel className="h-3.5 w-3.5 shrink-0 text-[var(--app-muted)]" strokeWidth={2} />
+                                        <span className="text-sm text-[var(--app-text)]">
+                                            <span className="text-[var(--app-muted)]">Produit : </span>
+                                            {row.fuel_type || '—'}
+                                        </span>
+                                    </div>
                                     <span className="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2.5 py-0.5 text-xs font-bold">
                                         {row.volume || '—'}
                                     </span>
@@ -3420,13 +3434,13 @@ function FuelTable({
                             ) : null}
 
                             {/* Info création */}
-                            <p className="mt-3 px-4 text-xs text-[var(--app-muted)]">
+                            <p className="mt-3 px-4 pb-4 text-xs text-[var(--app-muted)]">
                                 {[row.created_at_label, row.created_by ? `par ${row.created_by}` : ''].filter(Boolean).join(' · ')}
                             </p>
 
                             {/* Barre d'actions */}
                             {(canUpdate || canDelete) ? (
-                                <div className="mt-3 flex border-t border-[var(--app-border)]">
+                                <div className="-mt-4 flex border-t border-[var(--app-border)]">
                                     {canUpdate ? (
                                         <button
                                             type="button"
