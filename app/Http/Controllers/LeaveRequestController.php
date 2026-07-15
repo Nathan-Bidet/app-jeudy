@@ -540,6 +540,16 @@ class LeaveRequestController extends Controller
         $validator = $leaveRequest->validator;
         if ($validator) {
             $validator->notify(new LeaveRequestModificationAcceptedNotification($leaveRequest, $acceptedStartAt, $acceptedEndAt));
+
+            SendWebPushNotificationJob::dispatch($validator->id, [
+                'title' => 'Modification de congé acceptée',
+                'body' => sprintf(
+                    '%s a accepté la nouvelle période proposée pour sa demande de congé.',
+                    $this->userLabel($user),
+                ),
+                'icon' => '/pwa-192.png',
+                'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+            ]);
         }
 
         $after = $this->leaveRequestAuditSnapshot($leaveRequest);
@@ -600,6 +610,16 @@ class LeaveRequestController extends Controller
         $validator = $leaveRequest->validator;
         if ($validator) {
             $validator->notify(new LeaveRequestModificationRefusedNotification($leaveRequest, $proposedStartAt, $proposedEndAt));
+
+            SendWebPushNotificationJob::dispatch($validator->id, [
+                'title' => 'Modification de congé refusée',
+                'body' => sprintf(
+                    '%s a refusé la nouvelle période proposée pour sa demande de congé.',
+                    $this->userLabel($user),
+                ),
+                'icon' => '/pwa-192.png',
+                'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+            ]);
         }
 
         $this->auditLogService->log([
