@@ -33,13 +33,20 @@ class LdtProjectionService
             'assignee_label_free' => $assigneeLabelFree,
         ]);
 
-        $tasks = $this->groupTasksQuery($group)->get();
+        // All tasks in the group — used to determine if the group exists and for metadata.
+        $allTasks = $this->groupTasksQuery($group)->get();
 
-        if ($tasks->isEmpty()) {
+        if ($allTasks->isEmpty()) {
             $this->deleteEntryIfGroupEmpty($group['date'], $group['assignee_type'], $group['assignee_id']);
 
             return null;
         }
+
+        // Active tasks: neither partially pointed nor fully pointed.
+        // These are the only ones shown in the LDT "À prendre en charge" view.
+        $tasks = $allTasks->filter(
+            fn (AprevoirTask $task) => !(bool) $task->pointed && !(bool) $task->partially_pointed
+        );
 
         $assignee = $this->resolveAssignee($group['assignee_type'], $group['assignee_id'], $group['assignee_label_free']);
         $phones = $this->resolvePhones($assignee, $group['assignee_type']);
@@ -80,7 +87,8 @@ class LdtProjectionService
         $entry->comments_text = $commentsLines->isNotEmpty() ? implode("\n", $commentsLines->all()) : null;
         $entry->vehicles_text = $vehicles->isNotEmpty() ? implode(' • ', $vehicles->all()) : null;
         $entry->indicators = $indicators;
-        $entry->is_all_pointed = $tasks->every(fn (AprevoirTask $task) => (bool) $task->partially_pointed || (bool) $task->pointed);
+        // is_all_pointed = true when no active tasks remain (all are pointed or partially pointed).
+        $entry->is_all_pointed = $tasks->isEmpty();
         $entry->source_task_ids = $tasks->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
         $entry->color_style = $styles;
         $entry->updated_from_source_at = now();
