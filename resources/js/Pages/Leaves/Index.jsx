@@ -1,7 +1,8 @@
+import LeaveRequestDetailModal from '@/Components/LeaveRequestDetailModal';
 import AppLayout from '@/Layouts/AppLayout';
 import LeaveRequestForm from '@/Pages/Leaves/Components/LeaveRequestForm';
 import { router } from '@inertiajs/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export default function LeavesIndex({
     users = [],
@@ -12,8 +13,16 @@ export default function LeavesIndex({
     leaveRequestsToValidate = [],
     canValidateRequests = false,
     canDeleteLeaveRequests = false,
+    highlightId = null,
 }) {
     const [modificationForms, setModificationForms] = useState({});
+    const [openLeaveRequestId, setOpenLeaveRequestId] = useState(null);
+
+    useEffect(() => {
+        if (highlightId) {
+            setOpenLeaveRequestId(highlightId);
+        }
+    }, [highlightId]);
     const [showValidationHistory, setShowValidationHistory] = useState(false);
     const [validationUserId, setValidationUserId] = useState('');
     const [showAllMyLeaveRequests, setShowAllMyLeaveRequests] = useState(false);
@@ -550,6 +559,13 @@ export default function LeavesIndex({
                     </div>
                 ) : null}
             </section>
+
+            {openLeaveRequestId && (
+                <LeaveRequestDetailModal
+                    leaveRequestId={openLeaveRequestId}
+                    onClose={() => setOpenLeaveRequestId(null)}
+                />
+            )}
         </AppLayout>
     );
 }

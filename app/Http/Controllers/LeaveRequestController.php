@@ -16,6 +16,7 @@ use App\Notifications\LeaveRequestRefusedNotification;
 use App\Notifications\LeaveRequestSubmittedNotification;
 use App\Jobs\SendWebPushNotificationJob;
 use App\Services\AuditLogService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -150,6 +151,8 @@ class LeaveRequestController extends Controller
             ->values()
             ->all();
 
+        $highlightId = $request->query('highlight') ? (int) $request->query('highlight') : null;
+
         return Inertia::render('Leaves/Index', [
             'users' => $users,
             'leaveTypes' => $leaveTypes,
@@ -159,6 +162,7 @@ class LeaveRequestController extends Controller
             'leaveRequestsToValidate' => $leaveRequestsToValidate,
             'canValidateRequests' => $canValidateRequests,
             'canDeleteLeaveRequests' => $isAdmin,
+            'highlightId' => $highlightId,
         ]);
     }
 
@@ -343,6 +347,9 @@ class LeaveRequestController extends Controller
                     'body' => sprintf('%s a soumis une demande de congé', $requesterLabel),
                     'icon' => '/pwa-192.png',
                     'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                    'resourceType' => 'leave_request',
+                    'resourceId' => (int) $leaveRequest->id,
+                    'action' => 'view',
                 ]);
             }
 
@@ -417,6 +424,9 @@ class LeaveRequestController extends Controller
                 ),
                 'icon' => '/pwa-192.png',
                 'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                'resourceType' => 'leave_request',
+                'resourceId' => (int) $leaveRequest->id,
+                'action' => 'view',
             ]);
         }
 
@@ -434,6 +444,10 @@ class LeaveRequestController extends Controller
                 'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
             ],
         ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true]);
+        }
 
         return back()->with('success', 'Demande de congé approuvée.');
     }
@@ -481,6 +495,9 @@ class LeaveRequestController extends Controller
                 'body' => 'La période proposée pour votre demande de congé a été modifiée. Consultez la demande pour la valider.',
                 'icon' => '/pwa-192.png',
                 'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                'resourceType' => 'leave_request',
+                'resourceId' => (int) $leaveRequest->id,
+                'action' => 'view',
             ]);
         }
 
@@ -498,6 +515,10 @@ class LeaveRequestController extends Controller
                 'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
             ],
         ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true]);
+        }
 
         return back()->with('success', 'Contre-proposition de congé enregistrée.');
     }
@@ -549,6 +570,9 @@ class LeaveRequestController extends Controller
                 ),
                 'icon' => '/pwa-192.png',
                 'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                'resourceType' => 'leave_request',
+                'resourceId' => (int) $leaveRequest->id,
+                'action' => 'view',
             ]);
         }
 
@@ -581,6 +605,10 @@ class LeaveRequestController extends Controller
                 'after' => $after,
             ],
         ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true]);
+        }
 
         return back()->with('success', 'Modification de période acceptée.');
     }
@@ -619,6 +647,9 @@ class LeaveRequestController extends Controller
                 ),
                 'icon' => '/pwa-192.png',
                 'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                'resourceType' => 'leave_request',
+                'resourceId' => (int) $leaveRequest->id,
+                'action' => 'view',
             ]);
         }
 
@@ -635,6 +666,10 @@ class LeaveRequestController extends Controller
                 'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
             ],
         ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true]);
+        }
 
         return back()->with('success', 'Modification de période refusée.');
     }
@@ -660,6 +695,9 @@ class LeaveRequestController extends Controller
                 ),
                 'icon' => '/pwa-192.png',
                 'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                'resourceType' => 'leave_request',
+                'resourceId' => (int) $leaveRequest->id,
+                'action' => 'view',
             ]);
         }
 
@@ -677,6 +715,10 @@ class LeaveRequestController extends Controller
                 'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
             ],
         ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true]);
+        }
 
         return back()->with('success', 'Demande de congé refusée.');
     }
@@ -705,6 +747,72 @@ class LeaveRequestController extends Controller
         ]);
 
         return back()->with('success', 'Demande de congé supprimée.');
+    }
+
+    public function show(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $leaveRequest = LeaveRequest::with([
+            'requester:id,name,first_name,last_name,email',
+            'target:id,name,first_name,last_name,email',
+            'leaveType:id,name',
+            'validator:id,name,first_name,last_name,email',
+            'proposedBy:id,name,first_name,last_name,email',
+        ])->findOrFail($id);
+
+        $isRequester = (int) $leaveRequest->requester_user_id === (int) $user->id;
+        $isTarget = (int) $leaveRequest->target_user_id === (int) $user->id;
+        $isValidator = (int) $leaveRequest->validator_user_id === (int) $user->id;
+        $isAdmin = (bool) $user->hasRole('admin');
+
+        abort_unless($isRequester || $isTarget || $isValidator || $isAdmin, 403);
+
+        return response()->json($this->leaveRequestDetailData($leaveRequest, $user));
+    }
+
+    private function leaveRequestDetailData(LeaveRequest $leaveRequest, User $user): array
+    {
+        $isRequester = (int) $leaveRequest->requester_user_id === (int) $user->id;
+        $isTarget = (int) $leaveRequest->target_user_id === (int) $user->id;
+        $isValidator = (int) $leaveRequest->validator_user_id === (int) $user->id;
+        $isAdmin = (bool) $user->hasRole('admin');
+        $canValidate = $isValidator || $isAdmin;
+        $canAct = $isRequester || $isTarget;
+
+        return [
+            'id' => (int) $leaveRequest->id,
+            'status' => (string) $leaveRequest->status,
+            'requester_label' => $this->userLabel($leaveRequest->requester),
+            'target_label' => $this->userLabel($leaveRequest->target),
+            'requester_is_target' => (int) $leaveRequest->requester_user_id === (int) $leaveRequest->target_user_id,
+            'validator_label' => $leaveRequest->validator ? $this->userLabel($leaveRequest->validator) : null,
+            'leave_type_label' => $leaveRequest->leaveType?->name ?? '—',
+            'start_at' => $leaveRequest->start_at?->toDateString(),
+            'end_at' => $leaveRequest->end_at?->toDateString(),
+            'start_portion' => $leaveRequest->start_portion,
+            'end_portion' => $leaveRequest->end_portion,
+            'is_all_day' => (bool) $leaveRequest->is_all_day,
+            'custom_start_time' => $leaveRequest->custom_start_time,
+            'custom_end_time' => $leaveRequest->custom_end_time,
+            'message' => $leaveRequest->message,
+            'proposed_start_at' => $leaveRequest->proposed_start_at?->toDateString(),
+            'proposed_end_at' => $leaveRequest->proposed_end_at?->toDateString(),
+            'proposed_start_portion' => $leaveRequest->proposed_start_portion,
+            'proposed_end_portion' => $leaveRequest->proposed_end_portion,
+            'proposed_custom_start_time' => $leaveRequest->proposed_custom_start_time,
+            'proposed_custom_end_time' => $leaveRequest->proposed_custom_end_time,
+            'proposed_message' => $leaveRequest->proposed_message,
+            'proposed_by_label' => $leaveRequest->proposedBy ? $this->userLabel($leaveRequest->proposedBy) : null,
+            'created_at' => $leaveRequest->created_at?->toIso8601String(),
+            'updated_at' => $leaveRequest->updated_at?->toIso8601String(),
+            'permissions' => [
+                'can_approve' => $canValidate && $leaveRequest->status === LeaveRequest::STATUS_PENDING,
+                'can_refuse' => $canValidate && $leaveRequest->status === LeaveRequest::STATUS_PENDING,
+                'can_propose_modification' => $canValidate && $leaveRequest->status === LeaveRequest::STATUS_PENDING,
+                'can_accept_modification' => $canAct && $leaveRequest->status === LeaveRequest::STATUS_PENDING_USER_CONFIRMATION,
+                'can_refuse_modification' => $canAct && $leaveRequest->status === LeaveRequest::STATUS_PENDING_USER_CONFIRMATION,
+            ],
+        ];
     }
 
     private function canValidateLeaveRequest(Request $request, LeaveRequest $leaveRequest): bool

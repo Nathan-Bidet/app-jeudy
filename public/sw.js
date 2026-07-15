@@ -57,14 +57,22 @@ self.addEventListener('push', (event) => {
       body: data.body || '',
       icon: data.icon || '/pwa-192.png',
       badge: '/pwa-192.png',
-      data: { url: data.url || '/' },
+      data: {
+        url: data.url || '/',
+        resourceType: data.resourceType || null,
+        resourceId: data.resourceId || null,
+        action: data.action || null,
+      },
     })
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || '/';
+  const notifData = event.notification.data || {};
+  const targetUrl = notifData.url || '/';
+  const resourceType = notifData.resourceType;
+  const resourceId = notifData.resourceId;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
@@ -72,10 +80,11 @@ self.addEventListener('notificationclick', (event) => {
         (client) => new URL(client.url).origin === self.location.origin
       );
       if (existing) {
-        // postMessage déclenche router.visit() dans React (compatible iOS/Android/desktop).
-        // client.navigate() n'est pas supporté sur Safari et crée une race condition
-        // avec focus() même là où il est disponible.
-        existing.postMessage({ type: 'SW_NAVIGATE', url: targetUrl });
+        if (resourceType && resourceId) {
+          existing.postMessage({ type: 'OPEN_RESOURCE', resourceType, resourceId });
+        } else {
+          existing.postMessage({ type: 'SW_NAVIGATE', url: targetUrl });
+        }
         return existing.focus();
       }
       return clients.openWindow(targetUrl);

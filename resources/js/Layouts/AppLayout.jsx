@@ -1,3 +1,4 @@
+import LeaveRequestDetailModal from '@/Components/LeaveRequestDetailModal';
 import Modal from '@/Components/Modal';
 import PushNotificationPrompt from '@/Components/PushNotificationPrompt';
 import PwaInstallBanner from '@/Components/PwaInstallBanner';
@@ -42,6 +43,7 @@ export default function AppLayout({ title, header, children }) {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [theme, setTheme] = useState(getInitialTheme);
     const [showHoursReminderModal, setShowHoursReminderModal] = useState(false);
+    const [pendingResource, setPendingResource] = useState(null);
 
     const isDark = theme === 'dark';
     const hasHeader = useMemo(() => Boolean(header || title), [header, title]);
@@ -64,6 +66,13 @@ export default function AppLayout({ title, header, children }) {
         if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
 
         const handleSwMessage = (event) => {
+            if (event.data?.type === 'OPEN_RESOURCE') {
+                const { resourceType, resourceId } = event.data;
+                if (resourceType === 'leave_request' && resourceId) {
+                    setPendingResource({ type: resourceType, id: resourceId });
+                }
+                return;
+            }
             if (event.data?.type === 'SW_NAVIGATE' && event.data?.url) {
                 try {
                     const parsed = new URL(event.data.url);
@@ -181,6 +190,13 @@ export default function AppLayout({ title, header, children }) {
             <PwaInstallBanner />
             <PushNotificationPrompt />
             <ToastHost />
+
+            {pendingResource?.type === 'leave_request' && pendingResource?.id && (
+                <LeaveRequestDetailModal
+                    leaveRequestId={pendingResource.id}
+                    onClose={() => setPendingResource(null)}
+                />
+            )}
         </div>
     );
 }

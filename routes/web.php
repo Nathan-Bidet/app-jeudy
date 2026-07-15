@@ -135,6 +135,8 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::post('/activities/leaves', [LeaveRequestController::class, 'store'])
         ->middleware('throttle:leave-actions')
         ->name('leaves.store');
+    Route::get('/leaves/{id}', [LeaveRequestController::class, 'show'])
+        ->name('leaves.show');
     Route::post('/leaves/{id}/approve', [LeaveRequestController::class, 'approve'])
         ->middleware('throttle:leave-actions')
         ->name('leaves.approve');
