@@ -38,7 +38,7 @@ function dismissForever() {
 }
 
 export default function PushNotificationPrompt() {
-    const { isSupported, permission, isSubscribed, isLoading, subscribe } = usePushNotifications();
+    const { isSupported, permission, isSubscribed, isLoading, error, subscribe } = usePushNotifications();
     const [visible, setVisible] = useState(false);
 
     useEffect(() => {
@@ -99,6 +99,10 @@ export default function PushNotificationPrompt() {
                         <X className="h-4 w-4" />
                     </button>
                 </div>
+
+                {error ? (
+                    <p className="mt-2 text-xs text-red-500">{error}</p>
+                ) : null}
 
                 <div className="mt-3 flex gap-2">
                     <button
