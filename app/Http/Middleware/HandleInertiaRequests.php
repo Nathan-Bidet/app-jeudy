@@ -147,6 +147,7 @@ class HandleInertiaRequests extends Middleware
                     'dismiss_key' => $today,
                 ];
             },
+            'vapid_public_key' => config('webpush.vapid_public_key') ?: null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'status' => fn () => $request->session()->get('status'),

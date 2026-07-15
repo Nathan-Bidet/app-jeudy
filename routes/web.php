@@ -22,6 +22,7 @@ use App\Http\Controllers\EngraisController;
 use App\Http\Controllers\TaskFuelController;
 use App\Http\Controllers\TaskTiersController;
 use App\Http\Controllers\TasksDataController;
+use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\UserFileController;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Support\Facades\Route;
@@ -52,6 +53,9 @@ Route::middleware(['auth', 'twofactor'])->group(function () {
 
     Route::patch('/profile', [SecurityProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+
+    Route::post('/push-subscriptions', [PushSubscriptionController::class, 'store'])->name('push.subscribe');
+    Route::delete('/push-subscriptions', [PushSubscriptionController::class, 'destroy'])->name('push.unsubscribe');
 });
 
 Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {

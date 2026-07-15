@@ -131,4 +131,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(UserFile::class, 'uploaded_by_user_id');
     }
+
+    public function pushSubscriptions(): HasMany
+    {
+        return $this->hasMany(PushSubscription::class);
+    }
 }

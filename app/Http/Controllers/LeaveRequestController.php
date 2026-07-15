@@ -14,6 +14,7 @@ use App\Notifications\LeaveRequestModificationProposedNotification;
 use App\Notifications\LeaveRequestModificationRefusedNotification;
 use App\Notifications\LeaveRequestRefusedNotification;
 use App\Notifications\LeaveRequestSubmittedNotification;
+use App\Jobs\SendWebPushNotificationJob;
 use App\Services\AuditLogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -336,6 +337,13 @@ class LeaveRequestController extends Controller
 
             if ($validator) {
                 $validator->notify(new LeaveRequestSubmittedNotification($leaveRequest, $requesterLabel));
+
+                SendWebPushNotificationJob::dispatch($validator->id, [
+                    'title' => 'Demande de congé',
+                    'body' => sprintf('%s a soumis une demande de congé', $requesterLabel),
+                    'icon' => '/pwa-192.png',
+                    'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+                ]);
             }
 
             $this->auditLogService->log([

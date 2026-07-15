@@ -1,4 +1,5 @@
 import Modal from '@/Components/Modal';
+import PushNotificationPrompt from '@/Components/PushNotificationPrompt';
 import PwaInstallBanner from '@/Components/PwaInstallBanner';
 import Navbar from '@/Layouts/AppShell/Navbar';
 import Sidebar from '@/Layouts/AppShell/Sidebar';
@@ -160,6 +161,7 @@ export default function AppLayout({ title, header, children }) {
             </Modal>
 
             <PwaInstallBanner />
+            <PushNotificationPrompt />
             <ToastHost />
         </div>
     );

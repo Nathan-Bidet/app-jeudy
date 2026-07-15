@@ -1,4 +1,4 @@
-const SW_VERSION = 'jeudy-pwa-v2';
+const SW_VERSION = 'jeudy-pwa-v3';
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 const STATIC_CACHE = `${SW_VERSION}-static`;
 const PAGES_CACHE = `${SW_VERSION}-pages`;
@@ -43,6 +43,42 @@ function isSensitivePath(pathname) {
     || pathname.startsWith('/logout')
     || pathname.startsWith('/admin');
 }
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = { title: 'Jeudy', body: event.data ? event.data.text() : '' };
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Jeudy', {
+      body: data.body || '',
+      icon: data.icon || '/pwa-192.png',
+      badge: '/pwa-192.png',
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      const existing = windowClients.find(
+        (client) => new URL(client.url).origin === self.location.origin
+      );
+      if (existing) {
+        existing.navigate(targetUrl);
+        return existing.focus();
+      }
+      return clients.openWindow(targetUrl);
+    })
+  );
+});
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
