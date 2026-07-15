@@ -403,7 +403,7 @@ class LeaveRequestController extends Controller
         };
     }
 
-    public function approve(Request $request, int $id): RedirectResponse
+    public function approve(Request $request, int $id): RedirectResponse|JsonResponse
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         abort_unless($this->canValidateLeaveRequest($request, $leaveRequest), 403);
@@ -452,7 +452,7 @@ class LeaveRequestController extends Controller
         return back()->with('success', 'Demande de congé approuvée.');
     }
 
-    public function proposeModification(Request $request, int $id): RedirectResponse
+    public function proposeModification(Request $request, int $id): RedirectResponse|JsonResponse
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         $user = $request->user();
@@ -523,7 +523,7 @@ class LeaveRequestController extends Controller
         return back()->with('success', 'Contre-proposition de congé enregistrée.');
     }
 
-    public function acceptProposedModification(Request $request, int $id): RedirectResponse
+    public function acceptProposedModification(Request $request, int $id): RedirectResponse|JsonResponse
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         $user = $request->user();
@@ -613,7 +613,7 @@ class LeaveRequestController extends Controller
         return back()->with('success', 'Modification de période acceptée.');
     }
 
-    public function refuseProposedModification(Request $request, int $id): RedirectResponse
+    public function refuseProposedModification(Request $request, int $id): RedirectResponse|JsonResponse
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         $user = $request->user();
@@ -674,7 +674,7 @@ class LeaveRequestController extends Controller
         return back()->with('success', 'Modification de période refusée.');
     }
 
-    public function refuse(Request $request, int $id): RedirectResponse
+    public function refuse(Request $request, int $id): RedirectResponse|JsonResponse
     {
         $leaveRequest = LeaveRequest::query()->findOrFail($id);
         abort_unless($this->canValidateLeaveRequest($request, $leaveRequest), 403);
