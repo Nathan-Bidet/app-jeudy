@@ -86,7 +86,7 @@ export default function PushNotificationPrompt() {
                         <div>
                             <p className="text-sm font-semibold leading-snug">Notifications Push</p>
                             <p className="mt-0.5 text-xs text-[var(--app-muted)]">
-                                Recevez une notification lorsqu'une demande de congé vous est soumise.
+                                Recevez les notifications importantes de l'application, même lorsqu'elle est fermée.
                             </p>
                         </div>
                     </div>

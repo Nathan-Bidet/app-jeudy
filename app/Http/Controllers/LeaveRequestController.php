@@ -407,6 +407,17 @@ class LeaveRequestController extends Controller
         $requester = $leaveRequest->requester;
         if ($requester) {
             $requester->notify(new LeaveRequestApprovedNotification($leaveRequest));
+
+            SendWebPushNotificationJob::dispatch($requester->id, [
+                'title' => 'Congé accepté',
+                'body' => sprintf(
+                    'Votre demande de congé du %s au %s a été acceptée.',
+                    $leaveRequest->start_at?->format('d/m/Y') ?? '-',
+                    $leaveRequest->end_at?->format('d/m/Y') ?? '-',
+                ),
+                'icon' => '/pwa-192.png',
+                'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+            ]);
         }
 
         $this->auditLogService->log([
@@ -464,6 +475,13 @@ class LeaveRequestController extends Controller
         $requester = $leaveRequest->requester;
         if ($requester) {
             $requester->notify(new LeaveRequestModificationProposedNotification($leaveRequest));
+
+            SendWebPushNotificationJob::dispatch($requester->id, [
+                'title' => 'Période de congé modifiée',
+                'body' => 'La période proposée pour votre demande de congé a été modifiée. Consultez la demande pour la valider.',
+                'icon' => '/pwa-192.png',
+                'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+            ]);
         }
 
         $this->auditLogService->log([
@@ -612,6 +630,17 @@ class LeaveRequestController extends Controller
         $requester = $leaveRequest->requester;
         if ($requester) {
             $requester->notify(new LeaveRequestRefusedNotification($leaveRequest));
+
+            SendWebPushNotificationJob::dispatch($requester->id, [
+                'title' => 'Congé refusé',
+                'body' => sprintf(
+                    'Votre demande de congé du %s au %s a été refusée.',
+                    $leaveRequest->start_at?->format('d/m/Y') ?? '-',
+                    $leaveRequest->end_at?->format('d/m/Y') ?? '-',
+                ),
+                'icon' => '/pwa-192.png',
+                'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+            ]);
         }
 
         $this->auditLogService->log([
