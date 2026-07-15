@@ -5,7 +5,7 @@ import Navbar from '@/Layouts/AppShell/Navbar';
 import Sidebar from '@/Layouts/AppShell/Sidebar';
 import ToastHost from '@/Layouts/AppShell/ToastHost';
 import TitleCaps from '@/Layouts/AppShell/TitleCaps';
-import { usePage } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
 
 const THEME_KEY = 'app.theme';
@@ -59,6 +59,24 @@ export default function AppLayout({ title, header, children }) {
     useEffect(() => {
         setMobileOpen(false);
     }, [title]);
+
+    useEffect(() => {
+        if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+        const handleSwMessage = (event) => {
+            if (event.data?.type === 'SW_NAVIGATE' && event.data?.url) {
+                try {
+                    const parsed = new URL(event.data.url);
+                    router.visit(parsed.pathname + parsed.search);
+                } catch {
+                    router.visit(event.data.url);
+                }
+            }
+        };
+
+        navigator.serviceWorker.addEventListener('message', handleSwMessage);
+        return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    }, []);
 
     useEffect(() => {
         if (typeof window === 'undefined') {

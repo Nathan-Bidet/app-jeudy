@@ -72,7 +72,10 @@ self.addEventListener('notificationclick', (event) => {
         (client) => new URL(client.url).origin === self.location.origin
       );
       if (existing) {
-        existing.navigate(targetUrl);
+        // postMessage déclenche router.visit() dans React (compatible iOS/Android/desktop).
+        // client.navigate() n'est pas supporté sur Safari et crée une race condition
+        // avec focus() même là où il est disponible.
+        existing.postMessage({ type: 'SW_NAVIGATE', url: targetUrl });
         return existing.focus();
       }
       return clients.openWindow(targetUrl);
