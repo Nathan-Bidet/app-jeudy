@@ -95,8 +95,8 @@ function MobileFiltersModal({
                             className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm"
                         >
                             <option value="all">Tous</option>
-                            <option value="done">Pointé</option>
-                            <option value="todo">Non pointé</option>
+                            <option value="done">Pris en charge</option>
+                            <option value="todo">À prendre en charge</option>
                         </select>
                     </div>
                 </div>
@@ -545,8 +545,8 @@ export default function LdtIndex({
                             className="h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm"
                         >
                             <option value="all">Tous</option>
-                            <option value="done">Pointé</option>
-                            <option value="todo">Non pointé</option>
+                            <option value="done">Pris en charge</option>
+                            <option value="todo">À prendre en charge</option>
                         </select>
                     </label>
 

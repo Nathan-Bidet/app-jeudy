@@ -80,7 +80,7 @@ class LdtProjectionService
         $entry->comments_text = $commentsLines->isNotEmpty() ? implode("\n", $commentsLines->all()) : null;
         $entry->vehicles_text = $vehicles->isNotEmpty() ? implode(' • ', $vehicles->all()) : null;
         $entry->indicators = $indicators;
-        $entry->is_all_pointed = $tasks->every(fn (AprevoirTask $task) => (bool) $task->pointed);
+        $entry->is_all_pointed = $tasks->every(fn (AprevoirTask $task) => (bool) $task->partially_pointed || (bool) $task->pointed);
         $entry->source_task_ids = $tasks->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
         $entry->color_style = $styles;
         $entry->updated_from_source_at = now();

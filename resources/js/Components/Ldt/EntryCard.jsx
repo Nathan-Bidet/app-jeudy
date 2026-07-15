@@ -633,7 +633,7 @@ export default function EntryCard({
                 {entry.is_all_pointed ? (
                     <span className="inline-flex items-center gap-1 rounded-full border-2 border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-700">
                         <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2.2} />
-                        Pointé
+                        Pris en charge
                     </span>
                 ) : null}
             </div>
