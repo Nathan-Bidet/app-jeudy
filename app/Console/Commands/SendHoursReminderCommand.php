@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\SendWebPushNotificationJob;
 use App\Models\HourSheet;
 use App\Models\User;
 use App\Notifications\HoursMissingEntryReminderNotification;
@@ -57,6 +58,25 @@ class SendHoursReminderCommand extends Command
 
             $user->notify(new HoursMissingEntryReminderNotification($today));
             $sentCount++;
+
+            try {
+                $dbNotification = $user->notifications()
+                    ->where('data->type', 'hours_missing_entry_reminder')
+                    ->where('data->work_date', $today)
+                    ->latest()
+                    ->first();
+
+                SendWebPushNotificationJob::dispatch($user->id, [
+                    'title' => 'Heures à renseigner',
+                    'body' => 'Vous n\'avez pas encore saisi vos heures pour aujourd\'hui.',
+                    'icon' => '/pwa-192.png',
+                    'url' => route('hours.index'),
+                    'resourceType' => 'hours_reminder',
+                    'notificationId' => $dbNotification?->id ? (string) $dbNotification->id : null,
+                ]);
+            } catch (\Throwable $e) {
+                $this->warn(sprintf('Push hours reminder failed for user %d: %s', $user->id, $e->getMessage()));
+            }
         }
 
         $this->info(sprintf('%d rappel(s) heures envoyé(s).', $sentCount));

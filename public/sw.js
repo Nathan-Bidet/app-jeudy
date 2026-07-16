@@ -62,6 +62,7 @@ self.addEventListener('push', (event) => {
         resourceType: data.resourceType || null,
         resourceId: data.resourceId || null,
         action: data.action || null,
+        notificationId: data.notificationId || null,
       },
     })
   );
@@ -73,6 +74,7 @@ self.addEventListener('notificationclick', (event) => {
   const targetUrl = notifData.url || '/';
   const resourceType = notifData.resourceType;
   const resourceId = notifData.resourceId;
+  const notificationId = notifData.notificationId;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
@@ -80,8 +82,8 @@ self.addEventListener('notificationclick', (event) => {
         (client) => new URL(client.url).origin === self.location.origin
       );
       if (existing) {
-        if (resourceType && resourceId) {
-          existing.postMessage({ type: 'OPEN_RESOURCE', resourceType, resourceId });
+        if (resourceType) {
+          existing.postMessage({ type: 'OPEN_RESOURCE', resourceType, resourceId, notificationId });
         } else {
           existing.postMessage({ type: 'SW_NAVIGATE', url: targetUrl });
         }
