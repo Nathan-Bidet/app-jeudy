@@ -11,6 +11,12 @@ use Throwable;
 
 class NotifyWorkbookTaskAssigneeListener
 {
+    /**
+     * Champs métier surveillés pour "Tâche modifiée" (hors affectation chauffeur).
+     * Texte  : date, fin_date, task_label, loading_place, delivery_place, comment, boursagri_contract_number
+     * Entier : vehicle_id, remorque_id
+     * Booléen: is_direct, is_boursagri
+     */
     public function handle(AprevoirTaskChanged $event): void
     {
         if (! in_array($event->action, ['created', 'updated', 'deleted'], true)) {
@@ -24,52 +30,109 @@ class NotifyWorkbookTaskAssigneeListener
         $oldUserId = $this->extractUserId($before);
         $newUserId = $this->extractUserId($after);
 
-        // Même utilisateur : tâche modifiée
+        // Même chauffeur : notifier uniquement si un champ métier a réellement changé
         if ($oldUserId !== null && $oldUserId === $newUserId) {
-            $desc = $this->shortDescription($after);
-            $date = $this->formatDate($after['date'] ?? null);
-            $body = $this->buildBody(
-                $date ? sprintf('Votre tâche du %s a été mise à jour.', $date) : 'Votre tâche a été mise à jour.',
-                $desc,
-            );
-            $this->sendPush($oldUserId, $taskId, 'modified', [
-                'title' => 'Tâche modifiée',
-                'body' => $body,
-                'url' => route('ldt.index', ['focus_task_id' => $taskId]),
-                'resourceType' => 'workbook_task',
-                'resourceId' => $taskId,
-            ]);
+            if ($this->hasBusinessFieldChanged($before, $after)) {
+                $date = $this->formatDate($after['date'] ?? null);
+                $body = $this->buildBody(
+                    $date
+                        ? sprintf('Votre tâche du %s a été mise à jour.', $date)
+                        : 'Votre tâche a été mise à jour.',
+                    $this->shortDescription($after),
+                );
+                $this->sendPush($oldUserId, $taskId, 'modified', [
+                    'title' => 'Tâche modifiée',
+                    'body' => $body,
+                    'url' => route('ldt.index', ['focus_task_id' => $taskId]),
+                    'resourceType' => 'workbook_task',
+                    'resourceId' => $taskId,
+                ]);
+            }
 
             return;
         }
 
-        // Ancien utilisateur retiré
+        // Ancien chauffeur retiré
         if ($oldUserId !== null) {
-            $desc = $this->shortDescription($before);
-            $detail = $this->buildDetailLine($before['date'] ?? null, $desc);
-            $body = $this->buildBody('Une tâche ne vous est plus affectée.', $detail);
+            $detail = $this->buildDetailLine($before['date'] ?? null, $this->shortDescription($before));
             $this->sendPush($oldUserId, $taskId, 'removed', [
                 'title' => 'Tâche retirée',
-                'body' => $body,
+                'body' => $this->buildBody('Une tâche ne vous est plus affectée.', $detail),
                 'url' => route('ldt.index'),
                 'resourceType' => 'workbook_task',
                 'resourceId' => null,
             ]);
         }
 
-        // Nouvel utilisateur affecté
+        // Nouveau chauffeur affecté
         if ($newUserId !== null) {
-            $desc = $this->shortDescription($after);
-            $detail = $this->buildDetailLine($after['date'] ?? null, $desc);
-            $body = $this->buildBody('Une nouvelle tâche vous a été affectée.', $detail);
+            $detail = $this->buildDetailLine($after['date'] ?? null, $this->shortDescription($after));
             $this->sendPush($newUserId, $taskId, 'assigned', [
                 'title' => 'Nouvelle tâche affectée',
-                'body' => $body,
+                'body' => $this->buildBody('Une nouvelle tâche vous a été affectée.', $detail),
                 'url' => route('ldt.index', ['focus_task_id' => $taskId]),
                 'resourceType' => 'workbook_task',
                 'resourceId' => $taskId,
             ]);
         }
+    }
+
+    /**
+     * Compare les champs métier (hors affectation) et retourne true si au moins
+     * un champ a réellement changé après normalisation.
+     */
+    private function hasBusinessFieldChanged(?array $before, ?array $after): bool
+    {
+        if ($before === null || $after === null) {
+            return true;
+        }
+
+        // Champs texte : null == '' et espaces inutiles ignorés
+        foreach (['task_label', 'loading_place', 'delivery_place', 'comment', 'boursagri_contract_number'] as $field) {
+            if ($this->normalizeText($before[$field] ?? null) !== $this->normalizeText($after[$field] ?? null)) {
+                return true;
+            }
+        }
+
+        // Dates déjà normalisées en 'Y-m-d' par Carbon dans le snapshot
+        foreach (['date', 'fin_date'] as $field) {
+            if (($before[$field] ?? null) !== ($after[$field] ?? null)) {
+                return true;
+            }
+        }
+
+        // Identifiants entiers
+        foreach (['vehicle_id', 'remorque_id'] as $field) {
+            $bv = ($before[$field] ?? null) !== null ? (int) $before[$field] : null;
+            $av = ($after[$field] ?? null) !== null ? (int) $after[$field] : null;
+            if ($bv !== $av) {
+                return true;
+            }
+        }
+
+        // Booléens
+        foreach (['is_direct', 'is_boursagri'] as $field) {
+            if ((bool) ($before[$field] ?? false) !== (bool) ($after[$field] ?? false)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Normalise un champ texte : trim + collapse des espaces multiples.
+     * null et '' sont équivalents.
+     * Les retours à la ligne internes sont conservés.
+     */
+    private function normalizeText(?string $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+        $value = trim($value);
+
+        return preg_replace('/ {2,}/', ' ', $value) ?? $value;
     }
 
     private function extractUserId(?array $snapshot): ?int
@@ -123,11 +186,7 @@ class NotifyWorkbookTaskAssigneeListener
 
     private function buildBody(string $mainLine, ?string $detailLine): string
     {
-        if ($detailLine === null) {
-            return $mainLine;
-        }
-
-        return $mainLine."\n".$detailLine;
+        return $detailLine === null ? $mainLine : $mainLine."\n".$detailLine;
     }
 
     private function sendPush(?int $userId, ?int $taskId, string $notifType, array $payload): void
