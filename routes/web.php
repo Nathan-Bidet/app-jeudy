@@ -155,6 +155,8 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::delete('/leaves/{id}', [LeaveRequestController::class, 'destroy'])
         ->middleware('throttle:leave-actions')
         ->name('leaves.destroy');
+    Route::get('/notifications/{notificationId}/redirect', [NotificationController::class, 'readAndRedirect'])
+        ->name('notifications.read_redirect');
     Route::post('/notifications/{notificationId}/read', [NotificationController::class, 'markAsRead'])
         ->name('notifications.read');
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead'])

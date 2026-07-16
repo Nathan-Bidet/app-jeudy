@@ -69,15 +69,17 @@ export default function AppLayout({ title, header, children }) {
             if (event.data?.type === 'OPEN_RESOURCE') {
                 const { resourceType, resourceId, notificationId } = event.data;
                 if (resourceType === 'hours_reminder') {
+                    const navigate = () => router.visit('/activities/hours');
                     if (notificationId) {
                         const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
                         const csrfToken = match ? decodeURIComponent(match[1]) : '';
                         fetch(`/notifications/${encodeURIComponent(notificationId)}/read`, {
                             method: 'POST',
                             headers: { 'X-XSRF-TOKEN': csrfToken, 'Accept': 'application/json' },
-                        }).catch(() => {});
+                        }).finally(navigate);
+                    } else {
+                        navigate();
                     }
-                    router.visit('/activities/hours');
                     return;
                 }
                 if (resourceType === 'leave_request' && resourceId) {

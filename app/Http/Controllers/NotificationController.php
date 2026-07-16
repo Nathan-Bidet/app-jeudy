@@ -49,6 +49,26 @@ class NotificationController extends Controller
         ]);
     }
 
+    public function readAndRedirect(Request $request, string $notificationId): RedirectResponse
+    {
+        $notification = $request->user()
+            ->notifications()
+            ->whereKey($notificationId)
+            ->first();
+
+        if ($notification && $notification->read_at === null) {
+            $notification->markAsRead();
+        }
+
+        $type = $notification?->data['type'] ?? null;
+        $destination = match ($type) {
+            'hours_missing_entry_reminder' => route('hours.index'),
+            default => route('hours.index'),
+        };
+
+        return redirect($destination);
+    }
+
     public function markAsRead(Request $request, string $notificationId): RedirectResponse|JsonResponse
     {
         $notification = $request->user()

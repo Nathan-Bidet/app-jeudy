@@ -89,6 +89,9 @@ self.addEventListener('notificationclick', (event) => {
         }
         return existing.focus();
       }
+      if (notificationId) {
+        return clients.openWindow(`/notifications/${encodeURIComponent(notificationId)}/redirect`);
+      }
       return clients.openWindow(targetUrl);
     })
   );
