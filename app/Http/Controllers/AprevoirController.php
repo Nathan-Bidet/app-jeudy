@@ -1007,6 +1007,9 @@ class AprevoirController extends Controller
             'assignee_type' => $task->assignee_type,
             'assignee_id' => $task->assignee_id !== null ? (int) $task->assignee_id : null,
             'assignee_label_free' => $task->assignee_label_free,
+            'task_label' => $task->task,
+            'loading_place' => $task->loading_place,
+            'delivery_place' => $task->delivery_place,
         ];
     }
 

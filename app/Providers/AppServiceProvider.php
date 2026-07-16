@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Events\AprevoirTaskChanged;
+use App\Listeners\NotifyWorkbookTaskAssigneeListener;
 use App\Listeners\UpdateLdtProjectionListener;
 use App\Models\User;
 use App\Models\UserFile;
@@ -49,6 +50,7 @@ class AppServiceProvider extends ServiceProvider
     {
         Vite::prefetch(concurrency: 3);
         Event::listen(AprevoirTaskChanged::class, UpdateLdtProjectionListener::class);
+        Event::listen(AprevoirTaskChanged::class, NotifyWorkbookTaskAssigneeListener::class);
         $resolveUserName = static function ($user): ?string {
             if (! $user) {
                 return null;

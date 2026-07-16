@@ -82,6 +82,14 @@ export default function AppLayout({ title, header, children }) {
                     }
                     return;
                 }
+                if (resourceType === 'workbook_task') {
+                    if (resourceId) {
+                        router.visit(route('ldt.index', { focus_task_id: resourceId }));
+                    } else {
+                        router.visit(route('ldt.index'));
+                    }
+                    return;
+                }
                 if (resourceType === 'leave_request' && resourceId) {
                     setPendingResource({ type: resourceType, id: resourceId });
                 }
