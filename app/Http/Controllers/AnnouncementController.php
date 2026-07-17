@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SendWebPushNotificationJob;
 use App\Models\Announcement;
 use App\Models\AnnouncementPoll;
 use App\Models\AnnouncementPollResponse;
@@ -14,8 +15,10 @@ use App\Services\Announcements\AnnouncementRecipientResolver;
 use App\Support\Access\AccessManager;
 use App\Support\RichText\SimpleHtmlSanitizer;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\Rule;
@@ -373,6 +376,73 @@ class AnnouncementController extends Controller
         $message = $show ? 'Annonce affichée sur l\'accueil.' : 'Annonce retirée de l\'accueil.';
 
         return back()->with('success', $message);
+    }
+
+    public function sendPush(Request $request, Announcement $announcement): RedirectResponse|JsonResponse
+    {
+        $user = $request->user();
+        $access = app(AccessManager::class);
+        abort_unless($user && $access->can($user, 'annonces.create'), 403);
+
+        $recipients = $this->recipientResolver->resolve(
+            $announcement->sector_ids,
+            $announcement->user_ids,
+            $announcement->excluded_user_ids,
+        );
+
+        if ($recipients->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json(['ok' => true, 'sent' => 0]);
+            }
+
+            return back();
+        }
+
+        $title = filled($announcement->title) ? $announcement->title : 'Nouvelle annonce';
+        $rawBody = $announcement->body_html
+            ? SimpleHtmlSanitizer::toPlainText($announcement->body_html)
+            : '';
+        $body = filled($rawBody) ? mb_substr($rawBody, 0, 120) : $title;
+
+        $recipientIds = $recipients->pluck('id')->values()->all();
+
+        $notifByUser = DatabaseNotification::query()
+            ->whereIn('notifiable_id', $recipientIds)
+            ->where('notifiable_type', User::class)
+            ->where('data->type', 'announcement')
+            ->where('data->announcement_id', $announcement->id)
+            ->orderByDesc('created_at')
+            ->get()
+            ->groupBy('notifiable_id')
+            ->map(fn ($group) => (string) $group->first()->id);
+
+        $sentCount = 0;
+        foreach ($recipients as $recipient) {
+            try {
+                SendWebPushNotificationJob::dispatch($recipient->id, [
+                    'title' => $title,
+                    'body' => $body,
+                    'icon' => '/pwa-192.png',
+                    'url' => route('annonces.index', ['highlight' => $announcement->id]),
+                    'resourceType' => 'announcement',
+                    'resourceId' => (int) $announcement->id,
+                    'notificationId' => $notifByUser->get((string) $recipient->id),
+                ]);
+                $sentCount++;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('sendPush dispatch failed', [
+                    'user_id' => $recipient->id,
+                    'announcement_id' => $announcement->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true, 'sent' => $sentCount]);
+        }
+
+        return back()->with('success', 'Notification Push envoyée à '.$sentCount.' destinataire(s).');
     }
 
     /**

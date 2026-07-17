@@ -63,6 +63,9 @@ class NotificationController extends Controller
         $type = $notification?->data['type'] ?? null;
         $destination = match ($type) {
             'hours_missing_entry_reminder' => route('hours.index'),
+            'announcement' => isset($notification?->data['announcement_id'])
+                ? route('annonces.index', ['highlight' => (int) $notification->data['announcement_id']])
+                : route('annonces.index'),
             default => route('hours.index'),
         };
 

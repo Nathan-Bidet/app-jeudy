@@ -2,7 +2,7 @@ import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import RichTextEditor from '@/Components/RichTextEditor';
 import { Head, router, usePage } from '@inertiajs/react';
-import { ChevronDown, Megaphone, MessageSquare, Pencil, Plus, Send, Trash2, X } from 'lucide-react';
+import { Bell, ChevronDown, Megaphone, MessageSquare, Pencil, Plus, Send, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 function emptyFormState() {
@@ -1064,6 +1064,21 @@ export default function AnnoncesIndex({
         router.post(route('annonces.duplicate', id), {}, { preserveScroll: true });
     };
 
+    const [pushSending, setPushSending] = useState(null);
+
+    const sendPushForAnnouncement = (id) => {
+        if (pushSending === id) return;
+        setPushSending(id);
+        router.post(
+            route('annonces.send-push', id),
+            {},
+            {
+                preserveScroll: true,
+                onFinish: () => setPushSending(null),
+            },
+        );
+    };
+
     const saveGroup = (group) => {
         router.post(route('annonces.groups.store'), group, { preserveScroll: true });
     };
@@ -1399,6 +1414,17 @@ export default function AnnoncesIndex({
                                                 className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${item.is_dashboard_active ? 'border-[#F1BF0C] bg-[#F1BF0C]/10 text-[var(--app-text)]' : 'border-[var(--app-border)]'}`}
                                             >
                                                 {item.is_dashboard_active ? '★ Accueil' : 'Accueil'}
+                                            </button>
+                                        ) : null}
+                                        {canCreate && item.status === 'sent' ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => sendPushForAnnouncement(item.id)}
+                                                disabled={pushSending === item.id}
+                                                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--app-border)] px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50"
+                                            >
+                                                <Bell className="h-3.5 w-3.5" />
+                                                {pushSending === item.id ? 'Envoi…' : 'Notifier'}
                                             </button>
                                         ) : null}
                                         <button

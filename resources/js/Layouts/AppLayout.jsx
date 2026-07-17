@@ -90,6 +90,20 @@ export default function AppLayout({ title, header, children }) {
                     }
                     return;
                 }
+                if (resourceType === 'announcement' && resourceId) {
+                    const navigate = () => router.visit(route('annonces.index', { highlight: resourceId }));
+                    if (notificationId) {
+                        const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+                        const csrfToken = match ? decodeURIComponent(match[1]) : '';
+                        fetch(`/notifications/${encodeURIComponent(notificationId)}/read`, {
+                            method: 'POST',
+                            headers: { 'X-XSRF-TOKEN': csrfToken, 'Accept': 'application/json' },
+                        }).finally(navigate);
+                    } else {
+                        navigate();
+                    }
+                    return;
+                }
                 if (resourceType === 'leave_request' && resourceId) {
                     setPendingResource({ type: resourceType, id: resourceId });
                 }
