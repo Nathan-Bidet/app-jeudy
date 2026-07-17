@@ -14,6 +14,7 @@ function emptyFormState() {
         excluded_user_ids: [],
         has_poll: false,
         poll_type: 'single',
+        poll_title: '',
         poll_allow_other: false,
         poll_other_label: 'Autre',
         poll_options: [''],
@@ -38,6 +39,7 @@ function formFromAnnouncement(announcement) {
         excluded_user_ids: announcement.excluded_user_ids || [],
         has_poll: Boolean(announcement.poll),
         poll_type: announcement.poll?.poll_type || 'single',
+        poll_title: announcement.poll?.title || '',
         poll_allow_other: Boolean(announcement.poll?.allow_other),
         poll_other_label: announcement.poll?.other_label || 'Autre',
         poll_options: pollOptions?.length ? pollOptions : [''],
@@ -121,7 +123,10 @@ function pollToSmsText(poll) {
         ? 'Sondage — plusieurs réponses possibles :'
         : 'Sondage — une seule réponse possible :';
 
-    return [heading, ...options.map((option) => `• ${option}`)].join('\n');
+    const titleLine = String(poll.title || '').trim();
+    const lines = titleLine ? [titleLine, heading] : [heading];
+
+    return [...lines, ...options.map((option) => `• ${option}`)].join('\n');
 }
 
 function smsMessageWithTitleAndPoll(title, message, poll) {
@@ -607,6 +612,17 @@ function PollEditor({ formState, setFormState }) {
 
     return (
         <div className="space-y-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
+            <div>
+                <span className="mb-1.5 block text-sm font-semibold">Titre du sondage</span>
+                <input
+                    type="text"
+                    value={formState.poll_title}
+                    onChange={(event) => setFormState((prev) => ({ ...prev, poll_title: event.target.value }))}
+                    placeholder="Ex. Présence repas de fin d'année"
+                    className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm"
+                />
+            </div>
+
             <div className="flex flex-wrap gap-2">
                 <label className="inline-flex items-center gap-2 text-sm font-semibold">
                     <input
@@ -879,6 +895,9 @@ function AnnouncementDetailModal({ announcement, onClose, onSubmitPollResponse, 
                 {poll ? (
                     <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
                         <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Sondage</div>
+                        {poll.title ? (
+                            <div className="mt-1 text-base font-bold">{poll.title}</div>
+                        ) : null}
                         <div className="mt-1 font-semibold">
                             {poll.poll_type === 'multiple' ? 'Choix multiples' : 'Choix unique'}
                         </div>
@@ -1035,6 +1054,7 @@ export default function AnnoncesIndex({
             has_poll: formState.has_poll,
             poll: formState.has_poll ? {
                 poll_type: formState.poll_type,
+                title: formState.poll_title.trim(),
                 allow_other: formState.poll_allow_other,
                 other_label: formState.poll_other_label,
                 options: formState.poll_options.map((option) => option.trim()).filter(Boolean),
@@ -1105,6 +1125,7 @@ export default function AnnoncesIndex({
         const phones = smsPhonesForRecipients(recipients);
         const poll = formState.has_poll ? {
             poll_type: formState.poll_type,
+            title: formState.poll_title,
             allow_other: formState.poll_allow_other,
             other_label: formState.poll_other_label,
             options: formState.poll_options,
@@ -1378,6 +1399,9 @@ export default function AnnoncesIndex({
 
                                     {item.poll ? (
                                         <div className="mt-2 rounded-lg bg-[var(--app-surface-soft)] p-2 text-xs">
+                                            {item.poll.title ? (
+                                                <div className="text-sm font-bold">{item.poll.title}</div>
+                                            ) : null}
                                             <span className="font-semibold">
                                                 Sondage ({item.poll.poll_type === 'multiple' ? 'réponses multiples' : 'réponse unique'}) :
                                             </span>

@@ -15,6 +15,7 @@ class AnnouncementPoll extends Model
     protected $fillable = [
         'announcement_id',
         'poll_type',
+        'title',
         'allow_other',
         'other_label',
     ];

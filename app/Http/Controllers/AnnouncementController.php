@@ -215,6 +215,7 @@ class AnnouncementController extends Controller
             if ($announcement->poll) {
                 $poll = $draft->poll()->create([
                     'poll_type' => $announcement->poll->poll_type,
+                    'title' => $announcement->poll->title,
                     'allow_other' => $announcement->poll->allow_other,
                     'other_label' => $announcement->poll->other_label,
                 ]);
@@ -466,6 +467,7 @@ class AnnouncementController extends Controller
             'has_poll' => ['nullable', 'boolean'],
             'poll' => ['nullable', 'array'],
             'poll.poll_type' => ['required_if:has_poll,true', Rule::in(['single', 'multiple'])],
+            'poll.title' => ['nullable', 'string', 'max:255'],
             'poll.allow_other' => ['nullable', 'boolean'],
             'poll.other_label' => ['nullable', 'string', 'max:255'],
             'poll.options' => ['required_if:has_poll,true', 'array', 'min:1'],
@@ -541,6 +543,7 @@ class AnnouncementController extends Controller
             'dashboard_expires_at' => $showOnDashboard ? $dashboardExpiresAt : null,
             'has_poll' => $hasPoll,
             'poll_type' => $validated['poll']['poll_type'] ?? AnnouncementPoll::TYPE_SINGLE,
+            'poll_title' => $hasPoll ? trim((string) ($validated['poll']['title'] ?? '')) : null,
             'poll_allow_other' => $pollAllowOther,
             'poll_other_label' => $pollAllowOther ? $pollOtherLabel : null,
             'poll_options' => $pollOptions,
@@ -592,6 +595,7 @@ class AnnouncementController extends Controller
             if ($validated['has_poll']) {
                 $poll = $announcement->poll()->create([
                     'poll_type' => $validated['poll_type'],
+                    'title' => $validated['poll_title'] !== '' ? $validated['poll_title'] : null,
                     'allow_other' => $validated['poll_allow_other'],
                     'other_label' => $validated['poll_other_label'],
                 ]);
@@ -647,6 +651,7 @@ class AnnouncementController extends Controller
             $poll = [
                 'id' => $announcement->poll->id,
                 'poll_type' => $announcement->poll->poll_type,
+                'title' => $announcement->poll->title,
                 'allow_other' => (bool) $announcement->poll->allow_other,
                 'other_label' => $announcement->poll->other_label ?: 'Autre',
                 'options' => $announcement->poll->options
