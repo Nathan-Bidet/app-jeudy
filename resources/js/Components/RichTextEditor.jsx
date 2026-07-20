@@ -57,6 +57,26 @@ export default function RichTextEditor({ value, onChange, placeholder = '', minH
         emitChange();
     };
 
+    const handleKeyDown = (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        document.execCommand('insertLineBreak');
+        saveSelection();
+        emitChange();
+    };
+
+    const handlePaste = (event) => {
+        event.preventDefault();
+        const text = event.clipboardData.getData('text/plain');
+        const html = text
+            .split(/\r\n|\r|\n/)
+            .map((line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+            .join('<br>');
+        document.execCommand('insertHTML', false, html);
+        saveSelection();
+        emitChange();
+    };
+
     return (
         <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)]">
             <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--app-border)] p-2">
@@ -72,6 +92,8 @@ export default function RichTextEditor({ value, onChange, placeholder = '', minH
                 onInput={emitChange}
                 onMouseUp={saveSelection}
                 onKeyUp={saveSelection}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 data-placeholder={placeholder}
                 className={`${minHeightClassName} w-full max-w-full min-w-0 p-3 text-sm leading-relaxed outline-none [overflow-wrap:anywhere] empty:before:text-[var(--app-muted)] empty:before:content-[attr(data-placeholder)]`}
             />

@@ -156,6 +156,7 @@ class NotificationController extends Controller
         $title = isset($notification->data['title']) ? (string) $notification->data['title'] : null;
         $fullMessage = isset($notification->data['full_message']) ? (string) $notification->data['full_message'] : null;
         $announcementAuthor = null;
+        $bodyHtml = null;
         $poll = null;
 
         if ($type === 'announcement' && $announcementId && $announcements) {
@@ -167,6 +168,7 @@ class NotificationController extends Controller
                 if ($fullMessage === null && $announcement->body_html) {
                     $fullMessage = SimpleHtmlSanitizer::toPlainText($announcement->body_html) ?: null;
                 }
+                $bodyHtml = SimpleHtmlSanitizer::sanitize($announcement->body_html);
                 $announcementAuthor = $announcement->creator ? $this->userLabel($announcement->creator) : null;
                 $poll = $this->pollPresenter->present($announcement, $viewer, $canManage);
             }
@@ -178,6 +180,7 @@ class NotificationController extends Controller
             'title' => $title,
             'message' => (string) ($notification->data['message'] ?? 'Notification'),
             'full_message' => $fullMessage,
+            'body_html' => $bodyHtml,
             'announcement_author' => $announcementAuthor,
             'poll' => $poll,
             'period' => [

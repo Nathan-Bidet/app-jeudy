@@ -38,6 +38,7 @@ class SimpleHtmlSanitizer
         }
 
         self::sanitizeChildren($document, $root);
+        self::flattenBlocks($document, $root);
 
         $output = '';
         foreach (iterator_to_array($root->childNodes) as $child) {
@@ -61,6 +62,57 @@ class SimpleHtmlSanitizer
         $text = trim(html_entity_decode(strip_tags((string) $withBreaks), ENT_QUOTES, 'UTF-8'));
 
         return preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
+    }
+
+    /**
+     * Les navigateurs encapsulent chaque ligne saisie dans un <div>/<p> lors
+     * de l'appui sur Entrée dans le champ contenteditable. Conservés tels
+     * quels, ces blocs héritent de marges (CSS "prose" ou navigateur) et
+     * transforment chaque ligne en paragraphe très espacé. On aplatit donc
+     * la structure : un bloc = une ligne = un <br> séparateur, sans marge.
+     */
+    private static function flattenBlocks(DOMDocument $document, DOMElement $root): void
+    {
+        $children = iterator_to_array($root->childNodes);
+
+        foreach ($children as $index => $child) {
+            if (! $child instanceof DOMElement || ! in_array(strtolower($child->tagName), ['p', 'div'], true)) {
+                continue;
+            }
+
+            if ($index > 0) {
+                $root->insertBefore($document->createElement('br'), $child);
+            }
+
+            if (! self::isEmptyLineBlock($child)) {
+                while ($child->firstChild) {
+                    $root->insertBefore($child->firstChild, $child);
+                }
+            }
+
+            $root->removeChild($child);
+        }
+    }
+
+    private static function isEmptyLineBlock(DOMElement $block): bool
+    {
+        foreach (iterator_to_array($block->childNodes) as $child) {
+            if ($child instanceof DOMText) {
+                if (trim($child->textContent) !== '') {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if ($child instanceof DOMElement && strtolower($child->tagName) === 'br') {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private static function sanitizeChildren(DOMDocument $document, DOMNode $node): void

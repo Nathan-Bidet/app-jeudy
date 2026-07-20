@@ -1,5 +1,6 @@
 import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
+import AnnouncementBody from '@/Components/Announcements/AnnouncementBody';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
 import RichTextEditor from '@/Components/RichTextEditor';
 import { Head, router, usePage } from '@inertiajs/react';
@@ -736,10 +737,9 @@ function AnnouncementDetailModal({ announcement, onClose, onSubmitPollResponse, 
                     <h4 className="text-lg font-black text-[var(--app-text)]">{announcement.title}</h4>
                 ) : null}
 
-                <div
-                    className="prose prose-sm max-w-none whitespace-pre-wrap rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3"
-                    dangerouslySetInnerHTML={{ __html: announcement.body_html || '<p>(message vide)</p>' }}
-                />
+                <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
+                    <AnnouncementBody html={announcement.body_html} />
+                </div>
 
                 <PollDisplay
                     poll={poll}
@@ -1167,7 +1167,7 @@ export default function AnnoncesIndex({
                                     {item.title ? (
                                         <h3 className="mt-2 text-sm font-black text-[var(--app-text)]">{item.title}</h3>
                                     ) : null}
-                                    <p className="mt-2 whitespace-pre-line text-sm">{item.body_text || '(message vide)'}</p>
+                                    <AnnouncementBody html={item.body_html} className="mt-2" />
 
                                     <div className="mt-2 space-y-0.5">
                                         {recipientsSummary(item, sectorsById, usersById).map((line) => (

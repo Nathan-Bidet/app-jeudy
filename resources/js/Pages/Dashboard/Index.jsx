@@ -1,4 +1,5 @@
 import WidgetCard from '@/Components/Dashboard/WidgetCard';
+import AnnouncementBody from '@/Components/Announcements/AnnouncementBody';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, usePage } from '@inertiajs/react';
@@ -35,9 +36,7 @@ export default function DashboardIndex({ dashboard }) {
                         {announcement.title ? (
                             <p className="text-base font-bold leading-snug text-[var(--app-text)]">{announcement.title}</p>
                         ) : null}
-                        <p className={`whitespace-pre-line text-sm leading-relaxed text-[var(--app-text)]${announcement.title ? ' mt-1' : ''}`}>
-                            {announcement.body_text}
-                        </p>
+                        <AnnouncementBody html={announcement.body_html} className={announcement.title ? 'mt-1' : ''} />
                         {announcement.poll ? (
                             <div className="mt-3">
                                 <PollDisplay

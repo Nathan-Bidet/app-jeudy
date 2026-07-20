@@ -219,6 +219,7 @@ class HandleInertiaRequests extends Middleware
         $title = isset($notification->data['title']) ? (string) $notification->data['title'] : null;
         $fullMessage = isset($notification->data['full_message']) ? (string) $notification->data['full_message'] : null;
         $announcementAuthor = null;
+        $bodyHtml = null;
         $poll = null;
 
         if ($type === 'announcement' && $announcementId && $announcements) {
@@ -230,6 +231,7 @@ class HandleInertiaRequests extends Middleware
                 if ($fullMessage === null && $announcement->body_html) {
                     $fullMessage = SimpleHtmlSanitizer::toPlainText($announcement->body_html) ?: null;
                 }
+                $bodyHtml = SimpleHtmlSanitizer::sanitize($announcement->body_html);
                 $announcementAuthor = $announcement->creator ? $this->userLabel($announcement->creator) : null;
                 $poll = $this->pollPresenter->present($announcement, $viewer, $canManage);
             }
@@ -241,6 +243,7 @@ class HandleInertiaRequests extends Middleware
             'title' => $title,
             'message' => (string) ($notification->data['message'] ?? 'Notification'),
             'full_message' => $fullMessage,
+            'body_html' => $bodyHtml,
             'announcement_author' => $announcementAuthor,
             'poll' => $poll,
             'period' => [

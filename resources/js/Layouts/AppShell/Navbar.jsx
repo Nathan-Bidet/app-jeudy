@@ -1,4 +1,5 @@
 import UserMenu from '@/Layouts/AppShell/UserMenu';
+import AnnouncementBody from '@/Components/Announcements/AnnouncementBody';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
 import { Link, router, usePage } from '@inertiajs/react';
 import {
@@ -1242,7 +1243,8 @@ function NotificationsMenu() {
                                     const isAnnouncement = notification.type === 'announcement';
                                     const isExpanded = expandedNotificationIds.has(notification.id);
                                     const canExpand = isAnnouncement && (
-                                        notification.full_message
+                                        notification.body_html
+                                        || notification.full_message
                                         || String(notification.message ?? '').endsWith('…')
                                     );
 
@@ -1275,15 +1277,22 @@ function NotificationsMenu() {
                                                     {notification.title ? (
                                                         <p className="text-sm font-bold leading-snug text-[var(--app-text)]">{notification.title}</p>
                                                     ) : null}
-                                                    <p className={classNames(
-                                                        'text-sm leading-[1.25rem] text-[var(--app-text)] whitespace-pre-line',
-                                                        notification.title ? 'mt-0.5' : '',
-                                                        !isExpanded ? 'line-clamp-3' : '',
-                                                    )}>
-                                                        {isExpanded
-                                                            ? (notification.full_message || notification.message)
-                                                            : notification.message}
-                                                    </p>
+                                                    {isExpanded && notification.body_html ? (
+                                                        <AnnouncementBody
+                                                            html={notification.body_html}
+                                                            className={notification.title ? 'mt-0.5' : ''}
+                                                        />
+                                                    ) : (
+                                                        <p className={classNames(
+                                                            'text-sm leading-[1.25rem] text-[var(--app-text)] whitespace-pre-line',
+                                                            notification.title ? 'mt-0.5' : '',
+                                                            !isExpanded ? 'line-clamp-3' : '',
+                                                        )}>
+                                                            {isExpanded
+                                                                ? (notification.full_message || notification.message)
+                                                                : notification.message}
+                                                        </p>
+                                                    )}
                                                     {canExpand ? (
                                                         <button
                                                             type="button"
@@ -1401,9 +1410,13 @@ function NotificationsMenu() {
                             </button>
                         </div>
                         <div className="max-h-[70vh] space-y-3 overflow-y-auto px-5 py-4">
-                            <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--app-text)]">
-                                {announcementModal?.full_message || announcementModal?.message}
-                            </p>
+                            {announcementModal?.body_html ? (
+                                <AnnouncementBody html={announcementModal.body_html} />
+                            ) : (
+                                <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--app-text)]">
+                                    {announcementModal?.full_message || announcementModal?.message}
+                                </p>
+                            )}
                             {announcementModal?.poll ? (
                                 <PollDisplay
                                     poll={announcementModal.poll}
