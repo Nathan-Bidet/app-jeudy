@@ -41,18 +41,19 @@ export default function DashboardIndex({ dashboard }) {
                             announcementId={announcement.id}
                             hasBeenViewed={announcement.has_been_viewed}
                             className={announcement.title ? 'mt-1' : ''}
-                        />
-                        {announcement.poll ? (
-                            <div className="mt-3">
-                                <PollDisplay
-                                    poll={announcement.poll}
-                                    variant="full"
-                                    onSubmitResponse={submitPollResponse}
-                                    responseProcessing={pollResponseProcessing}
-                                    errors={errors}
-                                />
-                            </div>
-                        ) : null}
+                        >
+                            {announcement.poll ? (
+                                <div className="mt-3">
+                                    <PollDisplay
+                                        poll={announcement.poll}
+                                        variant="full"
+                                        onSubmitResponse={submitPollResponse}
+                                        responseProcessing={pollResponseProcessing}
+                                        errors={errors}
+                                    />
+                                </div>
+                            ) : null}
+                        </CollapsibleAnnouncementBody>
                         {announcement.created_by ? (
                             <p className="mt-3 text-xs text-[var(--app-muted)]">
                                 Publié par {announcement.created_by}
