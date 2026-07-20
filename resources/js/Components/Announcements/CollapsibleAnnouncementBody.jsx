@@ -98,9 +98,7 @@ export default function CollapsibleAnnouncementBody({ html, announcementId, hasB
                 }}
             >
                 <div ref={fullRef}>
-                    <div ref={textRef}>
-                        <AnnouncementBody html={html} className={className} />
-                    </div>
+                    <AnnouncementBody ref={textRef} html={html} className={className} />
                     {children}
                 </div>
             </div>
@@ -108,7 +106,7 @@ export default function CollapsibleAnnouncementBody({ html, announcementId, hasB
                 <button
                     type="button"
                     onClick={() => setExpanded((value) => !value)}
-                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
+                    className="-ml-1 mt-1 inline-flex items-center gap-1 rounded-lg px-1 py-1.5 text-xs font-semibold text-[#0F6930] transition hover:opacity-80 active:opacity-70"
                 >
                     {expanded ? (
                         <>
