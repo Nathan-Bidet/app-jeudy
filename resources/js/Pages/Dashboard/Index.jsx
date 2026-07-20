@@ -1,12 +1,25 @@
 import WidgetCard from '@/Components/Dashboard/WidgetCard';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
 import AppLayout from '@/Layouts/AppLayout';
-import { Head } from '@inertiajs/react';
+import { Head, router, usePage } from '@inertiajs/react';
 import { Megaphone } from 'lucide-react';
+import { useState } from 'react';
 
 export default function DashboardIndex({ dashboard }) {
+    const { errors = {} } = usePage().props;
     const widgets = dashboard?.widgets ?? [];
     const announcement = dashboard?.dashboard_announcement ?? null;
+    const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
+
+    const submitPollResponse = (payload) => {
+        if (!announcement?.id) return;
+        setPollResponseProcessing(true);
+        router.post(route('annonces.poll-response', announcement.id), payload, {
+            preserveScroll: true,
+            preserveState: true,
+            onFinish: () => setPollResponseProcessing(false),
+        });
+    };
 
     return (
         <AppLayout title="Accueil">
@@ -27,7 +40,13 @@ export default function DashboardIndex({ dashboard }) {
                         </p>
                         {announcement.poll ? (
                             <div className="mt-3">
-                                <PollDisplay poll={announcement.poll} variant="basic" />
+                                <PollDisplay
+                                    poll={announcement.poll}
+                                    variant="full"
+                                    onSubmitResponse={submitPollResponse}
+                                    responseProcessing={pollResponseProcessing}
+                                    errors={errors}
+                                />
                             </div>
                         ) : null}
                         {announcement.created_by ? (

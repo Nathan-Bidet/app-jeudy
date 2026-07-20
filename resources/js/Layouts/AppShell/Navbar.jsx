@@ -951,8 +951,7 @@ function NotificationsMenu() {
         });
     }, [notifications]);
 
-    const submitAnnouncementPollResponse = (payload) => {
-        const announcementId = announcementModal?.announcement_id;
+    const submitPollResponseFor = (announcementId, payload) => {
         if (!announcementId) return;
         setPollResponseProcessing(true);
         router.post(route('annonces.poll-response', announcementId), payload, {
@@ -960,6 +959,10 @@ function NotificationsMenu() {
             preserveState: true,
             onFinish: () => setPollResponseProcessing(false),
         });
+    };
+
+    const submitAnnouncementPollResponse = (payload) => {
+        submitPollResponseFor(announcementModal?.announcement_id, payload);
     };
 
     const toggleExpanded = (notificationId, event) => {
@@ -1292,7 +1295,13 @@ function NotificationsMenu() {
                                                     ) : null}
                                                     {isExpanded && notification.poll ? (
                                                         <div className="mt-2" onClick={(event) => event.stopPropagation()}>
-                                                            <PollDisplay poll={notification.poll} variant="basic" />
+                                                            <PollDisplay
+                                                                poll={notification.poll}
+                                                                variant="full"
+                                                                onSubmitResponse={(payload) => submitPollResponseFor(notification.announcement_id, payload)}
+                                                                responseProcessing={pollResponseProcessing}
+                                                                errors={pageErrors}
+                                                            />
                                                         </div>
                                                     ) : null}
                                                 </>

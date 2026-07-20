@@ -303,7 +303,11 @@ class DashboardDataService
                 ->whereNull('dashboard_expires_at')
                 ->orWhereDate('dashboard_expires_at', '>=', now()->toDateString())
             )
-            ->with(['creator:id,name,first_name,last_name', 'poll.options'])
+            ->with([
+                'creator:id,name,first_name,last_name',
+                'poll.options',
+                'poll.responses.user:id,name,first_name,last_name',
+            ])
             ->orderByDesc('sent_at')
             ->get()
             ->first(function (Announcement $a) use ($userId, $sectorId): bool {
@@ -332,12 +336,14 @@ class DashboardDataService
             $creatorName = $first !== '' ? $first : (trim((string) $announcement->creator->name) ?: null);
         }
 
+        $canManage = (bool) app(AccessManager::class)->can($user, 'annonces.manage');
+
         return [
             'id' => $announcement->id,
             'title' => $announcement->title,
             'body_text' => SimpleHtmlSanitizer::toPlainText($announcement->body_html),
             'created_by' => $creatorName,
-            'poll' => $announcement->poll ? $this->pollPresenter->basic($announcement->poll) : null,
+            'poll' => $this->pollPresenter->present($announcement, $user, $canManage),
         ];
     }
 
