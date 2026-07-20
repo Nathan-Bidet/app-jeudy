@@ -653,7 +653,7 @@ class AnnouncementController extends Controller
         return [
             'id' => $announcement->id,
             'title' => $announcement->title,
-            'body_html' => SimpleHtmlSanitizer::sanitize($announcement->body_html),
+            'body_html' => SimpleHtmlSanitizer::render($announcement->body_html),
             'body_text' => SimpleHtmlSanitizer::toPlainText($announcement->body_html),
             'status' => $announcement->status,
             'sector_ids' => $announcement->sector_ids ?? [],

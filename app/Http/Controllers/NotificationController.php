@@ -168,7 +168,7 @@ class NotificationController extends Controller
                 if ($fullMessage === null && $announcement->body_html) {
                     $fullMessage = SimpleHtmlSanitizer::toPlainText($announcement->body_html) ?: null;
                 }
-                $bodyHtml = SimpleHtmlSanitizer::sanitize($announcement->body_html);
+                $bodyHtml = SimpleHtmlSanitizer::render($announcement->body_html);
                 $announcementAuthor = $announcement->creator ? $this->userLabel($announcement->creator) : null;
                 $poll = $this->pollPresenter->present($announcement, $viewer, $canManage);
             }

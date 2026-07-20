@@ -341,7 +341,7 @@ class DashboardDataService
         return [
             'id' => $announcement->id,
             'title' => $announcement->title,
-            'body_html' => SimpleHtmlSanitizer::sanitize($announcement->body_html),
+            'body_html' => SimpleHtmlSanitizer::render($announcement->body_html),
             'created_by' => $creatorName,
             'poll' => $this->pollPresenter->present($announcement, $user, $canManage),
         ];
