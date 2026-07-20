@@ -1,4 +1,5 @@
 import UserMenu from '@/Layouts/AppShell/UserMenu';
+import PollDisplay from '@/Components/Announcements/PollDisplay';
 import { Link, router, usePage } from '@inertiajs/react';
 import {
     Archive,
@@ -930,16 +931,36 @@ function DesktopModuleDropdown({ module }) {
 }
 
 function NotificationsMenu() {
-    const { notifications: notificationsProp } = usePage().props;
+    const { notifications: notificationsProp, errors: pageErrors = {} } = usePage().props;
     const initialNotifications = Array.isArray(notificationsProp?.items) ? notificationsProp.items : [];
     const initialUnreadCount = Number(notificationsProp?.unread_count ?? initialNotifications.filter((notification) => !notification?.read_at).length);
     const [notifications, setNotifications] = useState(initialNotifications);
     const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
     const [expandedNotificationIds, setExpandedNotificationIds] = useState(new Set());
     const [announcementModal, setAnnouncementModal] = useState(null);
+    const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
     const hasUnread = unreadCount > 0;
 
     const openAnnouncementModal = (notification) => setAnnouncementModal(notification);
+
+    useEffect(() => {
+        setAnnouncementModal((prev) => {
+            if (!prev) return prev;
+            const updated = notifications.find((notification) => notification.id === prev.id);
+            return updated || prev;
+        });
+    }, [notifications]);
+
+    const submitAnnouncementPollResponse = (payload) => {
+        const announcementId = announcementModal?.announcement_id;
+        if (!announcementId) return;
+        setPollResponseProcessing(true);
+        router.post(route('annonces.poll-response', announcementId), payload, {
+            preserveScroll: true,
+            preserveState: true,
+            onFinish: () => setPollResponseProcessing(false),
+        });
+    };
 
     const toggleExpanded = (notificationId, event) => {
         event.stopPropagation();
@@ -1269,6 +1290,11 @@ function NotificationsMenu() {
                                                             {isExpanded ? 'Réduire' : 'Lire plus'}
                                                         </button>
                                                     ) : null}
+                                                    {isExpanded && notification.poll ? (
+                                                        <div className="mt-2" onClick={(event) => event.stopPropagation()}>
+                                                            <PollDisplay poll={notification.poll} variant="basic" />
+                                                        </div>
+                                                    ) : null}
                                                 </>
                                             ) : (
                                                 <p className="text-sm text-[var(--app-text)]">
@@ -1344,14 +1370,15 @@ function NotificationsMenu() {
                     leaveFrom="opacity-100 translate-y-0 sm:scale-100"
                     leaveTo="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
                 >
-                    <DialogPanel className="relative mx-auto w-full max-w-[calc(100vw-1.5rem)] transform overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl transition-all sm:max-w-md">
+                    <DialogPanel className="relative mx-auto w-full max-w-[calc(100vw-1.5rem)] transform overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl transition-all sm:max-w-lg">
                         <div className="flex items-start justify-between gap-3 border-b border-[var(--app-border)] px-5 py-4">
                             <div className="min-w-0">
-                                <p className="text-base font-bold leading-snug text-[var(--app-text)]">
+                                <p className="break-words text-base font-bold leading-snug text-[var(--app-text)]">
                                     {announcementModal?.title || 'Annonce'}
                                 </p>
                                 <p className="mt-0.5 text-xs text-[var(--app-muted)]">
                                     {formatNotificationDate(announcementModal?.created_at)}
+                                    {announcementModal?.announcement_author ? ` • Publié par ${announcementModal.announcement_author}` : ''}
                                     {!announcementModal?.read_at ? ' • Non lue' : ''}
                                 </p>
                             </div>
@@ -1364,10 +1391,19 @@ function NotificationsMenu() {
                                 <X className="h-4 w-4" strokeWidth={2} />
                             </button>
                         </div>
-                        <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+                        <div className="max-h-[70vh] space-y-3 overflow-y-auto px-5 py-4">
                             <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--app-text)]">
                                 {announcementModal?.full_message || announcementModal?.message}
                             </p>
+                            {announcementModal?.poll ? (
+                                <PollDisplay
+                                    poll={announcementModal.poll}
+                                    variant="full"
+                                    onSubmitResponse={submitAnnouncementPollResponse}
+                                    responseProcessing={pollResponseProcessing}
+                                    errors={pageErrors}
+                                />
+                            ) : null}
                         </div>
                         {!announcementModal?.read_at ? (
                             <div className="border-t border-[var(--app-border)] px-5 py-3">

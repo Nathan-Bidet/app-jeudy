@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Announcement;
+use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Services\AuditLogService;
+use App\Support\Access\AccessManager;
 use App\Support\RichText\SimpleHtmlSanitizer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -12,8 +14,10 @@ use Illuminate\Support\Facades\Route;
 
 class NotificationController extends Controller
 {
-    public function __construct(private readonly AuditLogService $auditLogService)
-    {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+        private readonly AnnouncementPollPresenter $pollPresenter,
+    ) {
     }
 
     public function latest(Request $request): JsonResponse
@@ -27,7 +31,7 @@ class NotificationController extends Controller
             ->get();
 
         $announcementIds = $rawNotifications
-            ->filter(fn ($n) => ($n->data['type'] ?? $n->type) === 'announcement' && !isset($n->data['title']))
+            ->filter(fn ($n) => ($n->data['type'] ?? $n->type) === 'announcement')
             ->map(fn ($n) => $n->data['announcement_id'] ?? null)
             ->filter()
             ->unique()
@@ -35,11 +39,16 @@ class NotificationController extends Controller
             ->all();
 
         $announcements = count($announcementIds) > 0
-            ? Announcement::whereIn('id', $announcementIds)->get()->keyBy('id')
+            ? Announcement::whereIn('id', $announcementIds)
+                ->with(['creator:id,name,first_name,last_name', 'poll.options', 'poll.responses.user:id,name,first_name,last_name'])
+                ->get()
+                ->keyBy('id')
             : collect();
 
+        $canManage = (bool) app(AccessManager::class)->can($user, 'annonces.manage');
+
         $notifications = $rawNotifications
-            ->map(fn ($notification) => $this->mapNotification($notification, $announcements))
+            ->map(fn ($notification) => $this->mapNotification($notification, $announcements, $user, $canManage))
             ->values()
             ->all();
 
@@ -138,7 +147,7 @@ class NotificationController extends Controller
         return back();
     }
 
-    private function mapNotification(object $notification, \Illuminate\Support\Collection $announcements = null): array
+    private function mapNotification(object $notification, \Illuminate\Support\Collection $announcements = null, $viewer = null, bool $canManage = false): array
     {
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
@@ -146,6 +155,8 @@ class NotificationController extends Controller
 
         $title = isset($notification->data['title']) ? (string) $notification->data['title'] : null;
         $fullMessage = isset($notification->data['full_message']) ? (string) $notification->data['full_message'] : null;
+        $announcementAuthor = null;
+        $poll = null;
 
         if ($type === 'announcement' && $announcementId && $announcements) {
             $announcement = $announcements->get($announcementId);
@@ -156,6 +167,8 @@ class NotificationController extends Controller
                 if ($fullMessage === null && $announcement->body_html) {
                     $fullMessage = SimpleHtmlSanitizer::toPlainText($announcement->body_html) ?: null;
                 }
+                $announcementAuthor = $announcement->creator ? $this->userLabel($announcement->creator) : null;
+                $poll = $this->pollPresenter->present($announcement, $viewer, $canManage);
             }
         }
 
@@ -165,6 +178,8 @@ class NotificationController extends Controller
             'title' => $title,
             'message' => (string) ($notification->data['message'] ?? 'Notification'),
             'full_message' => $fullMessage,
+            'announcement_author' => $announcementAuthor,
+            'poll' => $poll,
             'period' => [
                 'start_at' => $notification->data['period']['start_at'] ?? null,
                 'end_at' => $notification->data['period']['end_at'] ?? null,
@@ -176,6 +191,18 @@ class NotificationController extends Controller
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
+    }
+
+    private function userLabel(object $user): string
+    {
+        $fullName = trim((string) ($user->first_name ?? '').' '.(string) ($user->last_name ?? ''));
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        $name = trim((string) ($user->name ?? ''));
+
+        return $name !== '' ? $name : (string) ($user->email ?? '');
     }
 
     private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null): ?string

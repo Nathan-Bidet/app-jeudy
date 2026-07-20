@@ -7,6 +7,7 @@ use App\Models\AprevoirTask;
 use App\Models\CotationSetting;
 use App\Models\LdtEntry;
 use App\Models\User;
+use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Support\RichText\SimpleHtmlSanitizer;
 use App\Support\Access\AccessManager;
 use App\Support\Cotations\CotationPdfFormatter;
@@ -16,6 +17,11 @@ use Illuminate\Support\Facades\Schema;
 
 class DashboardDataService
 {
+    public function __construct(
+        private readonly AnnouncementPollPresenter $pollPresenter,
+    ) {
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -297,7 +303,7 @@ class DashboardDataService
                 ->whereNull('dashboard_expires_at')
                 ->orWhereDate('dashboard_expires_at', '>=', now()->toDateString())
             )
-            ->with('creator:id,name,first_name,last_name')
+            ->with(['creator:id,name,first_name,last_name', 'poll.options'])
             ->orderByDesc('sent_at')
             ->get()
             ->first(function (Announcement $a) use ($userId, $sectorId): bool {
@@ -331,6 +337,7 @@ class DashboardDataService
             'title' => $announcement->title,
             'body_text' => SimpleHtmlSanitizer::toPlainText($announcement->body_html),
             'created_by' => $creatorName,
+            'poll' => $announcement->poll ? $this->pollPresenter->basic($announcement->poll) : null,
         ];
     }
 

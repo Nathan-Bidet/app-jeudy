@@ -1,4 +1,5 @@
 import WidgetCard from '@/Components/Dashboard/WidgetCard';
+import PollDisplay from '@/Components/Announcements/PollDisplay';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head } from '@inertiajs/react';
 import { Megaphone } from 'lucide-react';
@@ -24,6 +25,11 @@ export default function DashboardIndex({ dashboard }) {
                         <p className={`whitespace-pre-line text-sm leading-relaxed text-[var(--app-text)]${announcement.title ? ' mt-1' : ''}`}>
                             {announcement.body_text}
                         </p>
+                        {announcement.poll ? (
+                            <div className="mt-3">
+                                <PollDisplay poll={announcement.poll} variant="basic" />
+                            </div>
+                        ) : null}
                         {announcement.created_by ? (
                             <p className="mt-3 text-xs text-[var(--app-muted)]">
                                 Publié par {announcement.created_by}

@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Announcement;
 use App\Models\HourSheet;
+use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Services\Hours\ApprovedLeaveDayService;
 use App\Support\Access\AccessManager;
 use App\Support\RichText\SimpleHtmlSanitizer;
@@ -19,6 +20,11 @@ class HandleInertiaRequests extends Middleware
      * @var string
      */
     protected $rootView = 'app';
+
+    public function __construct(
+        private readonly AnnouncementPollPresenter $pollPresenter,
+    ) {
+    }
 
     /**
      * Determine the current asset version.
@@ -153,7 +159,7 @@ class HandleInertiaRequests extends Middleware
                 'status' => fn () => $request->session()->get('status'),
                 'error' => fn () => $request->session()->get('error'),
             ],
-            'notifications' => fn () => $user ? (function () use ($user) {
+            'notifications' => fn () => $user ? (function () use ($user, $accessManager) {
                 $rawNotifications = $user->notifications()
                     ->orderByRaw('CASE WHEN read_at IS NULL THEN 0 ELSE 1 END')
                     ->orderByDesc('created_at')
@@ -161,7 +167,7 @@ class HandleInertiaRequests extends Middleware
                     ->get();
 
                 $announcementIds = $rawNotifications
-                    ->filter(fn ($n) => ($n->data['type'] ?? $n->type) === 'announcement' && !isset($n->data['title']))
+                    ->filter(fn ($n) => ($n->data['type'] ?? $n->type) === 'announcement')
                     ->map(fn ($n) => $n->data['announcement_id'] ?? null)
                     ->filter()
                     ->unique()
@@ -169,12 +175,17 @@ class HandleInertiaRequests extends Middleware
                     ->all();
 
                 $announcements = count($announcementIds) > 0
-                    ? Announcement::whereIn('id', $announcementIds)->get()->keyBy('id')
+                    ? Announcement::whereIn('id', $announcementIds)
+                        ->with(['creator:id,name,first_name,last_name', 'poll.options', 'poll.responses.user:id,name,first_name,last_name'])
+                        ->get()
+                        ->keyBy('id')
                     : collect();
+
+                $canManage = (bool) $accessManager->can($user, 'annonces.manage');
 
                 return [
                     'items' => $rawNotifications
-                        ->map(fn ($notification) => $this->mapNotification($notification, $announcements))
+                        ->map(fn ($notification) => $this->mapNotification($notification, $announcements, $user, $canManage))
                         ->values()
                         ->all(),
                     'unread_count' => (int) $user->unreadNotifications()->count(),
@@ -199,7 +210,7 @@ class HandleInertiaRequests extends Middleware
         return '/storage/'.$path;
     }
 
-    private function mapNotification(object $notification, \Illuminate\Support\Collection $announcements = null): array
+    private function mapNotification(object $notification, \Illuminate\Support\Collection $announcements = null, $viewer = null, bool $canManage = false): array
     {
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
@@ -207,6 +218,8 @@ class HandleInertiaRequests extends Middleware
 
         $title = isset($notification->data['title']) ? (string) $notification->data['title'] : null;
         $fullMessage = isset($notification->data['full_message']) ? (string) $notification->data['full_message'] : null;
+        $announcementAuthor = null;
+        $poll = null;
 
         if ($type === 'announcement' && $announcementId && $announcements) {
             $announcement = $announcements->get($announcementId);
@@ -217,6 +230,8 @@ class HandleInertiaRequests extends Middleware
                 if ($fullMessage === null && $announcement->body_html) {
                     $fullMessage = SimpleHtmlSanitizer::toPlainText($announcement->body_html) ?: null;
                 }
+                $announcementAuthor = $announcement->creator ? $this->userLabel($announcement->creator) : null;
+                $poll = $this->pollPresenter->present($announcement, $viewer, $canManage);
             }
         }
 
@@ -226,6 +241,8 @@ class HandleInertiaRequests extends Middleware
             'title' => $title,
             'message' => (string) ($notification->data['message'] ?? 'Notification'),
             'full_message' => $fullMessage,
+            'announcement_author' => $announcementAuthor,
+            'poll' => $poll,
             'period' => [
                 'start_at' => $notification->data['period']['start_at'] ?? null,
                 'end_at' => $notification->data['period']['end_at'] ?? null,
@@ -237,6 +254,18 @@ class HandleInertiaRequests extends Middleware
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
+    }
+
+    private function userLabel(object $user): string
+    {
+        $fullName = trim((string) ($user->first_name ?? '').' '.(string) ($user->last_name ?? ''));
+        if ($fullName !== '') {
+            return $fullName;
+        }
+
+        $name = trim((string) ($user->name ?? ''));
+
+        return $name !== '' ? $name : (string) ($user->email ?? '');
     }
 
     private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null): ?string

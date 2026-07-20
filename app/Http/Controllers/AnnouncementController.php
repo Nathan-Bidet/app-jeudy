@@ -11,6 +11,7 @@ use App\Models\Sector;
 use App\Models\User;
 use App\Notifications\AnnouncementNotification;
 use App\Services\AuditLogService;
+use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Services\Announcements\AnnouncementRecipientResolver;
 use App\Support\Access\AccessManager;
 use App\Support\RichText\SimpleHtmlSanitizer;
@@ -31,6 +32,7 @@ class AnnouncementController extends Controller
     public function __construct(
         private readonly AuditLogService $auditLogService,
         private readonly AnnouncementRecipientResolver $recipientResolver,
+        private readonly AnnouncementPollPresenter $pollPresenter,
     ) {
     }
 
@@ -640,35 +642,7 @@ class AnnouncementController extends Controller
      */
     private function presentAnnouncement(Announcement $announcement, ?User $viewer = null, bool $canManage = false): array
     {
-        $canViewResults = $viewer && ($canManage || (int) $announcement->created_by_user_id === (int) $viewer->id);
-        $canRespond = $viewer
-            && $announcement->poll
-            && $announcement->status === Announcement::STATUS_SENT
-            && $this->isAnnouncementRecipient($announcement, $viewer);
-
-        $poll = null;
-        if ($announcement->poll) {
-            $poll = [
-                'id' => $announcement->poll->id,
-                'poll_type' => $announcement->poll->poll_type,
-                'title' => $announcement->poll->title,
-                'allow_other' => (bool) $announcement->poll->allow_other,
-                'other_label' => $announcement->poll->other_label ?: 'Autre',
-                'options' => $announcement->poll->options
-                    ->map(fn ($option): array => [
-                        'id' => $option->id,
-                        'label' => $option->label,
-                    ])
-                    ->values()
-                    ->all(),
-                'current_response' => $this->presentCurrentPollResponse($announcement->poll, $viewer),
-                'can_respond' => (bool) $canRespond,
-            ];
-
-            if ($canViewResults) {
-                $poll['results'] = $this->presentPollResults($announcement);
-            }
-        }
+        $poll = $this->pollPresenter->present($announcement, $viewer, $canManage);
 
         $isDashboardActive = (bool) $announcement->show_on_dashboard
             && (
@@ -694,109 +668,6 @@ class AnnouncementController extends Controller
             'dashboard_expires_at' => $announcement->dashboard_expires_at?->toDateString(),
             'is_dashboard_active' => $isDashboardActive,
             'poll' => $poll,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function presentCurrentPollResponse(AnnouncementPoll $poll, ?User $viewer): ?array
-    {
-        if (! $viewer) {
-            return null;
-        }
-
-        $response = $poll->responses
-            ->first(fn (AnnouncementPollResponse $candidate): bool => (int) $candidate->user_id === (int) $viewer->id);
-
-        if (! $response) {
-            return null;
-        }
-
-        return [
-            'selected_option_ids' => array_values(array_map('intval', $response->selected_option_ids ?? [])),
-            'other_text' => $response->other_text,
-            'responded_at' => $response->responded_at?->toIso8601String(),
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function presentPollResults(Announcement $announcement): array
-    {
-        $poll = $announcement->poll;
-        if (! $poll) {
-            return [];
-        }
-
-        $recipients = $this->recipientResolver->resolve(
-            $announcement->sector_ids,
-            $announcement->user_ids,
-            $announcement->excluded_user_ids,
-        );
-        $recipientIds = $recipients->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $recipientCount = count($recipientIds);
-
-        $responses = $poll->responses
-            ->filter(fn (AnnouncementPollResponse $response): bool => in_array((int) $response->user_id, $recipientIds, true))
-            ->values();
-        $responseCount = $responses->count();
-        $respondedUserIds = $responses->pluck('user_id')->map(fn ($id): int => (int) $id)->all();
-        $recipientsById = $recipients->keyBy('id');
-
-        $options = $poll->options->map(function ($option) use ($responses, $responseCount): array {
-            $optionResponses = $responses->filter(function (AnnouncementPollResponse $response) use ($option): bool {
-                return in_array((int) $option->id, array_map('intval', $response->selected_option_ids ?? []), true);
-            })->values();
-            $votes = $optionResponses->count();
-
-            return [
-                'id' => $option->id,
-                'label' => $option->label,
-                'votes' => $votes,
-                'percentage' => $responseCount > 0 ? round(($votes / $responseCount) * 100, 1) : 0,
-                'respondents' => $optionResponses
-                    ->map(fn (AnnouncementPollResponse $response): array => [
-                        'id' => $response->user_id,
-                        'name' => $this->userLabel($response->user),
-                    ])
-                    ->values()
-                    ->all(),
-            ];
-        })->values()->all();
-
-        return [
-            'recipient_count' => $recipientCount,
-            'response_count' => $responseCount,
-            'other_label' => $poll->other_label ?: 'Autre',
-            'options' => $options,
-            'other_responses' => $responses
-                ->filter(fn (AnnouncementPollResponse $response): bool => trim((string) $response->other_text) !== '')
-                ->map(fn (AnnouncementPollResponse $response): array => [
-                    'user_id' => $response->user_id,
-                    'user_name' => $this->userLabel($response->user),
-                    'text' => $response->other_text,
-                    'responded_at' => $response->responded_at?->toIso8601String(),
-                ])
-                ->values()
-                ->all(),
-            'responded_users' => $responses
-                ->map(fn (AnnouncementPollResponse $response): array => [
-                    'id' => $response->user_id,
-                    'name' => $this->userLabel($response->user),
-                    'responded_at' => $response->responded_at?->toIso8601String(),
-                ])
-                ->values()
-                ->all(),
-            'pending_users' => $recipientsById
-                ->reject(fn (User $recipient): bool => in_array((int) $recipient->id, $respondedUserIds, true))
-                ->map(fn (User $recipient): array => [
-                    'id' => $recipient->id,
-                    'name' => $this->userLabel($recipient),
-                ])
-                ->values()
-                ->all(),
         ];
     }
 
