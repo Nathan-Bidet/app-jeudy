@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Models\Announcement;
+use App\Models\AnnouncementView;
 use App\Models\AprevoirTask;
 use App\Models\CotationSetting;
 use App\Models\LdtEntry;
@@ -338,12 +339,18 @@ class DashboardDataService
 
         $canManage = (bool) app(AccessManager::class)->can($user, 'annonces.manage');
 
+        $hasBeenViewed = AnnouncementView::query()
+            ->where('announcement_id', $announcement->id)
+            ->where('user_id', $userId)
+            ->exists();
+
         return [
             'id' => $announcement->id,
             'title' => $announcement->title,
             'body_html' => SimpleHtmlSanitizer::render($announcement->body_html),
             'created_by' => $creatorName,
             'poll' => $this->pollPresenter->present($announcement, $user, $canManage),
+            'has_been_viewed' => $hasBeenViewed,
         ];
     }
 

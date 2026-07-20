@@ -7,6 +7,7 @@ use App\Models\Announcement;
 use App\Models\AnnouncementPoll;
 use App\Models\AnnouncementPollResponse;
 use App\Models\AnnouncementRecipientGroup;
+use App\Models\AnnouncementView;
 use App\Models\Sector;
 use App\Models\User;
 use App\Notifications\AnnouncementNotification;
@@ -283,6 +284,19 @@ class AnnouncementController extends Controller
         $group->delete();
 
         return back()->with('success', 'Groupe de destinataires supprimé.');
+    }
+
+    public function markViewed(Request $request, Announcement $announcement): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 403);
+
+        AnnouncementView::query()->firstOrCreate(
+            ['announcement_id' => $announcement->id, 'user_id' => $user->id],
+            ['viewed_at' => now()],
+        );
+
+        return response()->json(['ok' => true]);
     }
 
     public function respondPoll(Request $request, Announcement $announcement): RedirectResponse
