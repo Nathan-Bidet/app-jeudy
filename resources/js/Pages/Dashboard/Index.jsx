@@ -4,19 +4,18 @@ import PollDisplay from '@/Components/Announcements/PollDisplay';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, usePage } from '@inertiajs/react';
 import { Megaphone } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 
 export default function DashboardIndex({ dashboard }) {
     const { errors = {} } = usePage().props;
     const widgets = dashboard?.widgets ?? [];
     const announcement = dashboard?.dashboard_announcement ?? null;
     const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
-    // Reflète exactement l'état replié/déplié de l'annonce (CollapsibleAnnouncementBody
-    // le signale via onCollapsedChange) : aucune logique de lecture/repli dupliquée ici.
-    const [announcementCollapsed, setAnnouncementCollapsed] = useState(false);
-    const handleAnnouncementCollapsedChange = useCallback((collapsed) => {
-        setAnnouncementCollapsed(collapsed);
-    }, []);
+    // Valeur dérivée directement au rendu à partir de la même source de
+    // vérité que le repli de l'annonce (has_been_viewed, fournie par le
+    // serveur) : pas d'état local à synchroniser, pas d'effet, donc pas de
+    // boucle de rendu possible entre ce composant et CollapsibleAnnouncementBody.
+    const accessQuickAbove = Boolean(announcement?.has_been_viewed);
 
     const submitPollResponse = (payload) => {
         if (!announcement?.id) return;
@@ -42,7 +41,6 @@ export default function DashboardIndex({ dashboard }) {
                 announcementId={announcement.id}
                 hasBeenViewed={announcement.has_been_viewed}
                 className={announcement.title ? 'mt-1' : ''}
-                onCollapsedChange={handleAnnouncementCollapsedChange}
             >
                 {announcement.poll ? (
                     <div className="mt-3">
@@ -79,7 +77,7 @@ export default function DashboardIndex({ dashboard }) {
             <Head title="Accueil" />
 
             <div className="w-full min-w-0 max-w-full space-y-6">
-                {announcement && announcementCollapsed ? (
+                {announcement && accessQuickAbove ? (
                     <>
                         {widgetsBlock}
                         {announcementBlock}

@@ -13,5 +13,12 @@ export default defineConfig({
         }),
         react(),
     ],
+    test: {
+        environment: 'jsdom',
+        globals: true,
+        // Exclut les fichiers AppleDouble (._*) créés par macOS sur les
+        // volumes SMB, en plus des exclusions par défaut de Vitest.
+        exclude: ['**/node_modules/**', '**/._*'],
+    },
 });
 
