@@ -48,7 +48,7 @@ function getVisibleRatio(el) {
  * conteneur animé que le texte : replié, il est donc masqué avec le texte
  * au-delà de la 3e ligne ; déplié, il apparaît juste en dessous.
  */
-export default function CollapsibleAnnouncementBody({ html, announcementId, hasBeenViewed, className = '', children = null }) {
+export default function CollapsibleAnnouncementBody({ html, announcementId, hasBeenViewed, className = '', children = null, onCollapsedChange = null }) {
     const [wasAlreadyViewed] = useState(Boolean(hasBeenViewed));
     const [expanded, setExpanded] = useState(!wasAlreadyViewed);
     const [textHeight, setTextHeight] = useState(0);
@@ -167,6 +167,17 @@ export default function CollapsibleAnnouncementBody({ html, announcementId, hasB
     const isOverflowing = textHeight > overflowThreshold + OVERFLOW_TOLERANCE;
     const canCollapse = wasAlreadyViewed && isOverflowing;
     const isClamped = canCollapse && !expanded;
+
+    /**
+     * Signale au parent le même état "repliée / dépliée" que celui qui pilote
+     * l'affichage ci-dessous (isClamped), afin qu'il puisse en dépendre (ex.
+     * ordre des blocs) sans dupliquer la logique de lecture/repli. Effectué
+     * en layout effect pour rester synchrone avant peinture, comme la mesure
+     * de hauteur ci-dessus.
+     */
+    useLayoutEffect(() => {
+        onCollapsedChange?.(isClamped);
+    }, [isClamped, onCollapsedChange]);
 
     return (
         <div ref={rootRef}>
