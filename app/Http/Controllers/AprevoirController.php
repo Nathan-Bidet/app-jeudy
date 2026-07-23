@@ -92,7 +92,7 @@ class AprevoirController extends Controller
             'focus_task_id' => ! empty($validated['focus_task_id']) ? (int) $validated['focus_task_id'] : null,
             'moduleConfig' => [
                 'key' => $config['key'],
-                'title' => $config['title'],
+                'title' => $config['key'] === 'engrais' ? 'Engrais / Tourteaux' : $config['title'],
                 'show_book' => $config['projects_to_ldt'],
                 'realtime_channel' => $config['realtime_channel'],
                 'routes' => [

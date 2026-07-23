@@ -206,13 +206,13 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
         } : null,
         safeHasRoute('engrais.index') && (permissions?.engrais_view ?? false) ? {
             key: 'engrais-planning',
-            label: 'Engrais',
+            label: 'Engrais / Tourteaux',
             href: safeHref('engrais.index'),
             icon: Clock3,
             active: safeCurrent('engrais.*'),
         } : isAdmin ? {
             key: 'engrais-planning',
-            label: 'Engrais',
+            label: 'Engrais / Tourteaux',
             href: safeHref('engrais.index'),
             icon: Clock3,
             active: safeCurrent('engrais.*'),
