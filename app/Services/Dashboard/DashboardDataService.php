@@ -5,16 +5,13 @@ namespace App\Services\Dashboard;
 use App\Models\Announcement;
 use App\Models\AnnouncementView;
 use App\Models\AprevoirTask;
-use App\Models\CotationSetting;
 use App\Models\LdtEntry;
 use App\Models\User;
 use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Support\RichText\SimpleHtmlSanitizer;
 use App\Support\Access\AccessManager;
-use App\Support\Cotations\CotationPdfFormatter;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 
 class DashboardDataService
 {
@@ -39,7 +36,6 @@ class DashboardDataService
             ],
             'widgets' => array_values(array_filter([
                 $this->tasksWidget($user),
-                $this->cotationsWidget($user),
                 $this->quickAccessWidget($user),
             ])),
             'dashboard_announcement' => $this->activeDashboardAnnouncement($user),
@@ -73,65 +69,24 @@ class DashboardDataService
     /**
      * @return array<string, mixed>|null
      */
-    private function cotationsWidget(User $user): ?array
-    {
-        $access = app(AccessManager::class);
-        $canViewCereals = $access->can($user, 'cotations.cereals.view') || $access->can($user, 'cotations.cereals.edit');
-        $canViewFuel = $access->can($user, 'cotations.fuel.view') || $access->can($user, 'cotations.fuel.edit');
-
-        if ((! $canViewCereals && ! $canViewFuel) || ! Route::has('cotations.index')) {
-            return null;
-        }
-
-        $cereals = $canViewCereals ? $this->dashboardCereals() : [];
-        $fuelBlocks = $canViewFuel ? $this->dashboardFuelBlocks() : [];
-        $mobileFuel = $canViewFuel ? [[
-            'label' => 'Carburant',
-            'href' => route('cotations.index', ['section' => 'fuel']),
-            'kind' => 'fuel',
-        ]] : [];
-
-        return [
-            'key' => 'cotations',
-            'title' => 'Cotations',
-            'type' => 'cotations',
-            'icon' => 'cotations',
-            'accent' => 'green',
-            'cereals' => $cereals,
-            'fuel_blocks' => $fuelBlocks,
-            'mobile_cereals' => array_slice($cereals, 0, 3),
-            'mobile_fuel' => $mobileFuel,
-        ];
-    }
-
-    /**
-     * @return array<int, array{label:string,href:string,kind:string,code:string}>
-     */
-    private function dashboardCereals(): array
-    {
-        $labels = $this->cerealLabelsConfig();
-
-        return [
-            ['label' => $this->dashboardCerealLabel($labels['EBM'] ?? 'Blé', 'Blé'), 'href' => route('cotations.index', ['cereal' => 'EBM']), 'kind' => 'cereal', 'code' => 'EBM'],
-            ['label' => $this->dashboardCerealLabel($labels['ECO'] ?? 'Colza', 'Colza'), 'href' => route('cotations.index', ['cereal' => 'ECO']), 'kind' => 'cereal', 'code' => 'ECO'],
-            ['label' => $this->dashboardCerealLabel($labels['EMA'] ?? 'Maïs', 'Maïs'), 'href' => route('cotations.index', ['cereal' => 'EMA']), 'kind' => 'cereal', 'code' => 'EMA'],
-        ];
-    }
-
-    private function dashboardCerealLabel(string $label, string $fallback): string
-    {
-        $cleaned = CotationPdfFormatter::text($label);
-
-        return $cleaned !== '' ? $cleaned : $fallback;
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
     private function quickAccessWidget(User $user): ?array
     {
         $access = app(AccessManager::class);
         $links = [];
+
+        if (Route::has('cotations.index') && (
+            $access->can($user, 'cotations.cereals.view')
+            || $access->can($user, 'cotations.cereals.edit')
+            || $access->can($user, 'cotations.fuel.view')
+            || $access->can($user, 'cotations.fuel.edit')
+        )) {
+            $links[] = [
+                'label' => 'Cotations',
+                'href' => route('cotations.index'),
+                'icon' => 'cotations',
+                'full_width' => true,
+            ];
+        }
 
         if (Route::has('calendar.index') && $access->can($user, 'calendar.view')) {
             $links[] = [
@@ -192,101 +147,6 @@ class DashboardDataService
             'icon' => 'shortcut',
             'accent' => 'green',
             'links' => $links,
-        ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function cerealLabelsConfig(): array
-    {
-        $defaults = [
-            'ECO' => 'Colza',
-            'EBM' => 'Blé',
-            'EMA' => 'Maïs',
-        ];
-
-        if (! Schema::hasTable('cotation_settings')) {
-            return $defaults;
-        }
-
-        $note = CotationSetting::query()->where('key', 'cereal_display_labels')->value('note');
-        $decoded = $note ? json_decode((string) $note, true) : null;
-        if (! is_array($decoded)) {
-            return $defaults;
-        }
-
-        foreach ($defaults as $code => $defaultLabel) {
-            $label = trim((string) ($decoded[$code] ?? ''));
-            $defaults[$code] = $label !== '' ? $label : $defaultLabel;
-        }
-
-        return $defaults;
-    }
-
-    /**
-     * @return array<int, array{label:string,href:string,kind:string}>
-     */
-    private function dashboardFuelBlocks(): array
-    {
-        $config = $this->fuelGridConfig();
-        $blocks = collect($config['sections'] ?? [])
-            ->filter(fn ($section): bool => is_array($section))
-            ->map(fn (array $section): array => [
-                'label' => trim((string) ($section['label'] ?? '')) ?: 'Carburant',
-                'href' => route('cotations.index', ['section' => 'fuel']),
-                'kind' => 'fuel',
-            ])
-            ->values()
-            ->all();
-
-        $gazoleLabel = trim((string) ($config['gazole']['label'] ?? ''));
-        if ($gazoleLabel !== '') {
-            $blocks[] = [
-                'label' => $gazoleLabel,
-                'href' => route('cotations.index', ['section' => 'fuel']),
-                'kind' => 'fuel',
-            ];
-        }
-
-        return $blocks;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function fuelGridConfig(): array
-    {
-        $default = [
-            'sections' => [
-                ['id' => 'fuel_grand_froid', 'label' => 'FUEL GRAND FROID'],
-                ['id' => 'gnr_agri', 'label' => 'GNR AGRI Enregistré'],
-                ['id' => 'gnr_taxe', 'label' => 'GNR Taxé'],
-            ],
-            'gazole' => ['label' => 'GAZOLE'],
-        ];
-
-        if (! Schema::hasTable('cotation_settings')) {
-            return $default;
-        }
-
-        $note = CotationSetting::query()->where('key', 'fuel_grid_config')->value('note');
-        $decoded = $note ? json_decode((string) $note, true) : null;
-        if (! is_array($decoded)) {
-            return $default;
-        }
-
-        return [
-            'sections' => collect($decoded['sections'] ?? $default['sections'])
-                ->filter(fn ($section): bool => is_array($section))
-                ->map(fn (array $section, int $index): array => [
-                    'label' => trim((string) ($section['label'] ?? '')) ?: ($default['sections'][$index]['label'] ?? 'Carburant'),
-                ])
-                ->values()
-                ->all(),
-            'gazole' => [
-                'label' => trim((string) ($decoded['gazole']['label'] ?? '')) ?: 'GAZOLE',
-            ],
         ];
     }
 
