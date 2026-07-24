@@ -1,11 +1,14 @@
+import DateInput from '@/Components/DateInput';
 import InputError from '@/Components/InputError';
 import Modal from '@/Components/Modal';
 import PrimaryButton from '@/Components/PrimaryButton';
 import SecondaryButton from '@/Components/SecondaryButton';
 import TextInput from '@/Components/TextInput';
-import { useForm } from '@inertiajs/react';
+import { useForm, usePage } from '@inertiajs/react';
 import { CheckCircle2, Pencil, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
+
+const dateInputClass = 'w-full rounded-xl border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-text)] bg-[var(--app-surface-soft)]';
 
 function formatDate(value) {
     if (!value) {
@@ -49,6 +52,8 @@ function getDisplayName(user) {
 }
 
 export default function JeudyPersonnelTable({ users = [], depots = [], canManage = false }) {
+    const { auth } = usePage().props;
+    const isAdmin = Boolean(auth?.is_admin);
     const [search, setSearch] = useState('');
     const [editingUser, setEditingUser] = useState(null);
 
@@ -58,6 +63,8 @@ export default function JeudyPersonnelTable({ users = [], depots = [], canManage
         depot_ids: [],
         operations_comment: '',
         display_order: '',
+        nacelle_valid_until: '',
+        eco_conduite_valid_until: '',
     });
 
     const rows = useMemo(() => {
@@ -94,6 +101,8 @@ export default function JeudyPersonnelTable({ users = [], depots = [], canManage
                 user.display_order === null || user.display_order === undefined
                     ? ''
                     : String(user.display_order),
+            nacelle_valid_until: user.nacelle_valid_until ?? '',
+            eco_conduite_valid_until: user.eco_conduite_valid_until ?? '',
         });
         form.clearErrors();
         setEditingUser(user);
@@ -260,7 +269,9 @@ export default function JeudyPersonnelTable({ users = [], depots = [], canManage
                     <div>
                         <h3 className="text-lg font-semibold">Éditer {editingUser ? getDisplayName(editingUser) : ''}</h3>
                         <p className="text-sm text-[var(--app-muted)]">
-                            Les dates habilitation nacelle et éco-conduite sont reprises depuis la base existante.
+                            {isAdmin
+                                ? 'Les dates habilitation nacelle et éco-conduite modifiées ici mettent à jour la fiche Annuaire de ce collaborateur.'
+                                : 'Les dates habilitation nacelle et éco-conduite sont reprises depuis l’Annuaire (modifiables par un administrateur uniquement).'}
                         </p>
                     </div>
 
@@ -330,16 +341,28 @@ export default function JeudyPersonnelTable({ users = [], depots = [], canManage
                         <InputError className="mt-2" message={form.errors.operations_comment} />
                     </div>
 
-                    <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 text-sm">
-                        <div className="grid gap-2 sm:grid-cols-2">
-                            <div>
-                                <p className="font-semibold">Habilitation nacelle</p>
-                                <p>{editingUser?.nacelle_valid_until ? formatDate(editingUser.nacelle_valid_until) : '-'}</p>
-                            </div>
-                            <div>
-                                <p className="font-semibold">Éco-conduite</p>
-                                <p>{editingUser?.eco_conduite_valid_until ? formatDate(editingUser.eco_conduite_valid_until) : '-'}</p>
-                            </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label className="mb-1 block text-sm font-medium">Habilitation nacelle</label>
+                            <DateInput
+                                label="Habilitation nacelle"
+                                value={form.data.nacelle_valid_until}
+                                onChange={(value) => form.setData('nacelle_valid_until', value ?? '')}
+                                disabled={!isAdmin}
+                                className={dateInputClass}
+                            />
+                            <InputError className="mt-2" message={form.errors.nacelle_valid_until} />
+                        </div>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium">Éco-conduite</label>
+                            <DateInput
+                                label="Éco-conduite"
+                                value={form.data.eco_conduite_valid_until}
+                                onChange={(value) => form.setData('eco_conduite_valid_until', value ?? '')}
+                                disabled={!isAdmin}
+                                className={dateInputClass}
+                            />
+                            <InputError className="mt-2" message={form.errors.eco_conduite_valid_until} />
                         </div>
                     </div>
 

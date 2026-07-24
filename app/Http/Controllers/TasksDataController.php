@@ -11,6 +11,7 @@ use App\Services\AuditLogService;
 use App\Support\Access\AccessManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -400,14 +401,27 @@ class TasksDataController extends Controller
 
     public function updateJeudy(Request $request, User $user): RedirectResponse
     {
-        $validated = $request->validate([
+        // Habilitation nacelle / éco-conduite sont les mêmes colonnes users
+        // que celles éditées depuis l'Annuaire, où elles sont réservées aux
+        // admins (DirectoryController::update) : on applique la même
+        // restriction ici plutôt que d'inventer une nouvelle règle.
+        $isAdmin = (bool) ($request->user()?->hasRole('admin'));
+
+        $rules = [
             'phone' => ['nullable', 'string', 'max:60'],
             'mobile_phone' => ['nullable', 'string', 'max:60'],
             'depot_ids' => ['nullable', 'array'],
             'depot_ids.*' => ['integer', Rule::exists('depots', 'id')],
             'operations_comment' => ['nullable', 'string', 'max:3000'],
             'display_order' => ['nullable', 'integer', 'min:0', 'max:999999'],
-        ]);
+        ];
+
+        if ($isAdmin) {
+            $rules['nacelle_valid_until'] = ['nullable', 'date'];
+            $rules['eco_conduite_valid_until'] = ['nullable', 'date'];
+        }
+
+        $validated = $request->validate($rules);
 
         $depotIds = collect($validated['depot_ids'] ?? [])
             ->map(static fn ($value): int => (int) $value)
@@ -433,14 +447,22 @@ class TasksDataController extends Controller
         if ($this->usersHasColumn('depot_id')) {
             $attributes['depot_id'] = $depotIds[0] ?? null;
         }
-
-        if ($attributes !== []) {
-            $user->forceFill($attributes)->save();
+        if ($isAdmin && $this->usersHasColumn('nacelle_valid_until') && array_key_exists('nacelle_valid_until', $validated)) {
+            $attributes['nacelle_valid_until'] = $validated['nacelle_valid_until'];
+        }
+        if ($isAdmin && $this->usersHasColumn('eco_conduite_valid_until') && array_key_exists('eco_conduite_valid_until', $validated)) {
+            $attributes['eco_conduite_valid_until'] = $validated['eco_conduite_valid_until'];
         }
 
-        if (Schema::hasTable('depot_user')) {
-            $user->depots()->sync($depotIds);
-        }
+        DB::transaction(function () use ($user, $attributes, $depotIds): void {
+            if ($attributes !== []) {
+                $user->forceFill($attributes)->save();
+            }
+
+            if (Schema::hasTable('depot_user')) {
+                $user->depots()->sync($depotIds);
+            }
+        });
 
         $this->auditLogService->log([
             'action' => 'update_user',
@@ -452,6 +474,8 @@ class TasksDataController extends Controller
                 'mobile_phone' => $user->mobile_phone,
                 'display_order' => $user->display_order,
                 'depot_ids' => $depotIds,
+                'nacelle_valid_until' => $user->nacelle_valid_until?->toDateString(),
+                'eco_conduite_valid_until' => $user->eco_conduite_valid_until?->toDateString(),
             ],
         ]);
 
