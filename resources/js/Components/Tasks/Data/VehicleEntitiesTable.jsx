@@ -30,6 +30,7 @@ const BASE_FORM = {
     registration: '',
     code_zeendoc: '',
     depot_id: '',
+    driver_user_id: '',
     tractor_vehicle_id: '',
     benne_ids: [],
     is_active: true,
@@ -67,6 +68,20 @@ export default function VehicleEntitiesTable({
     const depotOptions = useMemo(() => formOptions?.depots ?? [], [formOptions]);
     const tractorOptions = useMemo(() => formOptions?.tractor_candidates ?? [], [formOptions]);
     const remorqueOptions = useMemo(() => formOptions?.remorque_candidates ?? [], [formOptions]);
+    const driverOptions = useMemo(() => formOptions?.driver_candidates ?? [], [formOptions]);
+
+    // La liste des chauffeurs éligibles est filtrée côté serveur (secteur
+    // chauffeur/commercial, actifs) ; si le chauffeur déjà rattaché à cet
+    // élément n'y figure plus (ex. changement de secteur depuis), on l'ajoute
+    // quand même pour ne pas le faire disparaître silencieusement du select.
+    const driverSelectOptions = useMemo(() => {
+        const currentId = editingItem?.driver_user_id;
+        if (!currentId || driverOptions.some((option) => Number(option.id) === Number(currentId))) {
+            return driverOptions;
+        }
+
+        return [...driverOptions, { id: currentId, label: editingItem?.driver_name || `Utilisateur #${currentId}` }];
+    }, [driverOptions, editingItem]);
 
     const rows = useMemo(() => {
         const needle = normalizeString(search);
@@ -167,6 +182,7 @@ export default function VehicleEntitiesTable({
             registration: vehicle.registration ?? '',
             code_zeendoc: vehicle.code_zeendoc ?? '',
             depot_id: normalizeValue(vehicle.depot_id),
+            driver_user_id: normalizeValue(vehicle.driver_user_id),
             tractor_vehicle_id: normalizeValue(vehicle.tractor_vehicle_id),
             benne_ids: (vehicle.benne_ids ?? []).map((id) => String(id)),
             is_active: Boolean(vehicle.is_active),
@@ -480,23 +496,46 @@ export default function VehicleEntitiesTable({
                             </>
                         ) : null}
 
-                        <div>
-                            <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                                Dépôt
-                            </label>
-                            <select
-                                value={form.data.depot_id}
-                                onChange={(event) => form.setData('depot_id', event.target.value)}
-                                className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
-                            >
-                                <option value="">Aucun</option>
-                                {depotOptions.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                        {item.name}
-                                    </option>
-                                ))}
-                            </select>
-                            <InputError className="mt-1" message={form.errors.depot_id} />
+                        <div className="sm:col-span-2">
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
+                                        Dépôt de rattachement
+                                    </label>
+                                    <select
+                                        value={form.data.depot_id}
+                                        onChange={(event) => form.setData('depot_id', event.target.value)}
+                                        className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                                    >
+                                        <option value="">Aucun</option>
+                                        {depotOptions.map((item) => (
+                                            <option key={item.id} value={item.id}>
+                                                {item.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <InputError className="mt-1" message={form.errors.depot_id} />
+                                </div>
+
+                                <div>
+                                    <label className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
+                                        Chauffeur rattaché
+                                    </label>
+                                    <select
+                                        value={form.data.driver_user_id}
+                                        onChange={(event) => form.setData('driver_user_id', event.target.value)}
+                                        className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                                    >
+                                        <option value="">Aucun</option>
+                                        {driverSelectOptions.map((item) => (
+                                            <option key={item.id} value={item.id}>
+                                                {item.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <InputError className="mt-1" message={form.errors.driver_user_id} />
+                                </div>
+                            </div>
                         </div>
 
                         <div className="flex items-end">

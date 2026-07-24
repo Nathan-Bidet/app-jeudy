@@ -23,9 +23,7 @@ class TasksDataController extends Controller
     public function __construct(
         private readonly AccessManager $accessManager,
         private readonly AuditLogService $auditLogService,
-    )
-    {
-    }
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -94,16 +92,16 @@ class TasksDataController extends Controller
             }
 
             $select = [
-                    'id',
-                    'name',
-                    'first_name',
-                    'last_name',
-                    'email',
-                    'phone',
-                    'mobile_phone',
-                    'sector_id',
-                    'photo_path',
-                ];
+                'id',
+                'name',
+                'first_name',
+                'last_name',
+                'email',
+                'phone',
+                'mobile_phone',
+                'sector_id',
+                'photo_path',
+            ];
 
             if ($hasDepotId) {
                 $select[] = 'depot_id';
@@ -233,6 +231,7 @@ class TasksDataController extends Controller
                     'type:id,code,label',
                     'depot:id,name',
                     'garage:id,name',
+                    'driver:id,name,first_name,last_name',
                     'tractor:id,name,registration',
                     'bennes:id,name,registration',
                 ])
@@ -245,6 +244,7 @@ class TasksDataController extends Controller
                     'registration',
                     'code_zeendoc',
                     'depot_id',
+                    'driver_user_id',
                     'garage_id',
                     'tractor_vehicle_id',
                     'is_active',
@@ -267,6 +267,8 @@ class TasksDataController extends Controller
                         'mode' => $typeCode === 'ensemble_pl' ? 'ensemble_pl' : 'vehicle',
                         'depot_id' => $vehicle->depot_id,
                         'depot_name' => (string) ($vehicle->depot?->name ?? ''),
+                        'driver_user_id' => $vehicle->driver_user_id,
+                        'driver_name' => $vehicle->driver ? $this->userLabel($vehicle->driver) : '',
                         'garage_name' => (string) ($vehicle->garage?->name ?? ''),
                         'is_active' => (bool) $vehicle->is_active,
                         'tractor_vehicle_id' => $vehicle->tractor_vehicle_id,
@@ -358,10 +360,14 @@ class TasksDataController extends Controller
         $validated = $this->validatedVehicleSectionPayload($request);
         $payload = $this->makeVehiclePayloadFromSection($validated);
 
-        $vehicle = Vehicle::query()->create($payload['vehicle']);
-        if ($payload['is_ensemble']) {
-            $vehicle->bennes()->sync($payload['benne_ids']);
-        }
+        $vehicle = DB::transaction(function () use ($payload): Vehicle {
+            $vehicle = Vehicle::query()->create($payload['vehicle']);
+            if ($payload['is_ensemble']) {
+                $vehicle->bennes()->sync($payload['benne_ids']);
+            }
+
+            return $vehicle;
+        });
 
         $this->auditLogService->log([
             'action' => 'create_vehicle',
@@ -383,8 +389,10 @@ class TasksDataController extends Controller
         $validated = $this->validatedVehicleSectionPayload($request, $vehicle);
         $payload = $this->makeVehiclePayloadFromSection($validated, $vehicle);
 
-        $vehicle->update($payload['vehicle']);
-        $vehicle->bennes()->sync($payload['is_ensemble'] ? $payload['benne_ids'] : []);
+        DB::transaction(function () use ($vehicle, $payload): void {
+            $vehicle->update($payload['vehicle']);
+            $vehicle->bennes()->sync($payload['is_ensemble'] ? $payload['benne_ids'] : []);
+        });
 
         $this->auditLogService->log([
             'action' => 'update_vehicle',
@@ -661,6 +669,11 @@ class TasksDataController extends Controller
             'registration' => ['nullable', 'string', 'max:50'],
             'code_zeendoc' => ['nullable', 'string', 'max:120'],
             'depot_id' => ['nullable', 'integer', 'exists:depots,id'],
+            'driver_user_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('users', 'id')->where(fn ($query) => $query->where('is_active', true)),
+            ],
             'tractor_vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
             'benne_ids' => ['nullable', 'array'],
             'benne_ids.*' => ['integer', 'exists:vehicles,id'],
@@ -752,7 +765,7 @@ class TasksDataController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
      * @return array{vehicle: array<string, mixed>, is_ensemble: bool, benne_ids: array<int>}
      */
     private function makeVehiclePayloadFromSection(array $validated, ?Vehicle $currentVehicle = null): array
@@ -781,6 +794,7 @@ class TasksDataController extends Controller
                 'registration' => $isEnsemble ? null : $this->nullableString($validated['registration'] ?? null),
                 'code_zeendoc' => $isEnsemble ? null : $this->nullableString($validated['code_zeendoc'] ?? null),
                 'depot_id' => ! empty($validated['depot_id']) ? (int) $validated['depot_id'] : null,
+                'driver_user_id' => ! empty($validated['driver_user_id']) ? (int) $validated['driver_user_id'] : null,
                 'tractor_vehicle_id' => $isEnsemble ? $tractorVehicleId : null,
                 'is_active' => (bool) ($validated['is_active'] ?? true),
                 'is_rental' => false,
@@ -860,7 +874,45 @@ class TasksDataController extends Controller
             'depots' => $depots,
             'tractor_candidates' => $tractorCandidates,
             'remorque_candidates' => $remorqueCandidates,
+            'driver_candidates' => $this->driverCandidates(),
         ];
+    }
+
+    /**
+     * Même critère d'éligibilité "chauffeur" que Admin > Entités
+     * (VehiclesPanel.jsx : secteur chauffeur/chauffeur carb/commercial,
+     * utilisateurs actifs) mais appliqué côté serveur pour n'envoyer que
+     * la liste déjà filtrée, plutôt que l'intégralité des utilisateurs.
+     *
+     * @return array<int, array{id:int, label:string}>
+     */
+    private function driverCandidates(): array
+    {
+        return User::query()
+            ->where('is_active', true)
+            ->whereHas('sector', function ($query): void {
+                $query->where(function ($inner): void {
+                    $inner->whereIn(DB::raw('LOWER(name)'), ['chauffeur', 'chauffeur carb'])
+                        ->orWhere('slug', 'commercial');
+                });
+            })
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->orderBy('name')
+            ->get(['id', 'name', 'first_name', 'last_name'])
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'label' => $this->userLabel($user),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function userLabel(User $user): string
+    {
+        $fullName = trim((string) $user->first_name.' '.(string) $user->last_name);
+
+        return $fullName !== '' ? $fullName : ((string) $user->name ?: 'Utilisateur #'.$user->id);
     }
 
     private function isCamionType(string $code, string $label): bool
