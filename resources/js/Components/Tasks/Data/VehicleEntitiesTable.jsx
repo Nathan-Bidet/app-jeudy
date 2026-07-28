@@ -97,6 +97,7 @@ export default function VehicleEntitiesTable({
                 vehicle.registration,
                 vehicle.code_zeendoc,
                 vehicle.type_label,
+                vehicle.driver_name,
                 vehicle.depot_name,
                 vehicle.garage_name,
                 vehicle.tractor_label,
@@ -245,12 +246,13 @@ export default function VehicleEntitiesTable({
                 </div>
 
                 <div className="overflow-x-auto">
-                    <table className="min-w-[980px] w-full divide-y divide-[var(--app-border)] text-sm">
+                    <table className="min-w-[1080px] w-full divide-y divide-[var(--app-border)] text-sm">
                         <thead className="bg-[var(--app-surface-soft)]">
                             <tr className="text-left text-[var(--app-muted)]">
                                 <th className="px-4 py-2 font-semibold">Nom</th>
                                 <th className="px-4 py-2 font-semibold">Immatriculation</th>
                                 <th className="px-4 py-2 font-semibold">Type</th>
+                                <th className="px-4 py-2 font-semibold">Chauffeur</th>
                                 <th className="px-4 py-2 font-semibold">Dépôt</th>
                                 <th className="px-4 py-2 font-semibold">Détails</th>
                                 <th className="px-4 py-2 font-semibold text-center">Actif</th>
@@ -263,7 +265,7 @@ export default function VehicleEntitiesTable({
                             {rows.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={canManage ? 7 : 6}
+                                        colSpan={canManage ? 8 : 7}
                                         className="px-4 py-6 text-center text-[var(--app-muted)]"
                                     >
                                         Aucun élément.
@@ -284,6 +286,11 @@ export default function VehicleEntitiesTable({
                                         </td>
                                         <td className="px-4 py-3">
                                             {vehicle.type_label || (
+                                                <span className="text-[var(--app-muted)]">-</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {vehicle.driver_name || (
                                                 <span className="text-[var(--app-muted)]">-</span>
                                             )}
                                         </td>
