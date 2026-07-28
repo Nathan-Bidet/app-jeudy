@@ -1278,14 +1278,19 @@ export function NotificationsMenu() {
                 leaveTo="opacity-0 translate-y-1"
             >
                 <MenuItems className="fixed left-1/2 top-16 z-50 w-[calc(100vw-24px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-xl focus:outline-none sm:absolute sm:right-0 sm:left-auto sm:top-auto sm:mt-2 sm:w-[min(24rem,calc(100vw-1rem))] sm:translate-x-0">
-                    <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-4 py-3">
+                    {/* flex-wrap : sur un panneau étroit (mobile), le libellé de
+                        l'action passe proprement à la ligne sous le titre
+                        plutôt que de se compresser/se tronquer dans la ligne du
+                        titre. -mx/-my + px/py sur les boutons agrandissent la
+                        zone tactile sans changer leur taille visuelle. */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-[var(--app-border)] px-4 py-3">
                         <p className="text-sm font-semibold">Notifications</p>
                         {hasUnread ? (
                             <button
                                 type="button"
                                 onClick={handleMarkAllAsRead}
                                 disabled={markingAllRead}
-                                className="text-xs font-semibold text-[#0F6930] transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="-mx-1.5 -my-1.5 flex-shrink-0 whitespace-nowrap rounded-lg px-1.5 py-1.5 text-xs font-semibold text-[#0F6930] transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 Tout marquer comme lu
                             </button>
@@ -1295,7 +1300,7 @@ export function NotificationsMenu() {
                                 onClick={handleDeleteAll}
                                 disabled={deletingAll}
                                 aria-label="Supprimer définitivement toutes vos notifications lues"
-                                className="text-xs font-semibold text-red-700 transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="-mx-1.5 -my-1.5 flex-shrink-0 whitespace-nowrap rounded-lg px-1.5 py-1.5 text-xs font-semibold text-red-700 transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 Tout supprimer
                             </button>

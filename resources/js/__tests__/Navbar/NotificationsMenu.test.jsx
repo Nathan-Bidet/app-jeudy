@@ -101,6 +101,25 @@ describe('NotificationsMenu — actions globales exclusives', () => {
         expect(screen.queryByText('Tout marquer comme lu')).not.toBeInTheDocument();
     });
 
+    // Même composant, même rendu sur mobile et ordinateur (pas de variante
+    // dédiée) : le panneau autorise un retour à la ligne contrôlé de l'action
+    // plutôt que sa troncature/compression lorsque l'espace manque (petits
+    // écrans), et le libellé du bouton ne peut jamais se couper en deux
+    // lignes (whitespace-nowrap) au milieu d'un mot.
+    it('lets the header row wrap to a second line and keeps the action label on one line', async () => {
+        setPageProps([notification({ id: '1', read_at: new Date().toISOString() })], 0);
+        render(<NotificationsMenu />);
+
+        const [bellButton] = screen.getAllByRole('button');
+        fireEvent.click(bellButton);
+
+        const deleteAllButton = await screen.findByText('Tout supprimer');
+        const header = deleteAllButton.closest('div');
+
+        expect(header.className).toContain('flex-wrap');
+        expect(deleteAllButton.className).toContain('whitespace-nowrap');
+    });
+
     it('shows neither action when there are no notifications', async () => {
         setPageProps([], 0);
         render(<NotificationsMenu />);
