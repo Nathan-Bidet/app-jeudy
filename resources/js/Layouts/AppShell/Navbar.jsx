@@ -931,7 +931,7 @@ function DesktopModuleDropdown({ module }) {
     );
 }
 
-function NotificationsMenu() {
+export function NotificationsMenu() {
     const { notifications: notificationsProp, errors: pageErrors = {} } = usePage().props;
     const initialNotifications = Array.isArray(notificationsProp?.items) ? notificationsProp.items : [];
     const initialUnreadCount = Number(notificationsProp?.unread_count ?? initialNotifications.filter((notification) => !notification?.read_at).length);
@@ -940,7 +940,15 @@ function NotificationsMenu() {
     const [expandedNotificationIds, setExpandedNotificationIds] = useState(new Set());
     const [announcementModal, setAnnouncementModal] = useState(null);
     const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
+    const [markingAllRead, setMarkingAllRead] = useState(false);
+    const [deletingAll, setDeletingAll] = useState(false);
+    const [deleteAllError, setDeleteAllError] = useState(null);
     const hasUnread = unreadCount > 0;
+    // Aucun compteur dédié côté serveur n'est nécessaire : notifications.length
+    // n'est vide que si le total l'est aussi (la liste chargée est un extrait
+    // des dernières notifications), donc "il reste des notifications, toutes
+    // lues" se déduit directement de unreadCount et de la liste déjà chargée.
+    const canDeleteAll = !hasUnread && notifications.length > 0;
 
     const openAnnouncementModal = (notification) => setAnnouncementModal(notification);
 
@@ -1101,6 +1109,56 @@ function NotificationsMenu() {
         );
     });
 
+    // Suppression groupée effectuée côté serveur (toutes les notifications
+    // lues de l'utilisateur, y compris celles au-delà des 10 dernières
+    // chargées ici) : une seule requête, pas de boucle de suppressions
+    // individuelles.
+    const deleteAllNotifications = () => new Promise((resolve) => {
+        const destroyAllUrl = safeHref('notifications.destroy_all');
+        if (!destroyAllUrl) {
+            resolve(false);
+            return;
+        }
+
+        router.delete(destroyAllUrl, {
+            preserveScroll: true,
+            preserveState: true,
+            replace: true,
+            onSuccess: () => {
+                setNotifications([]);
+                setUnreadCount(0);
+                resolve(true);
+            },
+            onError: () => resolve(false),
+            onCancel: () => resolve(false),
+        });
+    });
+
+    const handleMarkAllAsRead = () => {
+        if (markingAllRead) return;
+        setMarkingAllRead(true);
+        markAllAsRead()
+            .then(() => refreshNotifications().catch(() => null))
+            .finally(() => setMarkingAllRead(false));
+    };
+
+    const handleDeleteAll = () => {
+        if (deletingAll) return;
+        if (!window.confirm('Supprimer définitivement toutes vos notifications lues ?')) {
+            return;
+        }
+
+        setDeletingAll(true);
+        setDeleteAllError(null);
+        deleteAllNotifications()
+            .then((success) => {
+                if (!success) {
+                    setDeleteAllError('La suppression a échoué. Réessayez.');
+                }
+            })
+            .finally(() => setDeletingAll(false));
+    };
+
     const handleNotificationClick = async (notification) => {
         if (!notification?.id) {
             return;
@@ -1223,19 +1281,31 @@ function NotificationsMenu() {
                     <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-4 py-3">
                         <p className="text-sm font-semibold">Notifications</p>
                         {hasUnread ? (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        markAllAsRead().then(() => {
-                                            refreshNotifications().catch(() => null);
-                                        });
-                                    }}
-                                    className="text-xs font-semibold text-[#0F6930] transition hover:opacity-80"
-                                >
-                                    Tout marquer comme lu
+                            <button
+                                type="button"
+                                onClick={handleMarkAllAsRead}
+                                disabled={markingAllRead}
+                                className="text-xs font-semibold text-[#0F6930] transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Tout marquer comme lu
+                            </button>
+                        ) : canDeleteAll ? (
+                            <button
+                                type="button"
+                                onClick={handleDeleteAll}
+                                disabled={deletingAll}
+                                aria-label="Supprimer définitivement toutes vos notifications lues"
+                                className="text-xs font-semibold text-red-700 transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Tout supprimer
                             </button>
                         ) : null}
                     </div>
+                    {deleteAllError ? (
+                        <p className="border-b border-[var(--app-border)] bg-red-50 px-4 py-2 text-xs font-semibold text-red-700">
+                            {deleteAllError}
+                        </p>
+                    ) : null}
                     <div className="p-3">
                         {notifications.length > 0 ? (
                             <div className="max-h-80 space-y-2 overflow-y-auto pr-1">

@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AprevoirController;
 use App\Http\Controllers\ArchiveController;
@@ -9,6 +8,9 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\CalendarEventController;
 use App\Http\Controllers\CalendarFeedController;
 use App\Http\Controllers\CotationController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DirectoryController;
+use App\Http\Controllers\EngraisController;
 use App\Http\Controllers\FormattingRuleController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\HourSheetController;
@@ -16,13 +18,11 @@ use App\Http\Controllers\LdtController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\SecurityProfileController;
-use App\Http\Controllers\DirectoryController;
-use App\Http\Controllers\EngraisController;
-use App\Http\Controllers\TaskFuelController;
-use App\Http\Controllers\TaskTiersController;
-use App\Http\Controllers\TasksDataController;
 use App\Http\Controllers\PushSubscriptionController;
+use App\Http\Controllers\SecurityProfileController;
+use App\Http\Controllers\TaskFuelController;
+use App\Http\Controllers\TasksDataController;
+use App\Http\Controllers\TaskTiersController;
 use App\Http\Controllers\UserFileController;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Support\Facades\Route;
@@ -163,6 +163,8 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->name('notifications.read_all');
     Route::get('/notifications/latest', [NotificationController::class, 'latest'])
         ->name('notifications.latest');
+    Route::delete('/notifications', [NotificationController::class, 'destroyAll'])
+        ->name('notifications.destroy_all');
     Route::delete('/notifications/{notificationId}', [NotificationController::class, 'destroy'])
         ->name('notifications.destroy');
     Route::get('/global-search', [GlobalSearchController::class, 'index'])

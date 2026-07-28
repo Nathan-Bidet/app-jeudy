@@ -7,9 +7,10 @@ use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Services\AuditLogService;
 use App\Support\Access\AccessManager;
 use App\Support\RichText\SimpleHtmlSanitizer;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 class NotificationController extends Controller
@@ -17,8 +18,7 @@ class NotificationController extends Controller
     public function __construct(
         private readonly AuditLogService $auditLogService,
         private readonly AnnouncementPollPresenter $pollPresenter,
-    ) {
-    }
+    ) {}
 
     public function latest(Request $request): JsonResponse
     {
@@ -112,6 +112,48 @@ class NotificationController extends Controller
         return back();
     }
 
+    public function destroyAll(Request $request): RedirectResponse|JsonResponse
+    {
+        $user = $request->user();
+
+        // Ne supprime que les notifications déjà lues : si une nouvelle
+        // notification arrive entre l'affichage du bouton et la validation
+        // de l'utilisateur, elle est forcément non lue et survit donc à
+        // cette opération plutôt que d'être supprimée par erreur.
+        $deletedCount = DB::transaction(function () use ($user): int {
+            $readNotifications = $user->notifications()
+                ->whereNotNull('read_at')
+                ->get(['id', 'read_at']);
+
+            $count = $readNotifications->count();
+
+            if ($count === 0) {
+                return 0;
+            }
+
+            $this->auditLogService->log([
+                'action' => 'Suppression de toutes les notifications',
+                'module' => 'Notifications',
+                'description' => 'Suppression de toutes les notifications lues',
+                'payload' => [
+                    'notification_ids' => $readNotifications->pluck('id')->map(fn ($id) => (string) $id)->all(),
+                    'count' => $count,
+                    'deleted_at' => now()->toIso8601String(),
+                ],
+            ]);
+
+            $user->notifications()->whereNotNull('read_at')->delete();
+
+            return $count;
+        });
+
+        if ($request->expectsJson()) {
+            return response()->json(['success' => true, 'deleted_count' => $deletedCount]);
+        }
+
+        return back()->with('success', $deletedCount > 0 ? 'Notifications supprimées.' : 'Aucune notification à supprimer.');
+    }
+
     public function destroy(Request $request, string $notificationId): RedirectResponse|JsonResponse
     {
         $notification = $request->user()
@@ -147,7 +189,7 @@ class NotificationController extends Controller
         return back();
     }
 
-    private function mapNotification(object $notification, \Illuminate\Support\Collection $announcements = null, $viewer = null, bool $canManage = false): array
+    private function mapNotification(object $notification, ?\Illuminate\Support\Collection $announcements = null, $viewer = null, bool $canManage = false): array
     {
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
