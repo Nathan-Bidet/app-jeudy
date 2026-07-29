@@ -11,9 +11,9 @@ use App\Models\AnnouncementView;
 use App\Models\Sector;
 use App\Models\User;
 use App\Notifications\AnnouncementNotification;
-use App\Services\AuditLogService;
 use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Services\Announcements\AnnouncementRecipientResolver;
+use App\Services\AuditLogService;
 use App\Support\Access\AccessManager;
 use App\Support\RichText\SimpleHtmlSanitizer;
 use Carbon\Carbon;
@@ -34,8 +34,7 @@ class AnnouncementController extends Controller
         private readonly AuditLogService $auditLogService,
         private readonly AnnouncementRecipientResolver $recipientResolver,
         private readonly AnnouncementPollPresenter $pollPresenter,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -314,6 +313,123 @@ class AnnouncementController extends Controller
             'other_text' => ['nullable', 'string', 'max:1000'],
         ]);
 
+        $payload = $this->buildPollResponsePayload($announcement, $validated);
+
+        AnnouncementPollResponse::query()->updateOrCreate(
+            [
+                'announcement_poll_id' => $announcement->poll->id,
+                'user_id' => $user->id,
+            ],
+            array_merge($payload, [
+                'announcement_id' => $announcement->id,
+                'responded_at' => now(),
+            ]),
+        );
+
+        return back()->with('success', 'Votre réponse a été enregistrée.');
+    }
+
+    /**
+     * Permet à un administrateur ou au créateur de l'annonce d'enregistrer
+     * ou de modifier la réponse d'un destinataire à sa place — même table,
+     * même contrainte d'unicité et même logique de validation que
+     * respondPoll(), la seule différence étant l'identité du répondant ciblé
+     * et l'autorisation requise (authorizeOwnership : admin ou créateur,
+     * jamais le destinataire lui-même via cette route).
+     */
+    public function respondPollFor(Request $request, Announcement $announcement, User $user): RedirectResponse
+    {
+        $actor = $request->user();
+        abort_unless($actor, 403);
+
+        $announcement->loadMissing(['poll.options']);
+        abort_unless($announcement->poll && $announcement->status === Announcement::STATUS_SENT, 404);
+
+        // Admin (annonces.manage) ou créateur de CETTE annonce uniquement —
+        // un créateur ne peut pas agir sur le sondage d'un autre créateur.
+        $this->authorizeOwnership($actor, $announcement);
+
+        if (! $this->isAnnouncementRecipient($announcement, $user)) {
+            throw ValidationException::withMessages([
+                'selected_option_ids' => 'Cette personne ne fait pas partie des destinataires du sondage.',
+            ]);
+        }
+
+        $validated = $request->validate([
+            'selected_option_ids' => ['nullable', 'array'],
+            'selected_option_ids.*' => ['integer'],
+            'other_text' => ['nullable', 'string', 'max:1000'],
+            // Instantané de la réponse tel que vu par le modal à son
+            // ouverture, comparé au contenu réel sous verrou ci-dessous
+            // (concurrence optimiste basée sur le contenu, pas sur une
+            // horloge : un timestamp() en secondes ne distinguerait pas deux
+            // écritures survenues dans la même seconde).
+            'expected_exists' => ['required', 'boolean'],
+            'expected_selected_option_ids' => ['nullable', 'array'],
+            'expected_selected_option_ids.*' => ['integer'],
+            'expected_other_text' => ['nullable', 'string'],
+        ]);
+
+        $payload = $this->buildPollResponsePayload($announcement, $validated);
+
+        DB::transaction(function () use ($announcement, $user, $actor, $validated, $payload): void {
+            $existing = AnnouncementPollResponse::query()
+                ->where('announcement_poll_id', $announcement->poll->id)
+                ->where('user_id', $user->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $this->matchesExpectedPollResponse($existing, $validated)) {
+                throw ValidationException::withMessages([
+                    'selected_option_ids' => 'La réponse de cette personne a été modifiée entretemps. Rechargez avant de continuer.',
+                ]);
+            }
+
+            $before = $existing ? [
+                'selected_option_ids' => $existing->selected_option_ids,
+                'other_text' => $existing->other_text,
+            ] : null;
+
+            AnnouncementPollResponse::query()->updateOrCreate(
+                [
+                    'announcement_poll_id' => $announcement->poll->id,
+                    'user_id' => $user->id,
+                ],
+                array_merge($payload, [
+                    'announcement_id' => $announcement->id,
+                    'responded_at' => now(),
+                ]),
+            );
+
+            $this->auditLogService->log([
+                'action' => $existing ? 'update_poll_response_on_behalf' : 'create_poll_response_on_behalf',
+                'module' => 'annonces',
+                'description' => sprintf(
+                    '%s de la réponse au sondage de %s par %s',
+                    $existing ? 'Modification' : 'Création',
+                    $this->userLabel($user),
+                    $this->userLabel($actor),
+                ),
+                'payload' => [
+                    'announcement_id' => $announcement->id,
+                    'announcement_poll_id' => $announcement->poll->id,
+                    'target_user_id' => $user->id,
+                    'target_user_label' => $this->userLabel($user),
+                    'before' => $before,
+                    'after' => $payload,
+                ],
+            ]);
+        });
+
+        return back()->with('success', 'Réponse enregistrée pour '.$this->userLabel($user).'.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{selected_option_ids: array<int, int>, other_text: string|null}
+     */
+    private function buildPollResponsePayload(Announcement $announcement, array $validated): array
+    {
         $availableOptionIds = $announcement->poll->options->pluck('id')->map(fn ($id): int => (int) $id)->all();
         $selectedOptionIds = array_values(array_intersect(
             array_values(array_unique(array_map('intval', $validated['selected_option_ids'] ?? []))),
@@ -343,20 +459,41 @@ class AnnouncementController extends Controller
             ]);
         }
 
-        AnnouncementPollResponse::query()->updateOrCreate(
-            [
-                'announcement_poll_id' => $announcement->poll->id,
-                'user_id' => $user->id,
-            ],
-            [
-                'announcement_id' => $announcement->id,
-                'selected_option_ids' => $selectedOptionIds,
-                'other_text' => $otherText !== '' ? $otherText : null,
-                'responded_at' => now(),
-            ],
-        );
+        return [
+            'selected_option_ids' => $selectedOptionIds,
+            'other_text' => $otherText !== '' ? $otherText : null,
+        ];
+    }
 
-        return back()->with('success', 'Votre réponse a été enregistrée.');
+    /**
+     * Concurrence optimiste basée sur le contenu réel de la réponse (plutôt
+     * que sur un horodatage) : compare ce que le modal affichait à son
+     * ouverture (expected_*) à l'état actuel, lu sous verrou. Un écart —
+     * réponse créée, modifiée ou supprimée entretemps par quelqu'un d'autre —
+     * bloque l'écriture au lieu de l'écraser silencieusement.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function matchesExpectedPollResponse(?AnnouncementPollResponse $existing, array $validated): bool
+    {
+        $expectedExists = (bool) ($validated['expected_exists'] ?? false);
+        if ($expectedExists !== ($existing !== null)) {
+            return false;
+        }
+
+        if ($existing === null) {
+            return true;
+        }
+
+        $expectedSelected = array_values(array_unique(array_map('intval', $validated['expected_selected_option_ids'] ?? [])));
+        sort($expectedSelected);
+        $currentSelected = array_values(array_unique(array_map('intval', $existing->selected_option_ids ?? [])));
+        sort($currentSelected);
+
+        $expectedOtherText = trim((string) ($validated['expected_other_text'] ?? ''));
+        $currentOtherText = trim((string) ($existing->other_text ?? ''));
+
+        return $expectedSelected === $currentSelected && $expectedOtherText === $currentOtherText;
     }
 
     public function updateDashboard(Request $request, Announcement $announcement): RedirectResponse

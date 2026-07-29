@@ -338,6 +338,8 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->name('annonces.send-push');
     Route::post('/annonces/{announcement}/poll-response', [AnnouncementController::class, 'respondPoll'])
         ->name('annonces.poll-response');
+    Route::post('/annonces/{announcement}/poll-response/{user}', [AnnouncementController::class, 'respondPollFor'])
+        ->name('annonces.poll-response-for');
     Route::post('/annonces/{announcement}/mark-viewed', [AnnouncementController::class, 'markViewed'])
         ->name('annonces.mark-viewed');
     Route::post('/annonces/groups', [AnnouncementController::class, 'storeGroup'])

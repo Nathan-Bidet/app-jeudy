@@ -16,8 +16,7 @@ class AnnouncementPollPresenter
 {
     public function __construct(
         private readonly AnnouncementRecipientResolver $recipientResolver,
-    ) {
-    }
+    ) {}
 
     /**
      * Représentation complète : réponse du destinataire, capacité à
@@ -40,6 +39,10 @@ class AnnouncementPollPresenter
         $data = $this->basic($poll);
         $data['current_response'] = $this->currentResponse($poll, $viewer);
         $data['can_respond'] = (bool) $canRespond;
+        // Mêmes personnes autorisées à consulter les résultats détaillés
+        // (admin ou créateur de l'annonce) : répondre au nom d'un
+        // destinataire depuis ces listes est réservé au même public.
+        $data['can_answer_for_others'] = (bool) $canViewResults;
 
         if ($canViewResults) {
             $data['results'] = $this->results($announcement, $poll);

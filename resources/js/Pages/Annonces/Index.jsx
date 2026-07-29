@@ -2,6 +2,7 @@ import AppLayout from '@/Layouts/AppLayout';
 import Modal from '@/Components/Modal';
 import AnnouncementBody from '@/Components/Announcements/AnnouncementBody';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
+import AnswerPollOnBehalfModal from '@/Components/Announcements/AnswerPollOnBehalfModal';
 import RichTextEditor from '@/Components/RichTextEditor';
 import { Head, router, usePage } from '@inertiajs/react';
 import { Bell, ChevronDown, Megaphone, MessageSquare, Pencil, Plus, Send, Trash2, X } from 'lucide-react';
@@ -702,7 +703,7 @@ function PollEditor({ formState, setFormState }) {
     );
 }
 
-function AnnouncementDetailModal({ announcement, onClose, onSubmitPollResponse, pollResponseProcessing, errors = {} }) {
+function AnnouncementDetailModal({ announcement, onClose, onSubmitPollResponse, pollResponseProcessing, errors = {}, onAnswerForUser }) {
     const poll = announcement?.poll;
 
     if (!announcement) return null;
@@ -747,6 +748,8 @@ function AnnouncementDetailModal({ announcement, onClose, onSubmitPollResponse, 
                     onSubmitResponse={submitPollResponse}
                     responseProcessing={pollResponseProcessing}
                     errors={errors}
+                    canAnswerForOthers={Boolean(poll?.can_answer_for_others) && announcement.status === 'sent'}
+                    onAnswerForUser={(user) => onAnswerForUser?.(announcement, user)}
                 />
             </div>
         </Modal>
@@ -776,6 +779,8 @@ export default function AnnoncesIndex({
     const [detailAnnouncement, setDetailAnnouncement] = useState(null);
     const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
     const [pendingSmsHref, setPendingSmsHref] = useState(null);
+    const [answerOnBehalf, setAnswerOnBehalf] = useState(null); // { announcementId, userId } | null
+    const [answerOnBehalfProcessing, setAnswerOnBehalfProcessing] = useState(false);
 
     useEffect(() => {
         if (openDraft) {
@@ -803,6 +808,74 @@ export default function AnnoncesIndex({
             setDetailAnnouncement(refreshed);
         }
     }, [announcements, highlightAnnouncement, detailAnnouncement]);
+
+    // Dérivé des résultats de sondage déjà chargés (pending_users/
+    // responded_users/options/other_responses) plutôt que d'un nouvel appel
+    // API : recalculé à chaque rafraîchissement des props, donc toujours
+    // basé sur l'état le plus récent connu au moment de l'ouverture/de la
+    // validation du modal (utilisé comme jeton de concurrence côté serveur).
+    const answerOnBehalfContext = useMemo(() => {
+        if (!answerOnBehalf) return null;
+
+        const announcement = announcements.find((item) => Number(item.id) === Number(answerOnBehalf.announcementId))
+            || (Number(detailAnnouncement?.id) === Number(answerOnBehalf.announcementId) ? detailAnnouncement : null)
+            || (Number(highlightAnnouncement?.id) === Number(answerOnBehalf.announcementId) ? highlightAnnouncement : null);
+
+        const results = announcement?.poll?.results;
+        if (!results) return null;
+
+        const respondedEntry = (results.responded_users || [])
+            .find((candidate) => Number(candidate.id) === Number(answerOnBehalf.userId));
+        const pendingEntry = (results.pending_users || [])
+            .find((candidate) => Number(candidate.id) === Number(answerOnBehalf.userId));
+        const targetUser = respondedEntry || pendingEntry;
+        if (!targetUser) return null;
+
+        const selectedOptionIds = (results.options || [])
+            .filter((option) => (option.respondents || []).some((respondent) => Number(respondent.id) === Number(answerOnBehalf.userId)))
+            .map((option) => Number(option.id));
+        const otherEntry = (results.other_responses || [])
+            .find((candidate) => Number(candidate.user_id) === Number(answerOnBehalf.userId));
+
+        return {
+            announcement,
+            user: targetUser,
+            response: respondedEntry ? {
+                selected_option_ids: selectedOptionIds,
+                other_text: otherEntry ? otherEntry.text : '',
+                responded_at: respondedEntry.responded_at,
+            } : null,
+        };
+    }, [answerOnBehalf, announcements, detailAnnouncement, highlightAnnouncement]);
+
+    const openAnswerOnBehalf = (announcement, user) => {
+        setAnswerOnBehalf({ announcementId: announcement.id, userId: user.id });
+    };
+
+    const closeAnswerOnBehalf = () => {
+        if (answerOnBehalfProcessing) return;
+        setAnswerOnBehalf(null);
+    };
+
+    const submitAnswerOnBehalf = (payload) => {
+        if (!answerOnBehalfContext) return;
+
+        setAnswerOnBehalfProcessing(true);
+        router.post(
+            route('annonces.poll-response-for', [answerOnBehalfContext.announcement.id, answerOnBehalfContext.user.id]),
+            {
+                ...payload,
+                expected_exists: Boolean(answerOnBehalfContext.response),
+                expected_selected_option_ids: answerOnBehalfContext.response?.selected_option_ids ?? [],
+                expected_other_text: answerOnBehalfContext.response?.other_text ?? '',
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => setAnswerOnBehalf(null),
+                onFinish: () => setAnswerOnBehalfProcessing(false),
+            },
+        );
+    };
 
     const sectorsById = useMemo(() => Object.fromEntries(sectors.map((sector) => [sector.id, sector.name])), [sectors]);
     const usersById = useMemo(() => Object.fromEntries(users.map((user) => [user.id, user.name])), [users]);
@@ -1267,6 +1340,15 @@ export default function AnnoncesIndex({
                 onClose={() => setDetailAnnouncement(null)}
                 onSubmitPollResponse={submitPollResponse}
                 pollResponseProcessing={pollResponseProcessing}
+                errors={errors}
+                onAnswerForUser={openAnswerOnBehalf}
+            />
+
+            <AnswerPollOnBehalfModal
+                context={answerOnBehalfContext}
+                onClose={closeAnswerOnBehalf}
+                onSubmit={submitAnswerOnBehalf}
+                processing={answerOnBehalfProcessing}
                 errors={errors}
             />
 

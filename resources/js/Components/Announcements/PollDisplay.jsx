@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 
-export function PollResults({ results }) {
+export function PollResults({ results, canAnswerForOthers = false, onAnswerForUser }) {
     const [openOptionIds, setOpenOptionIds] = useState([]);
     const [showOtherResponses, setShowOtherResponses] = useState(false);
 
     if (!results) return null;
+
+    const canAnswerFor = canAnswerForOthers && typeof onAnswerForUser === 'function';
 
     const toggleOptionRespondents = (optionId) => {
         const numericId = Number(optionId);
@@ -95,7 +97,19 @@ export function PollResults({ results }) {
                     <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">Ont répondu</div>
                     <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-[var(--app-surface)] p-2">
                         {(results.responded_users || []).length ? results.responded_users.map((user) => (
-                            <p key={user.id} className="text-sm">{user.name}</p>
+                            canAnswerFor ? (
+                                <button
+                                    key={user.id}
+                                    type="button"
+                                    onClick={() => onAnswerForUser(user)}
+                                    title={`Modifier la réponse de ${user.name}`}
+                                    className="block w-full rounded px-1 py-1 text-left text-sm text-[var(--brand-brown)] underline decoration-dotted underline-offset-2 hover:bg-[var(--app-surface-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-yellow-dark)]"
+                                >
+                                    {user.name}
+                                </button>
+                            ) : (
+                                <p key={user.id} className="text-sm">{user.name}</p>
+                            )
                         )) : <p className="text-xs text-[var(--app-muted)]">Aucune réponse pour le moment.</p>}
                     </div>
                 </div>
@@ -103,7 +117,19 @@ export function PollResults({ results }) {
                     <div className="text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">En attente</div>
                     <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-[var(--app-surface)] p-2">
                         {(results.pending_users || []).length ? results.pending_users.map((user) => (
-                            <p key={user.id} className="text-sm">{user.name}</p>
+                            canAnswerFor ? (
+                                <button
+                                    key={user.id}
+                                    type="button"
+                                    onClick={() => onAnswerForUser(user)}
+                                    title={`Répondre au nom de ${user.name}`}
+                                    className="block w-full rounded px-1 py-1 text-left text-sm text-[var(--brand-brown)] underline decoration-dotted underline-offset-2 hover:bg-[var(--app-surface-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-yellow-dark)]"
+                                >
+                                    {user.name}
+                                </button>
+                            ) : (
+                                <p key={user.id} className="text-sm">{user.name}</p>
+                            )
                         )) : <p className="text-xs text-[var(--app-muted)]">Tout le monde a répondu.</p>}
                     </div>
                 </div>
@@ -120,8 +146,23 @@ export function PollResults({ results }) {
  * onSubmitResponse) ; variant="basic" (défaut) n'affiche que le titre, le
  * type et les réponses possibles, sans interaction.
  */
-export default function PollDisplay({ poll, variant = 'basic', onSubmitResponse, responseProcessing = false, errors = {} }) {
-    const currentResponse = poll?.current_response;
+export default function PollDisplay({
+    poll,
+    variant = 'basic',
+    onSubmitResponse,
+    responseProcessing = false,
+    errors = {},
+    // "Répondre au nom de" (admin/créateur) : respondingFor identifie le
+    // destinataire ciblé ({ id, name, response }) et remplace la réponse du
+    // viewer comme source de préremplissage, sans dupliquer le formulaire de
+    // vote ni ses règles de sélection choix unique/multiple.
+    respondingFor = null,
+    submitLabel = null,
+    hideResults = false,
+    canAnswerForOthers = false,
+    onAnswerForUser,
+}) {
+    const currentResponse = respondingFor ? respondingFor.response : poll?.current_response;
     const [selectedOptionIds, setSelectedOptionIds] = useState([]);
     const [useOther, setUseOther] = useState(false);
     const [otherText, setOtherText] = useState('');
@@ -132,11 +173,13 @@ export default function PollDisplay({ poll, variant = 'basic', onSubmitResponse,
         setSelectedOptionIds(nextSelectedIds.map(Number));
         setUseOther(nextOtherText.trim() !== '');
         setOtherText(nextOtherText);
-    }, [poll?.id, currentResponse?.responded_at]);
+    }, [poll?.id, respondingFor?.id, currentResponse?.responded_at]);
 
     if (!poll) return null;
 
-    const canRespond = variant === 'full' && Boolean(poll.can_respond) && typeof onSubmitResponse === 'function';
+    const canRespond = variant === 'full'
+        && typeof onSubmitResponse === 'function'
+        && (respondingFor ? true : Boolean(poll.can_respond));
 
     const toggleOption = (optionId) => {
         const numericId = Number(optionId);
@@ -218,7 +261,7 @@ export default function PollDisplay({ poll, variant = 'basic', onSubmitResponse,
                         </div>
                     ) : null}
 
-                    {currentResponse ? (
+                    {currentResponse && !respondingFor ? (
                         <p className="text-xs font-semibold text-emerald-700">Votre réponse a été enregistrée.</p>
                     ) : null}
                     {errors.selected_option_ids ? (
@@ -234,7 +277,7 @@ export default function PollDisplay({ poll, variant = 'basic', onSubmitResponse,
                         disabled={responseProcessing}
                         className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--color-black)] disabled:opacity-60"
                     >
-                        {currentResponse ? 'Enregistrer ma réponse' : 'Répondre'}
+                        {submitLabel || (currentResponse ? 'Enregistrer ma réponse' : 'Répondre')}
                     </button>
                 </div>
             ) : (
@@ -246,7 +289,13 @@ export default function PollDisplay({ poll, variant = 'basic', onSubmitResponse,
                 </ul>
             )}
 
-            {poll.results ? <PollResults results={poll.results} /> : null}
+            {!hideResults && poll.results ? (
+                <PollResults
+                    results={poll.results}
+                    canAnswerForOthers={canAnswerForOthers}
+                    onAnswerForUser={onAnswerForUser}
+                />
+            ) : null}
         </div>
     );
 }
