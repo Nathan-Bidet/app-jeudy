@@ -9,14 +9,14 @@ import PollDisplay from '@/Components/Announcements/PollDisplay';
  * validation (choix unique/multiple) que le formulaire de vote normal —
  * seule la cible de la réponse et le libellé changent.
  */
-export default function AnswerPollOnBehalfModal({ context, onClose, onSubmit, processing = false, errors = {} }) {
+export default function AnswerPollOnBehalfModal({ context, onClose, onSubmit, processing = false, errors = {}, zIndexClass }) {
     const isOpen = Boolean(context);
     const poll = context?.announcement?.poll;
     const user = context?.user;
     const isEditing = Boolean(context?.response);
 
     return (
-        <Modal show={isOpen} onClose={processing ? () => {} : onClose} maxWidth="lg">
+        <Modal show={isOpen} onClose={processing ? () => {} : onClose} maxWidth="lg" {...(zIndexClass ? { zIndexClass } : {})}>
             {isOpen ? (
                 <>
                     <div className="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">

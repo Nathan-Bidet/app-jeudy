@@ -1,6 +1,8 @@
 import UserMenu from '@/Layouts/AppShell/UserMenu';
 import AnnouncementBody from '@/Components/Announcements/AnnouncementBody';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
+import AnswerPollOnBehalfModal from '@/Components/Announcements/AnswerPollOnBehalfModal';
+import useAnswerPollOnBehalf from '@/hooks/useAnswerPollOnBehalf';
 import { Link, router, usePage } from '@inertiajs/react';
 import {
     Archive,
@@ -950,6 +952,25 @@ export function NotificationsMenu() {
     // lues" se déduit directement de unreadCount et de la liste déjà chargée.
     const canDeleteAll = !hasUnread && notifications.length > 0;
 
+    // "Répondre au nom de" depuis une annonce ouverte via le centre de
+    // notifications : même hook partagé que la page Annonces et l'accueil
+    // (même endpoint, même dérivation depuis les résultats déjà chargés),
+    // reconstruit ici comme une liste {id: announcement_id, poll} à partir
+    // des notifications de type "announcement" actuellement chargées.
+    const answerableAnnouncements = useMemo(
+        () => notifications
+            .filter((notification) => notification.type === 'announcement' && notification.announcement_id && notification.poll)
+            .map((notification) => ({ id: notification.announcement_id, poll: notification.poll })),
+        [notifications],
+    );
+    const {
+        context: answerOnBehalfContext,
+        processing: answerOnBehalfProcessing,
+        open: openAnswerOnBehalf,
+        close: closeAnswerOnBehalf,
+        submit: submitAnswerOnBehalf,
+    } = useAnswerPollOnBehalf(answerableAnnouncements);
+
     const openAnnouncementModal = (notification) => setAnnouncementModal(notification);
 
     useEffect(() => {
@@ -1499,6 +1520,8 @@ export function NotificationsMenu() {
                                     onSubmitResponse={submitAnnouncementPollResponse}
                                     responseProcessing={pollResponseProcessing}
                                     errors={pageErrors}
+                                    canAnswerForOthers={Boolean(announcementModal.poll?.can_answer_for_others)}
+                                    onAnswerForUser={(user) => openAnswerOnBehalf(announcementModal.announcement_id, user)}
                                 />
                             ) : null}
                         </div>
@@ -1522,6 +1545,15 @@ export function NotificationsMenu() {
                 </TransitionChild>
             </Dialog>
         </Transition>
+
+        <AnswerPollOnBehalfModal
+            context={answerOnBehalfContext}
+            onClose={closeAnswerOnBehalf}
+            onSubmit={submitAnswerOnBehalf}
+            processing={answerOnBehalfProcessing}
+            errors={pageErrors}
+            zIndexClass="z-[300]"
+        />
         </>
     );
 }

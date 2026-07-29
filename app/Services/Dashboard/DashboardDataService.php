@@ -8,8 +8,8 @@ use App\Models\AprevoirTask;
 use App\Models\LdtEntry;
 use App\Models\User;
 use App\Services\Announcements\AnnouncementPollPresenter;
-use App\Support\RichText\SimpleHtmlSanitizer;
 use App\Support\Access\AccessManager;
+use App\Support\RichText\SimpleHtmlSanitizer;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Route;
 
@@ -17,8 +17,7 @@ class DashboardDataService
 {
     public function __construct(
         private readonly AnnouncementPollPresenter $pollPresenter,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -211,6 +210,12 @@ class DashboardDataService
             'created_by' => $creatorName,
             'poll' => $this->pollPresenter->present($announcement, $user, $canManage),
             'has_been_viewed' => $hasBeenViewed,
+            // Utilisé côté frontend pour ne proposer "Répondre au nom de..."
+            // que si le sondage est réellement ouvert (même règle que la
+            // page Annonces) — le serveur applique de toute façon cette
+            // même contrainte dans respondPollFor(), ceci n'est qu'un
+            // affinement d'affichage.
+            'status' => $announcement->status,
         ];
     }
 
@@ -265,6 +270,7 @@ class DashboardDataService
                 usort($sortedIds, function (int $a, int $b) use ($tasksById): int {
                     $posA = $tasksById->get($a)['position'] ?? PHP_INT_MAX;
                     $posB = $tasksById->get($b)['position'] ?? PHP_INT_MAX;
+
                     return $posA <=> $posB;
                 });
 

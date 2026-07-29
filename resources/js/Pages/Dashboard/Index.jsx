@@ -1,16 +1,30 @@
 import WidgetCard from '@/Components/Dashboard/WidgetCard';
 import CollapsibleAnnouncementBody from '@/Components/Announcements/CollapsibleAnnouncementBody';
 import PollDisplay from '@/Components/Announcements/PollDisplay';
+import AnswerPollOnBehalfModal from '@/Components/Announcements/AnswerPollOnBehalfModal';
+import useAnswerPollOnBehalf from '@/hooks/useAnswerPollOnBehalf';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, usePage } from '@inertiajs/react';
 import { Megaphone } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 export default function DashboardIndex({ dashboard }) {
     const { errors = {} } = usePage().props;
     const widgets = dashboard?.widgets ?? [];
     const announcement = dashboard?.dashboard_announcement ?? null;
     const [pollResponseProcessing, setPollResponseProcessing] = useState(false);
+
+    // Une seule annonce possible sur l'accueil : même hook partagé que la
+    // page Annonces et le centre de notifications, pour ne jamais dupliquer
+    // la logique "répondre au nom de".
+    const answerableAnnouncements = useMemo(() => (announcement ? [announcement] : []), [announcement]);
+    const {
+        context: answerOnBehalfContext,
+        processing: answerOnBehalfProcessing,
+        open: openAnswerOnBehalf,
+        close: closeAnswerOnBehalf,
+        submit: submitAnswerOnBehalf,
+    } = useAnswerPollOnBehalf(answerableAnnouncements);
     // Valeur dérivée directement au rendu à partir de la même source de
     // vérité que le repli de l'annonce (has_been_viewed, fournie par le
     // serveur) : pas d'état local à synchroniser, pas d'effet, donc pas de
@@ -50,6 +64,8 @@ export default function DashboardIndex({ dashboard }) {
                             onSubmitResponse={submitPollResponse}
                             responseProcessing={pollResponseProcessing}
                             errors={errors}
+                            canAnswerForOthers={Boolean(announcement.poll?.can_answer_for_others) && announcement.status === 'sent'}
+                            onAnswerForUser={(user) => openAnswerOnBehalf(announcement.id, user)}
                         />
                     </div>
                 ) : null}
@@ -89,6 +105,14 @@ export default function DashboardIndex({ dashboard }) {
                     </>
                 )}
             </div>
+
+            <AnswerPollOnBehalfModal
+                context={answerOnBehalfContext}
+                onClose={closeAnswerOnBehalf}
+                onSubmit={submitAnswerOnBehalf}
+                processing={answerOnBehalfProcessing}
+                errors={errors}
+            />
         </AppLayout>
     );
 }
