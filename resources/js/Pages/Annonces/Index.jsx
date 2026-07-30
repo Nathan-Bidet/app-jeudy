@@ -825,10 +825,19 @@ export default function AnnoncesIndex({
         processing: answerOnBehalfProcessing,
         open: openAnswerOnBehalfRaw,
         close: closeAnswerOnBehalf,
+        reset: resetAnswerOnBehalf,
         submit: submitAnswerOnBehalf,
     } = useAnswerPollOnBehalf(answerableAnnouncements);
 
     const openAnswerOnBehalf = (announcement, user) => openAnswerOnBehalfRaw(announcement.id, user);
+
+    // Fermer le modal "Réponses" (parent) ne doit jamais laisser le modal
+    // "répondre au nom de" (enfant) réapparaître ensuite avec un utilisateur
+    // ciblé obsolète — on nettoie donc systématiquement l'état enfant ici.
+    const closeDetailAnnouncement = () => {
+        setDetailAnnouncement(null);
+        resetAnswerOnBehalf();
+    };
 
     const sectorsById = useMemo(() => Object.fromEntries(sectors.map((sector) => [sector.id, sector.name])), [sectors]);
     const usersById = useMemo(() => Object.fromEntries(users.map((user) => [user.id, user.name])), [users]);
@@ -1290,7 +1299,7 @@ export default function AnnoncesIndex({
 
             <AnnouncementDetailModal
                 announcement={detailAnnouncement}
-                onClose={() => setDetailAnnouncement(null)}
+                onClose={closeDetailAnnouncement}
                 onSubmitPollResponse={submitPollResponse}
                 pollResponseProcessing={pollResponseProcessing}
                 errors={errors}
@@ -1302,6 +1311,7 @@ export default function AnnoncesIndex({
                 onClose={closeAnswerOnBehalf}
                 onSubmit={submitAnswerOnBehalf}
                 processing={answerOnBehalfProcessing}
+                zIndexClass="z-[60]"
                 errors={errors}
             />
 

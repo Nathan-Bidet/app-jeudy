@@ -61,6 +61,13 @@ export default function useAnswerPollOnBehalf(items) {
         setTarget(null);
     };
 
+    // À utiliser quand le modal PARENT (celui qui affiche les listes "En
+    // attente"/"Ont répondu") se ferme, pour ne jamais laisser ce hook
+    // réapparaître avec un utilisateur ciblé obsolète si le parent rouvre
+    // ensuite sur une autre annonce. Contrairement à close(), ignore
+    // volontairement l'état "processing" : le parent qui se ferme prime.
+    const reset = () => setTarget(null);
+
     const submit = (payload) => {
         if (!context) return;
 
@@ -82,5 +89,5 @@ export default function useAnswerPollOnBehalf(items) {
         );
     };
 
-    return { context, processing, open, close, submit };
+    return { context, processing, open, close, reset, submit };
 }

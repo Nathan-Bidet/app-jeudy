@@ -34,7 +34,6 @@ export default function Modal({
         <Transition show={show} leave="duration-200">
             <Dialog
                 as="div"
-                id="modal"
                 className={`fixed inset-0 ${zIndexClass} flex transform items-start overflow-y-auto px-3 py-4 transition-all sm:items-center sm:px-4 sm:py-6`}
                 onClose={close}
             >

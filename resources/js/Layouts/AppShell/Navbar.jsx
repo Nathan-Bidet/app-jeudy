@@ -968,10 +968,19 @@ export function NotificationsMenu() {
         processing: answerOnBehalfProcessing,
         open: openAnswerOnBehalf,
         close: closeAnswerOnBehalf,
+        reset: resetAnswerOnBehalf,
         submit: submitAnswerOnBehalf,
     } = useAnswerPollOnBehalf(answerableAnnouncements);
 
     const openAnnouncementModal = (notification) => setAnnouncementModal(notification);
+
+    // Fermer la vue complète d'une annonce (parent) ne doit jamais laisser le
+    // modal "répondre au nom de" (enfant) réapparaître avec un utilisateur
+    // ciblé obsolète.
+    const closeAnnouncementModal = () => {
+        setAnnouncementModal(null);
+        resetAnswerOnBehalf();
+    };
 
     useEffect(() => {
         setAnnouncementModal((prev) => {
@@ -1463,7 +1472,7 @@ export function NotificationsMenu() {
             <Dialog
                 as="div"
                 className="fixed inset-0 z-[200] flex transform items-start overflow-y-auto px-3 py-4 transition-all sm:items-center sm:px-4 sm:py-6"
-                onClose={() => setAnnouncementModal(null)}
+                onClose={closeAnnouncementModal}
             >
                 <TransitionChild
                     enter="ease-out duration-300"
@@ -1498,7 +1507,7 @@ export function NotificationsMenu() {
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setAnnouncementModal(null)}
+                                onClick={closeAnnouncementModal}
                                 className="mt-0.5 flex-shrink-0 rounded-lg p-1 text-[var(--app-muted)] transition hover:bg-[var(--app-surface-soft)] hover:text-[var(--app-text)]"
                                 aria-label="Fermer"
                             >
