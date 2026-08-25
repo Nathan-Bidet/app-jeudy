@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMailHref, buildSmsHref, singleLineText, toMailHref, toSmsHref, toTelHref } from '@/Support/contactLinks';
+import { buildMailHref, buildSmsHref, isFrenchMobileNumber, singleLineText, toMailHref, toSmsHref, toTelHref } from '@/Support/contactLinks';
 
 /**
  * Primitives partagées avec le Livre du travail (EntryCard.jsx) : mêmes
@@ -61,6 +61,38 @@ describe('buildMailHref', () => {
         expect(href).toBe(`mailto:?subject=${encodeURIComponent('Objet')}&body=${encodeURIComponent('x')}`);
         expect(href).toBe(buildMailHref(null, 'Objet', ['x']));
         expect(href).toBe(buildMailHref(undefined, 'Objet', ['x']));
+    });
+});
+
+describe('isFrenchMobileNumber', () => {
+    it('recognizes national 06/07 numbers regardless of spaces/dots/dashes', () => {
+        expect(isFrenchMobileNumber('06 77 27 03 03')).toBe(true);
+        expect(isFrenchMobileNumber('07 12 34 56 78')).toBe(true);
+        expect(isFrenchMobileNumber('06.77.27.03.03')).toBe(true);
+        expect(isFrenchMobileNumber('06-77-27-03-03')).toBe(true);
+    });
+
+    it('recognizes +33/0033 international equivalents, including "(0)" liaison', () => {
+        expect(isFrenchMobileNumber('+33 6 77 27 03 03')).toBe(true);
+        expect(isFrenchMobileNumber('+33 7 12 34 56 78')).toBe(true);
+        expect(isFrenchMobileNumber('0033 7 12 34 56 78')).toBe(true);
+        expect(isFrenchMobileNumber('+33 (0)6 77 27 03 03')).toBe(true);
+        expect(isFrenchMobileNumber('+336772703 03')).toBe(true);
+    });
+
+    it('rejects French landline prefixes (01-05, 09)', () => {
+        for (const prefix of ['01', '02', '03', '04', '05', '09']) {
+            expect(isFrenchMobileNumber(`${prefix} 23 45 67 89`)).toBe(false);
+        }
+    });
+
+    it('rejects incomplete, too-long, or non-numeric (extension) values instead of matching loosely on "06"/"07"', () => {
+        expect(isFrenchMobileNumber('06 77 27 03')).toBe(false); // incomplete (8 digits)
+        expect(isFrenchMobileNumber('06 77 27 03 03 12')).toBe(false); // too long
+        expect(isFrenchMobileNumber('appelez le 06 77 27 03 03')).toBe(false); // not purely a number
+        expect(isFrenchMobileNumber('06 77 27 03 03 poste 12')).toBe(false); // extension
+        expect(isFrenchMobileNumber('')).toBe(false);
+        expect(isFrenchMobileNumber(null)).toBe(false);
     });
 });
 

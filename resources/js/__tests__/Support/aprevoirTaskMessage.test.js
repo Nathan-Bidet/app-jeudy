@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject } from '@/Support/aprevoirTaskMessage';
+import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject, pickAprevoirSmsNumber } from '@/Support/aprevoirTaskMessage';
 
 function baseGroup(overrides = {}) {
     return { date: '2026-08-20', date_label: '20-08-2026', ...overrides };
@@ -71,6 +71,28 @@ describe('buildAprevoirTaskMessageLines', () => {
         expect(first).toContain('Commentaire: Ancien');
         expect(second).toContain('Commentaire: Nouveau');
         expect(second).not.toContain('Commentaire: Ancien');
+    });
+});
+
+describe('pickAprevoirSmsNumber', () => {
+    it('uses the explicit "Portable" field when present (Jeudy staff), even if a generic phone is also set', () => {
+        expect(pickAprevoirSmsNumber({ type: 'user', mobile_phone: '0612345678', phone: '0102030405' })).toBe('0612345678');
+    });
+
+    it('falls back to the generic phone field when it is a recognizable French mobile (external transporter/depot contact)', () => {
+        expect(pickAprevoirSmsNumber({ type: 'transporter', mobile_phone: null, phone: '06 77 27 03 03' })).toBe('06 77 27 03 03');
+        expect(pickAprevoirSmsNumber({ type: 'transporter', mobile_phone: null, phone: '07 12 34 56 78' })).toBe('07 12 34 56 78');
+        expect(pickAprevoirSmsNumber({ type: 'depot', mobile_phone: null, phone: '+33 6 77 27 03 03' })).toBe('+33 6 77 27 03 03');
+    });
+
+    it('does not use the generic phone field when it is a landline', () => {
+        expect(pickAprevoirSmsNumber({ type: 'transporter', mobile_phone: null, phone: '01 23 45 67 89' })).toBeNull();
+    });
+
+    it('returns null when there is no mobile-capable number at all (including no assignee)', () => {
+        expect(pickAprevoirSmsNumber({ type: 'transporter', mobile_phone: null, phone: null })).toBeNull();
+        expect(pickAprevoirSmsNumber({ type: 'none' })).toBeNull();
+        expect(pickAprevoirSmsNumber(null)).toBeNull();
     });
 });
 

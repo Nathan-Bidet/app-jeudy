@@ -1,5 +1,33 @@
-import { singleLineText } from '@/Support/contactLinks';
+import { isFrenchMobileNumber, singleLineText } from '@/Support/contactLinks';
 import { stripTextMarkers } from '@/Support/textFormatting';
+
+/**
+ * Numéro à utiliser pour l'action SMS d'un destinataire de tâche (group.
+ * assignee), sans jamais créer ni dupliquer de champ :
+ * 1. Personnel Jeudy avec un champ "Portable" (assignee.mobile_phone)
+ *    renseigné -> ce numéro, inchangé (comportement existant).
+ * 2. Sinon, contact externe (transporteur/dépôt) sans champ portable dédié :
+ *    son téléphone générique (assignee.phone) est utilisé UNIQUEMENT si la
+ *    normalisation le reconnaît comme un mobile français complet — jamais
+ *    un fixe, jamais une correspondance partielle.
+ * 3. Sinon, aucun numéro exploitable pour le SMS.
+ *
+ * @param {object|null} assignee - group.assignee tel qu'envoyé par le serveur
+ * @returns {string|null}
+ */
+export function pickAprevoirSmsNumber(assignee) {
+    const mobile = String(assignee?.mobile_phone || '').trim();
+    if (mobile) {
+        return mobile;
+    }
+
+    const generic = String(assignee?.phone || '').trim();
+    if (generic && isFrenchMobileNumber(generic)) {
+        return generic;
+    }
+
+    return null;
+}
 
 /**
  * Construit le contenu SMS/e-mail d'une tâche Tâches/Engrais/À prévoir, au

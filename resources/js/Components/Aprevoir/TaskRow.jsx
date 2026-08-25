@@ -4,7 +4,7 @@ import PlaceActionsLink from '@/Components/PlaceActionsLink';
 import SendActionsMenu from '@/Components/SendActionsMenu';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { buildMailHref, buildSmsHref } from '@/Support/contactLinks';
-import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject } from '@/Support/aprevoirTaskMessage';
+import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject, pickAprevoirSmsNumber } from '@/Support/aprevoirTaskMessage';
 import { BookOpen, CheckCircle2, Circle, Copy, Pencil, Trash2 } from 'lucide-react';
 
 function bookButton(task) {
@@ -73,7 +73,8 @@ export default function TaskRow({
     // sur group.assignee, jamais copié ni recherché par nom.
     const assignee = group?.assignee;
     const sendMessageLines = buildAprevoirTaskMessageLines(group, task);
-    const sendSmsHref = assignee?.mobile_phone ? buildSmsHref(assignee.mobile_phone, sendMessageLines) : null;
+    const sendSmsNumber = pickAprevoirSmsNumber(assignee);
+    const sendSmsHref = sendSmsNumber ? buildSmsHref(sendSmsNumber, sendMessageLines) : null;
     // L'e-mail reste toujours proposable : sans adresse, le lien mailto:
     // est construit avec un destinataire vide (objet/corps toujours
     // préremplis) plutôt que de désactiver l'action.

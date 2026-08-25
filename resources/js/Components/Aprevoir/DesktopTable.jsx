@@ -5,7 +5,7 @@ import SendActionsMenu from '@/Components/SendActionsMenu';
 import { BoursagriIndicatorCell, DirectIndicatorCell, IndicatorsInline, PointedIndicatorCell } from '@/Components/Aprevoir/TaskStateIndicators';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { buildMailHref, buildSmsHref } from '@/Support/contactLinks';
-import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject } from '@/Support/aprevoirTaskMessage';
+import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject, pickAprevoirSmsNumber } from '@/Support/aprevoirTaskMessage';
 import { BookOpen, Check, Circle, Copy, Filter, GripHorizontal, GripVertical, Pencil, Search, Trash2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -55,16 +55,18 @@ function plainBookButton(task) {
 /**
  * Bouton "Envoyer" (SMS/e-mail) sous la date de chaque tâche, au format du
  * Livre du travail : coordonnées lues directement sur le destinataire de la
- * tâche (group.assignee.mobile_phone / .email, déjà résolu côté serveur via
- * la relation réelle) — jamais copiées ni recherchées par nom. Le portable
- * (mobile_phone) est seul utilisé pour le SMS ; le champ "phone" générique
- * (pouvant être une ligne fixe pour un transporteur/dépôt) n'est jamais
- * utilisé comme substitut.
+ * tâche (group.assignee.mobile_phone / .email / .phone, déjà résolu côté
+ * serveur via la relation réelle) — jamais copiées ni recherchées par nom.
+ * Priorité au champ "Portable" (personnel Jeudy). Un contact de transporteur/
+ * dépôt externe n'a pas ce champ dédié : son "phone" générique n'est utilisé
+ * pour le SMS que si pickAprevoirSmsNumber le reconnaît comme un mobile
+ * français complet (jamais un fixe, jamais une correspondance partielle).
  */
 function sendMenuFor(moduleTitle, group, task) {
     const assignee = group?.assignee;
     const lines = buildAprevoirTaskMessageLines(group, task);
-    const smsHref = assignee?.mobile_phone ? buildSmsHref(assignee.mobile_phone, lines) : null;
+    const smsNumber = pickAprevoirSmsNumber(assignee);
+    const smsHref = smsNumber ? buildSmsHref(smsNumber, lines) : null;
     // L'e-mail reste toujours proposable : sans adresse, le lien mailto:
     // est construit avec un destinataire vide (objet/corps toujours
     // préremplis) plutôt que de désactiver l'action.

@@ -137,6 +137,32 @@ describe('DesktopTable — bouton Envoyer sous la date', () => {
         expect(screen.getByRole('menuitem', { name: /Envoyer par e-mail/ }).getAttribute('href')).toMatch(/^mailto:\?subject=/);
         expect(screen.queryByText('Aucun destinataire disponible')).not.toBeInTheDocument();
     });
+
+    it('external transporter contact without a dedicated mobile field: recognizes a French mobile in the generic phone field and enables SMS', () => {
+        const group = baseGroup({
+            type: 'transporter',
+            name: 'Marcel (Transport Dubois)',
+            company_name: 'Transport Dubois',
+            mobile_phone: null,
+            phone: '06 77 27 03 03',
+        });
+        render(<DesktopTable groups={[{ ...group, tasks: [baseTask({ task: 'Livraison engrais Nord' })] }]} moduleTitle="Engrais / Tourteaux" />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        const smsLink = screen.getByRole('menuitem', { name: /Envoyer par SMS/ });
+        expect(smsLink.getAttribute('href')).toContain('sms:0677270303?body=');
+        expect(decodeURIComponent(smsLink.getAttribute('href'))).toContain('Livraison engrais Nord');
+    });
+
+    it('external depot/transporter contact whose generic phone is a landline: SMS stays unavailable', () => {
+        const group = baseGroup({ type: 'transporter', mobile_phone: null, phone: '01 23 45 67 89' });
+        render(<DesktopTable groups={[{ ...group, tasks: [baseTask()] }]} moduleTitle="Engrais / Tourteaux" />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByText('Aucun numéro de portable renseigné')).toBeInTheDocument();
+    });
 });
 
 describe('TaskRow (mobile) — bouton Envoyer', () => {
