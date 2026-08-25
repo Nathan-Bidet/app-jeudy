@@ -1,7 +1,10 @@
 import DragHandle from '@/Components/Aprevoir/DragHandle';
 import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
+import SendActionsMenu from '@/Components/SendActionsMenu';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
+import { buildMailHref, buildSmsHref } from '@/Support/contactLinks';
+import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject } from '@/Support/aprevoirTaskMessage';
 import { BookOpen, CheckCircle2, Circle, Copy, Pencil, Trash2 } from 'lucide-react';
 
 function bookButton(task) {
@@ -43,6 +46,8 @@ function bookButton(task) {
 
 export default function TaskRow({
     task,
+    group = null,
+    moduleTitle = '',
     placeResolver = {},
     highlighted = false,
     saving = false,
@@ -62,6 +67,16 @@ export default function TaskRow({
 }) {
     const customStyle = adaptiveTaskStyle(task?.style || {});
     const isPartiallyPointed = task?.partially_pointed === true || task?.partially_pointed === 1 || task?.partially_pointed === '1' || task?.partially_pointed === 'true';
+
+    // Mêmes coordonnées et même format de message que la version ordinateur
+    // (resources/js/Components/Aprevoir/DesktopTable.jsx) — lu directement
+    // sur group.assignee, jamais copié ni recherché par nom.
+    const assignee = group?.assignee;
+    const sendMessageLines = buildAprevoirTaskMessageLines(group, task);
+    const sendSmsHref = assignee?.mobile_phone ? buildSmsHref(assignee.mobile_phone, sendMessageLines) : null;
+    const sendMailHref = assignee?.email
+        ? buildMailHref(assignee.email, buildAprevoirTaskSubject(moduleTitle, group, task), sendMessageLines)
+        : null;
 
     return (
         <div
@@ -154,6 +169,7 @@ export default function TaskRow({
                         </span>
                     ) : null}
                     {bookButton(task)}
+                    <SendActionsMenu smsHref={sendSmsHref} mailHref={sendMailHref} />
 
                     {canPartialPoint ? (
                         <button

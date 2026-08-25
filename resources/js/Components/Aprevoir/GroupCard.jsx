@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 
 export default function GroupCard({
     group,
+    moduleTitle = '',
     depotPlaceMap = {},
     highlightedTaskId = null,
     savingTaskIds = {},
@@ -53,6 +54,8 @@ export default function GroupCard({
                     <TaskRow
                         key={task.id}
                         task={task}
+                        group={group}
+                        moduleTitle={moduleTitle}
                         placeResolver={depotPlaceMap}
                         highlighted={Number(highlightedTaskId || 0) === Number(task?.id || 0)}
                         saving={Boolean(savingTaskIds?.[task?.id])}

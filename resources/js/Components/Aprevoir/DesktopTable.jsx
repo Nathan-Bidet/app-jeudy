@@ -1,8 +1,11 @@
 import Modal from '@/Components/Modal';
 import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
+import SendActionsMenu from '@/Components/SendActionsMenu';
 import { BoursagriIndicatorCell, DirectIndicatorCell, IndicatorsInline, PointedIndicatorCell } from '@/Components/Aprevoir/TaskStateIndicators';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
+import { buildMailHref, buildSmsHref } from '@/Support/contactLinks';
+import { buildAprevoirTaskMessageLines, buildAprevoirTaskSubject } from '@/Support/aprevoirTaskMessage';
 import { BookOpen, Check, Circle, Copy, Filter, GripHorizontal, GripVertical, Pencil, Search, Trash2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -47,6 +50,30 @@ function plainBookButton(task) {
 
     if (!projected) return <span className={`${className} opacity-60`}>{content}</span>;
     return <a href={task.book.url} className={className}>{content}</a>;
+}
+
+/**
+ * Bouton "Envoyer" (SMS/e-mail) sous la date de chaque tâche, au format du
+ * Livre du travail : coordonnées lues directement sur le destinataire de la
+ * tâche (group.assignee.mobile_phone / .email, déjà résolu côté serveur via
+ * la relation réelle) — jamais copiées ni recherchées par nom. Le portable
+ * (mobile_phone) est seul utilisé pour le SMS ; le champ "phone" générique
+ * (pouvant être une ligne fixe pour un transporteur/dépôt) n'est jamais
+ * utilisé comme substitut.
+ */
+function sendMenuFor(moduleTitle, group, task) {
+    const assignee = group?.assignee;
+    const lines = buildAprevoirTaskMessageLines(group, task);
+    const smsHref = assignee?.mobile_phone ? buildSmsHref(assignee.mobile_phone, lines) : null;
+    const mailHref = assignee?.email
+        ? buildMailHref(assignee.email, buildAprevoirTaskSubject(moduleTitle, group, task), lines)
+        : null;
+
+    return (
+        <div onClick={(event) => event.stopPropagation()}>
+            <SendActionsMenu smsHref={smsHref} mailHref={mailHref} />
+        </div>
+    );
 }
 
 function rowStyle(task) {
@@ -244,6 +271,7 @@ function DropIndicatorRow() {
 function TaskDataRow({
     group,
     task,
+    moduleTitle,
     placeResolver,
     highlighted = false,
     saving = false,
@@ -294,9 +322,10 @@ function TaskDataRow({
             }}
         >
             <td className="px-3 py-3 font-medium text-center">
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center gap-1">
                     <div>{group?.date_label || group?.date || '—'}</div>
-                    <div className="mt-1">{plainBookButton(task)}</div>
+                    <div>{plainBookButton(task)}</div>
+                    {sendMenuFor(moduleTitle, group, task)}
                 </div>
             </td>
             <td className="px-3 py-3 text-center font-semibold">{task.fin_label || '—'}</td>
@@ -464,6 +493,7 @@ function TaskDataRow({
 
 export default function DesktopTable({
     groups = [],
+    moduleTitle = '',
     pointedGroups = null,
     pointedGroupsLoaded = false,
     pointedGroupsLoading = false,
@@ -1284,6 +1314,7 @@ export default function DesktopTable({
                                         <TaskDataRow
                                             group={group}
                                             task={task}
+                                            moduleTitle={moduleTitle}
                                             placeResolver={depotPlaceMap}
                                             highlighted={Number(highlightedTaskId || 0) === Number(task?.id || 0)}
                                             saving={Boolean(savingTaskIds?.[task?.id])}

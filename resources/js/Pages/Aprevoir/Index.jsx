@@ -2370,6 +2370,7 @@ export default function AprevoirIndex({
             <div ref={tableSectionRef} className="w-full max-w-full space-y-4 px-0 sm:space-y-5">
                 <DesktopTable
                     groups={localGroups}
+                    moduleTitle={moduleTitle}
                     pointedGroups={pointedGroups}
                     pointedGroupsLoaded={pointedGroupsLoaded}
                     pointedGroupsLoading={pointedGroupsLoading}
@@ -2415,6 +2416,7 @@ export default function AprevoirIndex({
                             <GroupCard
                                 key={group.key}
                                 group={group}
+                                moduleTitle={moduleTitle}
                                 depotPlaceMap={reference?.depot_place_map || {}}
                                 highlightedTaskId={highlightedTaskId}
                                 savingTaskIds={savingTaskIds}

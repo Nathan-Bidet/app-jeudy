@@ -2,6 +2,7 @@ import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { stripTextMarkers } from '@/Support/textFormatting';
+import { buildMailHref, singleLineText, toMailHref, toSmsHref, toTelHref } from '@/Support/contactLinks';
 import { CalendarDays, Check, CheckCircle2, Mail, PhoneCall, Smartphone, Truck, UserRound } from 'lucide-react';
 
 function SemiTruckIcon({ className = 'h-3.5 w-3.5' }) {
@@ -42,22 +43,19 @@ function styleFromTaskItem(item) {
     return adaptiveTaskStyle(item?.style || {});
 }
 
+// Délègue aux primitives partagées (resources/js/Support/contactLinks.js),
+// réutilisées telles quelles par Tâches/Engrais — mêmes noms locaux conservés
+// pour ne toucher aucun autre appel de ce fichier.
 function phoneHref(number) {
-    const raw = (number || '').toString().trim();
-    if (!raw) return null;
-    return `tel:${raw.replace(/[^\d+]/g, '')}`;
+    return toTelHref(number);
 }
 
 function smsHref(number) {
-    const raw = (number || '').toString().trim();
-    if (!raw) return null;
-    return `sms:${raw.replace(/[^\d+]/g, '')}`;
+    return toSmsHref(number);
 }
 
 function mailHref(address) {
-    const email = String(address || '').trim();
-    if (!email) return null;
-    return `mailto:${encodeURIComponent(email)}`;
+    return toMailHref(address);
 }
 
 function transportSegments(item) {
@@ -92,17 +90,11 @@ function transportLinesForSms(item) {
 }
 
 function singleLineSmsText(value) {
-    return stripTextMarkers(value)
-        .replace(/\r\n|\r|\n/g, ' | ')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
+    return singleLineText(value);
 }
 
 function buildMailLink(address, subject, lines) {
-    const base = mailHref(address);
-    if (!base) return null;
-
-    return `${base}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`;
+    return buildMailHref(address, subject, lines);
 }
 
 function taskSmsHref(number, entry, item, includeComment, includeTransport) {
