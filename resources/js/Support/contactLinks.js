@@ -40,11 +40,19 @@ export function buildSmsHref(number, lines) {
 /**
  * mailto:<adresse>?subject=<objet encodé>&body=<message encodé> — même
  * format que le Livre du travail.
+ *
+ * Contrairement à buildSmsHref (qui renvoie null sans numéro, l'action SMS
+ * reste alors indisponible), buildMailHref ne renvoie JAMAIS null : l'objet
+ * et le corps ne doivent pas dépendre de la présence d'une adresse. Sans
+ * adresse, le lien mailto: est construit avec un destinataire vide
+ * (`mailto:?subject=...&body=...`) — l'application de messagerie s'ouvre en
+ * rédaction avec le contenu de la tâche déjà prérempli, et l'utilisateur
+ * choisit lui-même le destinataire.
  */
 export function buildMailHref(address, subject, lines) {
-    const base = toMailHref(address);
-    if (!base) return null;
-    return `${base}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent((lines || []).join('\n'))}`;
+    const email = String(address || '').trim();
+    const recipient = email ? encodeURIComponent(email) : '';
+    return `mailto:${recipient}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent((lines || []).join('\n'))}`;
 }
 
 /**

@@ -74,9 +74,10 @@ export default function TaskRow({
     const assignee = group?.assignee;
     const sendMessageLines = buildAprevoirTaskMessageLines(group, task);
     const sendSmsHref = assignee?.mobile_phone ? buildSmsHref(assignee.mobile_phone, sendMessageLines) : null;
-    const sendMailHref = assignee?.email
-        ? buildMailHref(assignee.email, buildAprevoirTaskSubject(moduleTitle, group, task), sendMessageLines)
-        : null;
+    // L'e-mail reste toujours proposable : sans adresse, le lien mailto:
+    // est construit avec un destinataire vide (objet/corps toujours
+    // préremplis) plutôt que de désactiver l'action.
+    const sendMailHref = buildMailHref(assignee?.email, buildAprevoirTaskSubject(moduleTitle, group, task), sendMessageLines);
 
     return (
         <div
@@ -169,7 +170,7 @@ export default function TaskRow({
                         </span>
                     ) : null}
                     {bookButton(task)}
-                    <SendActionsMenu smsHref={sendSmsHref} mailHref={sendMailHref} />
+                    <SendActionsMenu smsHref={sendSmsHref} mailHref={sendMailHref} mailHasRecipient={Boolean(assignee?.email)} />
 
                     {canPartialPoint ? (
                         <button

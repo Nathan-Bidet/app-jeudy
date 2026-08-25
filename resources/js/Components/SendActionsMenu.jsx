@@ -9,14 +9,21 @@ import { useEffect, useRef, useState } from 'react';
  * fermeture au clic extérieur), étendu avec la sémantique ARIA d'un menu
  * (rôles menu/menuitem, fermeture et restitution du focus via Échap).
  *
- * smsHref/mailHref à null désactivent l'action correspondante et affichent
- * le message associé (coordonnée absente) sans jamais ouvrir d'application.
+ * smsHref à null désactive l'action SMS et affiche smsDisabledReason, sans
+ * jamais ouvrir d'application. mailHref, lui, reste normalement toujours
+ * fourni par l'appelant (même sans adresse connue, via un mailto: à
+ * destinataire vide) : passer mailHasRecipient=false affiche alors une note
+ * discrète sous l'action, qui reste cliquable — seul mailHref=null désactive
+ * réellement l'e-mail (cas d'usage générique, non utilisé pour les tâches
+ * Engrais/À prévoir où l'e-mail doit toujours rester proposable).
  */
 export default function SendActionsMenu({
     label = 'Envoyer',
     smsHref = null,
     smsDisabledReason = 'Aucun numéro de portable renseigné',
     mailHref = null,
+    mailHasRecipient = true,
+    mailNoRecipientNote = 'Adresse à renseigner dans votre messagerie',
     mailDisabledReason = 'Aucune adresse e-mail renseignée',
     noRecipientMessage = 'Aucun destinataire disponible',
     className = '',
@@ -109,10 +116,17 @@ export default function SendActionsMenu({
                                     role="menuitem"
                                     href={mailHref}
                                     onClick={() => setOpen(false)}
-                                    className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm font-semibold hover:bg-[var(--app-surface-soft)]"
+                                    className="flex flex-col gap-0.5 px-3.5 py-2.5 text-sm font-semibold hover:bg-[var(--app-surface-soft)]"
                                 >
-                                    <Mail className="h-4 w-4 shrink-0" strokeWidth={2.2} />
-                                    Envoyer par e-mail
+                                    <span className="flex items-center gap-2.5">
+                                        <Mail className="h-4 w-4 shrink-0" strokeWidth={2.2} />
+                                        Envoyer par e-mail
+                                    </span>
+                                    {!mailHasRecipient ? (
+                                        <span className="pl-[1.625rem] text-xs font-normal text-[var(--app-muted)]">
+                                            {mailNoRecipientNote}
+                                        </span>
+                                    ) : null}
                                 </a>
                             ) : (
                                 <p

@@ -56,8 +56,11 @@ describe('buildMailHref', () => {
         );
     });
 
-    it('returns null when the address is missing', () => {
-        expect(buildMailHref('', 'Objet', ['x'])).toBeNull();
+    it('never returns null: builds an empty-recipient mailto: when the address is missing (subject/body still prefilled)', () => {
+        const href = buildMailHref('', 'Objet', ['x']);
+        expect(href).toBe(`mailto:?subject=${encodeURIComponent('Objet')}&body=${encodeURIComponent('x')}`);
+        expect(href).toBe(buildMailHref(null, 'Objet', ['x']));
+        expect(href).toBe(buildMailHref(undefined, 'Objet', ['x']));
     });
 });
 

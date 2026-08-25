@@ -79,33 +79,63 @@ describe('DesktopTable — bouton Envoyer sous la date', () => {
         expect(decodeURIComponent(mailLink.getAttribute('href'))).toContain('Engrais / Tourteaux - 20-08-2026 - Livraison engrais Nord');
     });
 
-    it('shows "Aucun destinataire disponible" when no driver is attached', () => {
+    it('still offers e-mail (recipient empty, subject/body prefilled) when no driver is attached — SMS stays unavailable', () => {
         const group = baseGroup(null);
-        render(<DesktopTable groups={[{ ...group, tasks: [baseTask()] }]} moduleTitle="Engrais / Tourteaux" />);
+        render(<DesktopTable groups={[{ ...group, tasks: [baseTask({ task: 'Livraison engrais Nord' })] }]} moduleTitle="Engrais / Tourteaux" />);
 
         fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
 
-        expect(screen.getByText('Aucun destinataire disponible')).toBeInTheDocument();
+        expect(screen.getByText('Aucun numéro de portable renseigné')).toBeInTheDocument();
+        const mailLink = screen.getByRole('menuitem', { name: /Envoyer par e-mail/ });
+        expect(mailLink.getAttribute('href')).toMatch(/^mailto:\?subject=/);
+        expect(decodeURIComponent(mailLink.getAttribute('href'))).toContain('Livraison engrais Nord');
+        expect(screen.getByText('Adresse à renseigner dans votre messagerie')).toBeInTheDocument();
     });
 
-    it('disables SMS only when the driver has no mobile number', () => {
+    it('disables SMS only when the driver has no mobile number — e-mail keeps the recipient prefilled', () => {
         const group = baseGroup({ mobile_phone: null, phone: '0102030405' });
         render(<DesktopTable groups={[{ ...group, tasks: [baseTask()] }]} moduleTitle="Engrais / Tourteaux" />);
 
         fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
 
         expect(screen.getByText('Aucun numéro de portable renseigné')).toBeInTheDocument();
-        expect(screen.getByRole('menuitem', { name: /Envoyer par e-mail/ })).toBeInTheDocument();
+        const mailLink = screen.getByRole('menuitem', { name: /Envoyer par e-mail/ });
+        expect(mailLink.getAttribute('href')).toContain(encodeURIComponent('jean.dupont@example.com'));
+        expect(screen.queryByText('Adresse à renseigner dans votre messagerie')).not.toBeInTheDocument();
     });
 
-    it('disables e-mail only when the driver has no e-mail', () => {
+    it('e-mail only (no mobile number): SMS unavailable, e-mail available with recipient prefilled', () => {
+        const group = baseGroup({ mobile_phone: null, phone: null });
+        render(<DesktopTable groups={[{ ...group, tasks: [baseTask()] }]} moduleTitle="Engrais / Tourteaux" />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByText('Aucun numéro de portable renseigné')).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: /Envoyer par e-mail/ }).getAttribute('href'))
+            .toContain(encodeURIComponent('jean.dupont@example.com'));
+    });
+
+    it('keeps e-mail available with an empty recipient (subject/body still prefilled) when the driver has no e-mail — SMS unaffected', () => {
         const group = baseGroup({ email: null });
         render(<DesktopTable groups={[{ ...group, tasks: [baseTask()] }]} moduleTitle="Engrais / Tourteaux" />);
 
         fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
 
-        expect(screen.getByText('Aucune adresse e-mail renseignée')).toBeInTheDocument();
+        expect(screen.getByText('Adresse à renseigner dans votre messagerie')).toBeInTheDocument();
+        const mailLink = screen.getByRole('menuitem', { name: /Envoyer par e-mail/ });
+        expect(mailLink.getAttribute('href')).toMatch(/^mailto:\?subject=/);
         expect(screen.getByRole('menuitem', { name: /Envoyer par SMS/ })).toBeInTheDocument();
+    });
+
+    it('no coordinates at all: SMS unavailable, e-mail still available without a recipient', () => {
+        const group = baseGroup({ mobile_phone: null, phone: null, email: null });
+        render(<DesktopTable groups={[{ ...group, tasks: [baseTask()] }]} moduleTitle="Engrais / Tourteaux" />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByText('Aucun numéro de portable renseigné')).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: /Envoyer par e-mail/ }).getAttribute('href')).toMatch(/^mailto:\?subject=/);
+        expect(screen.queryByText('Aucun destinataire disponible')).not.toBeInTheDocument();
     });
 });
 
@@ -122,11 +152,16 @@ describe('TaskRow (mobile) — bouton Envoyer', () => {
         );
     });
 
-    it('shows "Aucun destinataire disponible" when there is no group/assignee', () => {
-        render(<TaskRow task={baseTask()} group={null} moduleTitle="Engrais / Tourteaux" />);
+    it('still offers e-mail without a recipient when there is no group/assignee at all', () => {
+        render(<TaskRow task={baseTask({ task: 'Livraison engrais Nord' })} group={null} moduleTitle="Engrais / Tourteaux" />);
 
         fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
 
-        expect(screen.getByText('Aucun destinataire disponible')).toBeInTheDocument();
+        expect(screen.getByText('Aucun numéro de portable renseigné')).toBeInTheDocument();
+        const mailLink = screen.getByRole('menuitem', { name: /Envoyer par e-mail/ });
+        expect(mailLink.getAttribute('href')).toMatch(/^mailto:\?subject=/);
+        expect(decodeURIComponent(mailLink.getAttribute('href'))).toContain('Livraison engrais Nord');
+        expect(screen.getByText('Adresse à renseigner dans votre messagerie')).toBeInTheDocument();
+        expect(screen.queryByText('Aucun destinataire disponible')).not.toBeInTheDocument();
     });
 });

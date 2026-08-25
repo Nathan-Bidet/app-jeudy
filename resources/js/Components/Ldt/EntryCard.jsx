@@ -2,7 +2,7 @@ import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { stripTextMarkers } from '@/Support/textFormatting';
-import { buildMailHref, singleLineText, toMailHref, toSmsHref, toTelHref } from '@/Support/contactLinks';
+import { buildMailHref, singleLineText, toSmsHref, toTelHref } from '@/Support/contactLinks';
 import { CalendarDays, Check, CheckCircle2, Mail, PhoneCall, Smartphone, Truck, UserRound } from 'lucide-react';
 
 function SemiTruckIcon({ className = 'h-3.5 w-3.5' }) {
@@ -52,10 +52,6 @@ function phoneHref(number) {
 
 function smsHref(number) {
     return toSmsHref(number);
-}
-
-function mailHref(address) {
-    return toMailHref(address);
 }
 
 function transportSegments(item) {

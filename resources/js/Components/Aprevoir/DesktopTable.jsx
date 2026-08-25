@@ -65,13 +65,14 @@ function sendMenuFor(moduleTitle, group, task) {
     const assignee = group?.assignee;
     const lines = buildAprevoirTaskMessageLines(group, task);
     const smsHref = assignee?.mobile_phone ? buildSmsHref(assignee.mobile_phone, lines) : null;
-    const mailHref = assignee?.email
-        ? buildMailHref(assignee.email, buildAprevoirTaskSubject(moduleTitle, group, task), lines)
-        : null;
+    // L'e-mail reste toujours proposable : sans adresse, le lien mailto:
+    // est construit avec un destinataire vide (objet/corps toujours
+    // préremplis) plutôt que de désactiver l'action.
+    const mailHref = buildMailHref(assignee?.email, buildAprevoirTaskSubject(moduleTitle, group, task), lines);
 
     return (
         <div onClick={(event) => event.stopPropagation()}>
-            <SendActionsMenu smsHref={smsHref} mailHref={mailHref} />
+            <SendActionsMenu smsHref={smsHref} mailHref={mailHref} mailHasRecipient={Boolean(assignee?.email)} />
         </div>
     );
 }

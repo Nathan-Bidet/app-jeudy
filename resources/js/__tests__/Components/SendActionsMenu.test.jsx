@@ -37,6 +37,22 @@ describe('SendActionsMenu', () => {
         expect(screen.getByRole('menuitem', { name: /Envoyer par SMS/ })).toBeInTheDocument();
     });
 
+    it('keeps the e-mail action clickable (empty-recipient mailto:) with a discreet note when mailHasRecipient is false', () => {
+        render(<SendActionsMenu smsHref={null} mailHref="mailto:?subject=x&body=y" mailHasRecipient={false} />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        const mailLink = screen.getByRole('menuitem', { name: /Envoyer par e-mail/ });
+        expect(mailLink).toHaveAttribute('href', 'mailto:?subject=x&body=y');
+        expect(screen.getByText('Adresse à renseigner dans votre messagerie')).toBeInTheDocument();
+    });
+
+    it('does not show the discreet note when mailHasRecipient is true', () => {
+        render(<SendActionsMenu smsHref={null} mailHref="mailto:a@b.com?subject=x&body=y" mailHasRecipient />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.queryByText('Adresse à renseigner dans votre messagerie')).not.toBeInTheDocument();
+    });
+
     it('shows a single "no recipient" message and no external link when both are unavailable', () => {
         render(<SendActionsMenu smsHref={null} mailHref={null} />);
         fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
