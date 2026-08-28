@@ -63,6 +63,7 @@ class HandleInertiaRequests extends Middleware
                     'engrais_view' => (bool) ($user && $accessManager->can($user, 'engrais.view')),
                     'ldt_view' => (bool) ($user && $accessManager->can($user, 'ldt.view')),
                     'ldt_sms' => (bool) ($user && $accessManager->can($user, 'ldt.sms')),
+                    'maintenance_view' => (bool) ($user && $accessManager->can($user, 'maintenance.view')),
                     'task_data_view' => (bool) ($user && $accessManager->can($user, 'task.data.view')),
                     'task_data_jeudy_view' => (bool) ($user && ($accessManager->can($user, 'task.data.jeudy.view') || $accessManager->can($user, 'task.data.jeudy.manage'))),
                     'task_data_jeudy_manage' => (bool) ($user && $accessManager->can($user, 'task.data.jeudy.manage')),

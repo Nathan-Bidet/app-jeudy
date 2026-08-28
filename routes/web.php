@@ -16,6 +16,7 @@ use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\HourSheetController;
 use App\Http\Controllers\LdtController;
 use App\Http\Controllers\LeaveRequestController;
+use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PushSubscriptionController;
@@ -111,6 +112,28 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/engrais/tasks-data', [EngraisController::class, 'tasksData'])
         ->middleware('sector.access:engrais.view')
         ->name('engrais.tasks.data');
+
+    Route::get('/maintenance', [MaintenanceController::class, 'index'])
+        ->middleware('sector.access:maintenance.view')
+        ->name('maintenance.index');
+    Route::get('/maintenance/tasks-data', [MaintenanceController::class, 'tasksData'])
+        ->middleware('sector.access:maintenance.view')
+        ->name('maintenance.tasks.data');
+    Route::post('/maintenance/tasks', [MaintenanceController::class, 'store'])
+        ->middleware('sector.access:maintenance.create|maintenance.request')
+        ->name('maintenance.tasks.store');
+    Route::put('/maintenance/tasks/{task}', [MaintenanceController::class, 'update'])
+        ->middleware('sector.access:maintenance.create|maintenance.request')
+        ->name('maintenance.tasks.update');
+    Route::delete('/maintenance/tasks/{task}', [MaintenanceController::class, 'destroy'])
+        ->middleware('sector.access:maintenance.create|maintenance.request')
+        ->name('maintenance.tasks.destroy');
+    Route::patch('/maintenance/tasks/{task}/point', [MaintenanceController::class, 'point'])
+        ->middleware('sector.access:maintenance.point')
+        ->name('maintenance.tasks.point');
+    Route::patch('/maintenance/tasks/{task}/partial-point', [MaintenanceController::class, 'partialPoint'])
+        ->middleware('sector.access:maintenance.view')
+        ->name('maintenance.tasks.partial-point');
 
     Route::get('/ldt', [LdtController::class, 'index'])
         ->middleware('sector.access:ldt.view')

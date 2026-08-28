@@ -21,8 +21,12 @@ return new class extends Migration
             $table->string('assignee_label_free', 255)->default('')->after('assignee_id');
         });
 
-        DB::statement("ALTER TABLE `a_prevoir_tasks` MODIFY `assignee_type` ENUM('user','transporter','depot','free') NULL");
-        DB::statement("ALTER TABLE `ldt_entries` MODIFY `assignee_type` ENUM('user','transporter','depot','free','none') NOT NULL DEFAULT 'none'");
+        // Hors MySQL, assignee_type est une colonne texte libre : l'élargissement
+        // de l'énumération n'a pas d'équivalent et n'est pas nécessaire.
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("ALTER TABLE `a_prevoir_tasks` MODIFY `assignee_type` ENUM('user','transporter','depot','free') NULL");
+            DB::statement("ALTER TABLE `ldt_entries` MODIFY `assignee_type` ENUM('user','transporter','depot','free','none') NOT NULL DEFAULT 'none'");
+        }
 
         Schema::table('ldt_entries', function (Blueprint $table): void {
             $table->dropUnique('ldt_entries_date_assignee_unique');
@@ -42,8 +46,10 @@ return new class extends Migration
             $table->dropIndex('ldt_entries_date_assignee_idx');
         });
 
-        DB::statement("ALTER TABLE `ldt_entries` MODIFY `assignee_type` ENUM('user','transporter','depot','none') NOT NULL DEFAULT 'none'");
-        DB::statement("ALTER TABLE `a_prevoir_tasks` MODIFY `assignee_type` ENUM('user','transporter','depot') NULL");
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("ALTER TABLE `ldt_entries` MODIFY `assignee_type` ENUM('user','transporter','depot','none') NOT NULL DEFAULT 'none'");
+            DB::statement("ALTER TABLE `a_prevoir_tasks` MODIFY `assignee_type` ENUM('user','transporter','depot') NULL");
+        }
 
         Schema::table('ldt_entries', function (Blueprint $table): void {
             $table->dropColumn('assignee_label_free');

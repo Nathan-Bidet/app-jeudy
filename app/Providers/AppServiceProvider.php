@@ -12,11 +12,13 @@ use App\Models\Vehicle;
 use App\Models\VehicleType;
 use App\Models\Depot;
 use App\Models\FormattingRule;
+use App\Models\MaintenanceTask;
 use App\Models\Transporter;
 use App\Policies\DirectoryPolicy;
 use App\Policies\DepotPolicy;
 use App\Policies\FormattingRulePolicy;
 use App\Policies\GaragePolicy;
+use App\Policies\MaintenanceTaskPolicy;
 use App\Policies\TransporterPolicy;
 use App\Policies\VehiclePolicy;
 use App\Policies\VehicleTypePolicy;
@@ -146,6 +148,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Garage::class, GaragePolicy::class);
         Gate::policy(Transporter::class, TransporterPolicy::class);
         Gate::policy(FormattingRule::class, FormattingRulePolicy::class);
+        Gate::policy(MaintenanceTask::class, MaintenanceTaskPolicy::class);
 
         Gate::before(function ($user, string $ability) {
             if (method_exists($user, 'hasRole') && $user->hasRole('admin')) {

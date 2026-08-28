@@ -16,6 +16,7 @@ const ABILITY_GROUP_ORDER = [
     'a_prevoir',
     'engrais',
     'ldt',
+    'maintenance',
     'task.data',
     'task.fuel',
     'task.tiers',
@@ -39,6 +40,7 @@ const ABILITY_GROUP_LABELS = {
     a_prevoir: 'À Prévoir',
     engrais: 'Engrais',
     ldt: 'Livre du Travail',
+    maintenance: 'Maintenance / Entretien',
     'task.data': 'Tâches - Données',
     'task.fuel': 'Tâches - Carburant',
     'task.tiers': 'Tâches - Tiers',
@@ -70,7 +72,7 @@ function abilityGroupKey(ability) {
 
     const [prefix] = ability.split('.');
 
-    if (['dashboard', 'directory', 'a_prevoir', 'engrais', 'ldt', 'heures', 'calendar', 'cotations', 'annonces'].includes(prefix)) {
+    if (['dashboard', 'directory', 'a_prevoir', 'engrais', 'ldt', 'maintenance', 'heures', 'calendar', 'cotations', 'annonces'].includes(prefix)) {
         return prefix;
     }
 

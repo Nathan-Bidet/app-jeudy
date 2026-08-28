@@ -18,6 +18,7 @@ import {
     ExternalLink,
     FileText,
     Fuel,
+    Hammer,
     Home,
     ListTodo,
     Megaphone,
@@ -218,6 +219,13 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
             href: safeHref('engrais.index'),
             icon: Clock3,
             active: safeCurrent('engrais.*'),
+        } : null,
+        safeHasRoute('maintenance.index') && (permissions?.maintenance_view ?? false) ? {
+            key: 'maintenance',
+            label: 'Maintenance / Entretien',
+            href: safeHref('maintenance.index'),
+            icon: Hammer,
+            active: safeCurrent('maintenance.*'),
         } : null,
         safeHasRoute('task.data.index') && canTaskData ? {
             key: 'ldt-data',
