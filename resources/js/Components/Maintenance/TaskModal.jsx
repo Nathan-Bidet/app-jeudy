@@ -2,7 +2,7 @@ import InputError from '@/Components/InputError';
 import Modal from '@/Components/Modal';
 import PlaceAutocompleteTextarea from '@/Components/Shared/PlaceAutocompleteTextarea';
 import SearchableSelect from '@/Components/Shared/SearchableSelect';
-import { EyeOff, Loader2, Save } from 'lucide-react';
+import { AlertTriangle, EyeOff, Loader2, Save } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 
 function FieldLabel({ children, required = false }) {
@@ -26,6 +26,20 @@ export default function MaintenanceTaskModal({
     onSubmit,
 }) {
     const taskRef = useRef(null);
+    const scrollRef = useRef(null);
+
+    const errorMessages = useMemo(
+        () => Object.values(form?.errors || {}).filter(Boolean),
+        [form?.errors],
+    );
+
+    // Le contenu du modal défile : une erreur portant sur un champ hors écran
+    // passerait inaperçue. On remonte en tête, où le récapitulatif s'affiche.
+    useEffect(() => {
+        if (errorMessages.length > 0) {
+            scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }, [errorMessages.length]);
 
     const isEditing = mode === 'edit';
     const isRequest = origin === 'request';
@@ -106,7 +120,24 @@ export default function MaintenanceTaskModal({
                     ) : null}
                 </div>
 
-                <div className="grid max-h-[70vh] gap-4 overflow-y-auto bg-[var(--app-surface)] px-5 py-4">
+                <div
+                    ref={scrollRef}
+                    className="grid max-h-[70vh] gap-4 overflow-y-auto bg-[var(--app-surface)] px-5 py-4"
+                >
+                    {errorMessages.length > 0 ? (
+                        <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-700">
+                            <p className="inline-flex items-center gap-1.5 font-black uppercase tracking-[0.08em]">
+                                <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                Enregistrement impossible
+                            </p>
+                            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+                                {errorMessages.map((message) => (
+                                    <li key={message}>{message}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    ) : null}
+
                     {isRequest && !isEditing ? (
                         <p className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 text-xs text-[var(--app-muted)]">
                             Vous ne disposez pas du droit de créer directement une tâche : celle-ci sera
@@ -122,7 +153,6 @@ export default function MaintenanceTaskModal({
                                 value={form.data.date || ''}
                                 onChange={(event) => form.setData('date', event.target.value)}
                                 className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
-                                required
                             />
                             <InputError className="mt-1" message={form.errors.date} />
                         </div>
@@ -132,7 +162,6 @@ export default function MaintenanceTaskModal({
                             <input
                                 type="date"
                                 value={form.data.fin_date || ''}
-                                min={form.data.date || undefined}
                                 disabled={!hasStartDate}
                                 onChange={(event) => form.setData('fin_date', event.target.value)}
                                 className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
@@ -219,7 +248,6 @@ export default function MaintenanceTaskModal({
                             rows={4}
                             placeholder="Décrivez le travail à effectuer…"
                             className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
-                            required
                         />
                         <InputError className="mt-1" message={form.errors.task} />
                     </div>

@@ -337,7 +337,19 @@ export default function MaintenanceIndex({
     const submitForm = () => {
         const options = {
             preserveScroll: true,
+            // Le modal ne se ferme que si l'enregistrement a réussi : les
+            // erreurs restent affichées à côté des champs concernés.
             onSuccess: () => closeModal(),
+            onError: () => {
+                window.dispatchEvent(
+                    new CustomEvent('app:toast', {
+                        detail: {
+                            type: 'error',
+                            message: "La tâche n'a pas pu être enregistrée. Vérifiez les champs signalés.",
+                        },
+                    }),
+                );
+            },
         };
 
         if (editingTask) {

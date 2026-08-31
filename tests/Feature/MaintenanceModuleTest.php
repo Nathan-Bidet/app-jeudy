@@ -1913,3 +1913,158 @@ it('combine correctement demander et afficher les commentaires masqués', functi
         ->patchJson(route('maintenance.tasks.point', $task), ['pointed' => true])
         ->assertForbidden();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Création réelle via Inertia — chaîne complète bouton → base
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Reproduit une requête telle que l'envoie le frontend Inertia (et non un
+ * simple POST de formulaire), pour couvrir la chaîne exacte du navigateur.
+ */
+function maintenanceInertiaPost(array $payload): \Illuminate\Testing\TestResponse
+{
+    return test()->withHeaders([
+        'X-Inertia' => 'true',
+        'X-Requested-With' => 'XMLHttpRequest',
+        'Referer' => route('maintenance.index'),
+    ])->post(route('maintenance.tasks.store'), $payload);
+}
+
+it('crée réellement la tâche pour chaque combinaison du formulaire', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+    $depot = Depot::query()->create([
+        'name' => 'Dépôt Central',
+        'address_line1' => '1 rue du Test',
+        'postal_code' => '45000',
+        'city' => 'Orléans',
+    ]);
+
+    $this->actingAs($creator);
+
+    // Le formulaire envoie exactement ces clés, et des dates au format ISO
+    // produit par <input type="date">.
+    $base = [
+        'date' => '2026-09-10',
+        'fin_date' => '',
+        'due_date' => '',
+        'assignee_user_id' => '',
+        'assignee_label_free' => '',
+        'depot_id' => '',
+        'address_free' => '',
+        'task' => 'Tâche de base',
+        'comment' => '',
+        'comment_hidden' => false,
+        'origin' => 'creation',
+    ];
+
+    $scenarios = [
+        'journée simple' => [],
+        'période sur plusieurs jours' => ['date' => '2026-09-10', 'fin_date' => '2026-09-14'],
+        'date de fin souhaitée' => ['due_date' => '2026-09-20'],
+        'utilisateur affecté' => ['assignee_user_id' => (string) $assignee->id],
+        'personne libre' => ['assignee_label_free' => 'SARL Legrand'],
+        'sans personne affectée' => [],
+        'avec dépôt' => ['depot_id' => (string) $depot->id],
+        'avec adresse libre' => ['address_free' => "8 chemin des Prés\nBâtiment A"],
+        'commentaire visible' => ['comment' => 'Commentaire visible', 'comment_hidden' => false],
+        'commentaire masqué' => ['comment' => 'Commentaire masqué', 'comment_hidden' => true],
+    ];
+
+    $created = 0;
+
+    foreach ($scenarios as $label => $overrides) {
+        $payload = array_merge($base, $overrides, ['task' => 'Tâche — '.$label]);
+
+        $response = maintenanceInertiaPost($payload);
+
+        expect($response->status())
+            ->toBeIn([302, 303], "scénario « {$label} » : réponse inattendue");
+
+        $response->assertSessionHasNoErrors();
+
+        $created++;
+
+        // La ligne existe réellement en base, pas seulement en session.
+        $task = MaintenanceTask::query()->where('task', 'Tâche — '.$label)->first();
+
+        expect($task)->not->toBeNull("scénario « {$label} » : aucune ligne créée");
+        expect(MaintenanceTask::query()->count())->toBe($created);
+    }
+
+    // Contrôle détaillé de quelques enregistrements.
+    $periode = MaintenanceTask::query()->where('task', 'Tâche — période sur plusieurs jours')->sole();
+    expect($periode->date->toDateString())->toBe('2026-09-10')
+        ->and($periode->fin_date->toDateString())->toBe('2026-09-14');
+
+    $affecte = MaintenanceTask::query()->where('task', 'Tâche — utilisateur affecté')->sole();
+    expect($affecte->assignee_user_id)->toBe($assignee->id)
+        ->and($affecte->assignee_label_free)->toBeNull();
+
+    $libre = MaintenanceTask::query()->where('task', 'Tâche — personne libre')->sole();
+    expect($libre->assignee_user_id)->toBeNull()
+        ->and($libre->assignee_label_free)->toBe('SARL Legrand');
+
+    $sansPersonne = MaintenanceTask::query()->where('task', 'Tâche — sans personne affectée')->sole();
+    expect($sansPersonne->assigneeType())->toBe('none');
+
+    $avecDepot = MaintenanceTask::query()->where('task', 'Tâche — avec dépôt')->sole();
+    expect($avecDepot->depot_id)->toBe($depot->id);
+
+    $masque = MaintenanceTask::query()->where('task', 'Tâche — commentaire masqué')->sole();
+    expect($masque->comment)->toBe('Commentaire masqué')
+        ->and($masque->comment_hidden)->toBeTrue();
+
+    // Après rechargement de la page, les tâches sont toujours là. On repart
+    // d'en-têtes vierges : une navigation normale, pas une requête Inertia.
+    $this->flushHeaders();
+
+    $this->get(route('maintenance.index', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->where('meta.count_tasks', count($scenarios)));
+});
+
+it('renvoie des erreurs exploitables plutôt qu’un échec silencieux', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $this->actingAs($creator);
+
+    // Le navigateur ne filtre plus rien : la requête part et le serveur répond.
+    $response = maintenanceInertiaPost([
+        'date' => '',
+        'task' => '',
+        'comment_hidden' => false,
+        'origin' => 'creation',
+    ]);
+
+    $response->assertSessionHasErrors(['date', 'task']);
+
+    expect(MaintenanceTask::query()->count())->toBe(0);
+
+    // Période incohérente : refusée par le serveur, avec un message par champ.
+    maintenanceInertiaPost([
+        'date' => '2026-09-14',
+        'fin_date' => '2026-09-10',
+        'task' => 'Période inversée',
+        'comment_hidden' => false,
+        'origin' => 'creation',
+    ])->assertSessionHasErrors('fin_date');
+
+    expect(MaintenanceTask::query()->count())->toBe(0);
+});
+
+it('confirme le succès par le message flash utilisé partout dans l’application', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $this->actingAs($creator);
+
+    maintenanceInertiaPost([
+        'date' => '2026-09-10',
+        'task' => 'Tâche avec retour de succès',
+        'comment_hidden' => false,
+        'origin' => 'creation',
+    ])->assertSessionHas('status', 'Tâche Maintenance enregistrée.');
+
+    expect(MaintenanceTask::query()->count())->toBe(1);
+});
