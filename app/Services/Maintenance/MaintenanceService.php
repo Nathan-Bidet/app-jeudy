@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Policies\MaintenanceTaskPolicy;
 use App\Services\Visibility\DateRestrictionScope;
 use App\Support\Access\AccessManager;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 
 class MaintenanceService
@@ -195,11 +196,11 @@ class MaintenanceService
             'address_free_is_detail' => $task->depot_id !== null && trim((string) $task->address_free) !== '',
             'partially_pointed' => (bool) $task->partially_pointed,
             'partially_pointed_at' => $task->partially_pointed_at?->toIso8601String(),
-            'partially_pointed_at_label' => $task->partially_pointed_at?->format('d/m/Y H:i'),
+            'partially_pointed_at_label' => $this->dateTimeLabel($task->partially_pointed_at),
             'partially_pointed_by' => $this->personName($task->partiallyPointedBy),
             'pointed' => (bool) $task->pointed,
             'pointed_at' => $task->pointed_at?->toIso8601String(),
-            'pointed_at_label' => $task->pointed_at?->format('d/m/Y H:i'),
+            'pointed_at_label' => $this->dateTimeLabel($task->pointed_at),
             'pointed_by' => $this->personName($task->pointedBy),
             'first_pointed_on' => $task->first_pointed_on?->toDateString(),
             'first_pointed_on_label' => $task->first_pointed_on?->format('d/m/Y'),
@@ -374,6 +375,21 @@ class MaintenanceService
         $place = trim((string) ($this->depotAddress($task) ?? $task->depot?->name ?? $task->address_free));
 
         return $place !== '' ? $place : null;
+    }
+
+    /**
+     * Horodatage lisible : « 31/08/2026 à 14:46 ».
+     *
+     * Le « à » est concaténé plutôt qu'inséré dans le masque : format() lit
+     * son argument octet par octet et malmène les caractères accentués.
+     */
+    private function dateTimeLabel(?CarbonInterface $moment): ?string
+    {
+        if ($moment === null) {
+            return null;
+        }
+
+        return $moment->format('d/m/Y').' à '.$moment->format('H:i');
     }
 
     private function personName(?User $user): ?string

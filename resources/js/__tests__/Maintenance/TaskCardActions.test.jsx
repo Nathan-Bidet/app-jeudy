@@ -211,3 +211,92 @@ describe('colonne d’actions de la carte', () => {
         expect(screen.getByRole('button', { name: 'Pointer' })).toBeDisabled();
     });
 });
+
+describe('ligne de suivi', () => {
+    function trackingRow() {
+        return screen.getByText(/Créé par|Demandé par/).closest('div');
+    }
+
+    it('place les auteurs à gauche et la trace de pointage à droite', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({
+                    created_by: 'Nathan Bidet',
+                    updated_by: 'Alice Blanchet',
+                    partially_pointed: true,
+                    partially_pointed_by: 'Alice Blanchet',
+                    partially_pointed_at_label: '31/08/2026 à 14:46',
+                })}
+            />,
+        );
+
+        const row = trackingRow();
+
+        expect(row.className).toContain('justify-between');
+        expect(row.className).toContain('flex-wrap');
+
+        // Les deux blocs sont bien deux enfants du même conteneur, donc sur la
+        // même ligne tant que la place le permet.
+        expect(row.children).toHaveLength(2);
+        expect(row.children[0]).toHaveTextContent('Créé par Nathan Bidet • Modifié par Alice Blanchet');
+        expect(row.children[1]).toHaveTextContent('Partiel par Alice Blanchet le 31/08/2026 à 14:46');
+    });
+
+    it('applique la même logique au pointage définitif', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({
+                    created_by: 'Nathan Bidet',
+                    pointed: true,
+                    pointed_by: 'Alice Blanchet',
+                    pointed_at_label: '31/08/2026 à 14:46',
+                })}
+            />,
+        );
+
+        expect(trackingRow().children[1])
+            .toHaveTextContent('Pointé par Alice Blanchet le 31/08/2026 à 14:46');
+    });
+
+    it('ne réserve aucun espace à droite sans pointage', () => {
+        render(<MaintenanceTaskCard task={baseTask({ created_by: 'Nathan Bidet' })} />);
+
+        const row = trackingRow();
+
+        expect(row.children).toHaveLength(1);
+        expect(row).toHaveTextContent('Créé par Nathan Bidet');
+        expect(row).not.toHaveTextContent(/Partiel par|Pointé par|Premier pointage/);
+    });
+
+    it('empile les traces à droite quand il y en a plusieurs', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({
+                    created_by: 'Nathan Bidet',
+                    partially_pointed: true,
+                    partially_pointed_by: 'Alice Blanchet',
+                    pointed: true,
+                    pointed_by: 'Nathan Bidet',
+                    first_pointed_on_label: '04/09/2026',
+                })}
+            />,
+        );
+
+        const right = trackingRow().children[1];
+
+        expect(right.children).toHaveLength(3);
+        expect(right).toHaveTextContent('Partiel par Alice Blanchet');
+        expect(right).toHaveTextContent('Pointé par Nathan Bidet');
+        expect(right).toHaveTextContent('Premier pointage le 04/09/2026');
+    });
+
+    it('n’affiche pas « Modifié par » quand l’auteur n’a pas changé', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({ created_by: 'Nathan Bidet', updated_by: 'Nathan Bidet' })}
+            />,
+        );
+
+        expect(trackingRow()).not.toHaveTextContent('Modifié par');
+    });
+});

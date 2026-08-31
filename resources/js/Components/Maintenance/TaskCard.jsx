@@ -110,6 +110,22 @@ export default function MaintenanceTaskCard({
     const pointed = Boolean(task.pointed);
     // Le responsable voit l'état du partiel sans pouvoir le modifier.
     const showPartialState = !task.can_partial_point && task.can_point;
+    // Traces de pointage, dans l'ordre chronologique du suivi. Une seule dans
+    // le cas courant : elle occupe alors la droite de la ligne de suivi.
+    const trackingNotes = [
+        partiallyPointed && task.partially_pointed_by
+            ? `Partiel par ${task.partially_pointed_by}${
+                task.partially_pointed_at_label ? ` le ${task.partially_pointed_at_label}` : ''
+            }`
+            : null,
+        pointed && task.pointed_by
+            ? `Pointé par ${task.pointed_by}${
+                task.pointed_at_label ? ` le ${task.pointed_at_label}` : ''
+            }`
+            : null,
+        task.first_pointed_on_label ? `Premier pointage le ${task.first_pointed_on_label}` : null,
+    ].filter(Boolean);
+
     // Première ligne : les actions les plus utilisées, réduites à leur icône.
     const hasPrimaryRow = task.can_point || task.can_update || task.can_delete;
     // Dessous : les actions libellées, chacune sur sa ligne.
@@ -185,32 +201,26 @@ export default function MaintenanceTaskCard({
                     </p>
                 ) : null}
 
-                {partiallyPointed && task.partially_pointed_by ? (
-                    <p className="mt-1.5 text-[11px] text-[var(--app-muted)]">
-                        Partiel par {task.partially_pointed_by}
-                        {task.partially_pointed_at_label ? ` le ${task.partially_pointed_at_label}` : ''}
-                    </p>
-                ) : null}
+                {/* Suivi : auteurs à gauche, traces de pointage à droite, sur
+                    une même ligne. justify-between n'occupe aucune place quand
+                    la partie droite est absente, et flex-wrap replie proprement
+                    sur mobile plutôt que de déborder. */}
+                <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[11px] text-[var(--app-muted)]">
+                    <span>
+                        {task.is_request ? 'Demandé' : 'Créé'} par {task.created_by || '—'}
+                        {task.updated_by && task.updated_by !== task.created_by
+                            ? ` • Modifié par ${task.updated_by}`
+                            : ''}
+                    </span>
 
-                {pointed && task.pointed_by ? (
-                    <p className="mt-0.5 text-[11px] text-[var(--app-muted)]">
-                        Pointé par {task.pointed_by}
-                        {task.pointed_at_label ? ` le ${task.pointed_at_label}` : ''}
-                    </p>
-                ) : null}
-
-                {/* Le bouton « Dater » n'affiche plus la valeur : elle reste
-                    lisible ici, avec le reste de l'historique. */}
-                {task.first_pointed_on_label ? (
-                    <p className="mt-0.5 text-[11px] text-[var(--app-muted)]">
-                        Premier pointage le {task.first_pointed_on_label}
-                    </p>
-                ) : null}
-
-                <p className="mt-2 text-[11px] text-[var(--app-muted)]">
-                    {task.is_request ? 'Demandé' : 'Créé'} par {task.created_by || '—'}
-                    {task.updated_by && task.updated_by !== task.created_by ? ` • modifié par ${task.updated_by}` : ''}
-                </p>
+                    {trackingNotes.length ? (
+                        <span className="flex flex-col gap-0.5 sm:items-end sm:text-right">
+                            {trackingNotes.map((note) => (
+                                <span key={note}>{note}</span>
+                            ))}
+                        </span>
+                    ) : null}
+                </div>
                 </div>
 
                 {/* Colonne droite : toutes les actions, alignées verticalement.

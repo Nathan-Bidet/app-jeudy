@@ -1344,7 +1344,10 @@ it('informe le nouvel affecté et l’ancien lors d’une réaffectation', funct
         ]))
         ->assertSessionHasNoErrors();
 
-    $firstReasons = maintenanceNotificationsOf($first)->pluck('reason')->all();
+    // Comparaison indépendante de l'ordre : deux notifications émises dans la
+    // même seconde ne se relisent pas dans un ordre garanti, et ce test porte
+    // sur qui reçoit quoi, pas sur la chronologie.
+    $firstReasons = maintenanceNotificationsOf($first)->pluck('reason')->sort()->values()->all();
     $secondReasons = maintenanceNotificationsOf($second)->pluck('reason')->all();
 
     expect($firstReasons)->toBe(['assigned', 'unassigned'])
@@ -1381,7 +1384,7 @@ it('ne renotifie pas l’affecté pour une modification sans changement métier'
         ]))
         ->assertSessionHasNoErrors();
 
-    $reasons = maintenanceNotificationsOf($assignee)->pluck('reason')->all();
+    $reasons = maintenanceNotificationsOf($assignee)->pluck('reason')->sort()->values()->all();
 
     expect($reasons)->toBe(['assigned', 'updated']);
 });
