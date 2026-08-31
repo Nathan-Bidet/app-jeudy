@@ -466,7 +466,7 @@ export default function MaintenanceIndex({
         <AppLayout title="Maintenance / Entretien" header={pageHeader}>
             <Head title="Maintenance / Entretien" />
 
-            <div className="maintenance-page w-full max-w-full space-y-4 px-0 pb-20 pt-2 sm:pt-3 lg:mx-auto lg:max-w-[1460px] lg:pb-8">
+            <div className="maintenance-page w-full max-w-full space-y-4 px-0 sm:space-y-5">
                 {displayedGroups.length === 0 ? (
                     <section className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
                         Aucune tâche de maintenance pour les filtres sélectionnés.
