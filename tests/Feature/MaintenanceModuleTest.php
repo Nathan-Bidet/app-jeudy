@@ -1738,3 +1738,178 @@ it('garde un nombre de requêtes stable quand la liste grandit', function (): vo
     // coût ne doit pas croître avec le nombre de tâches.
     expect($large)->toBeLessThanOrEqual($small + 5);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Phase 7 — revue finale : intégrité et contournements
+|--------------------------------------------------------------------------
+*/
+
+it('conserve une tâche et son pointage quand le compte créateur est supprimé', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($author)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'task' => 'Historique à préserver',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    $author->delete();
+
+    $task = MaintenanceTask::query()->find($task->id);
+
+    // La tâche survit au départ de son auteur : seule la référence est vidée.
+    expect($task)->not->toBeNull()
+        ->and($task->created_by_user_id)->toBeNull()
+        ->and($task->task)->toBe('Historique à préserver')
+        ->and($task->partially_pointed)->toBeTrue()
+        ->and($task->first_pointed_on)->not->toBeNull();
+
+    // Et la liste continue de s'afficher sans erreur.
+    $this->actingAs($assignee)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.tasks.0.created_by', null);
+});
+
+it('résiste aux contournements HTTP sur toutes les routes du module', function (): void {
+    $owner = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($owner)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'comment' => 'Confidentiel absolu',
+            'comment_hidden' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    // Un utilisateur sans aucune permission sur le module.
+    $stranger = maintenanceUser([]);
+
+    $refusals = [
+        ['getJson', route('maintenance.index'), []],
+        ['getJson', route('maintenance.tasks.data'), []],
+        ['postJson', route('maintenance.tasks.store'), maintenancePayload()],
+        ['putJson', route('maintenance.tasks.update', $task), maintenancePayload()],
+        ['deleteJson', route('maintenance.tasks.destroy', $task), []],
+        ['patchJson', route('maintenance.tasks.point', $task), ['pointed' => true]],
+        ['patchJson', route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true]],
+        ['patchJson', route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2020-01-01']],
+    ];
+
+    foreach ($refusals as [$method, $url, $payload]) {
+        $this->actingAs($stranger)->{$method}($url, $payload)->assertForbidden();
+    }
+
+    // Un lecteur seul : il voit la page mais ne peut rien écrire.
+    $reader = maintenanceUser(['maintenance.view']);
+
+    foreach (array_slice($refusals, 2) as [$method, $url, $payload]) {
+        $this->actingAs($reader)->{$method}($url, $payload)->assertForbidden();
+    }
+
+    $task->refresh();
+
+    expect($task->pointed)->toBeFalse()
+        ->and($task->partially_pointed)->toBeFalse()
+        ->and($task->first_pointed_on)->toBeNull()
+        ->and($task->comment)->toBe('Confidentiel absolu')
+        ->and(MaintenanceTask::query()->count())->toBe(1);
+
+    // Et le contenu masqué n'a fuité par aucune des deux surfaces de lecture.
+    $reader->givePermissionTo('maintenance.view');
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    $json = $this->actingAs($reader)->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']));
+    $page = $this->actingAs($reader)->get(route('maintenance.index', ['pointed_filter' => 'all']));
+
+    expect($json->getContent())->not->toContain('Confidentiel absolu')
+        ->and($page->getContent())->not->toContain('Confidentiel absolu');
+});
+
+it('vérifie les cinq permissions une à une sur leur route dédiée', function (): void {
+    $matrix = [
+        'maintenance.view' => fn (User $u) => $this->actingAs($u)->getJson(route('maintenance.index')),
+        'maintenance.create' => fn (User $u) => $this->actingAs($u)
+            ->postJson(route('maintenance.tasks.store'), maintenancePayload()),
+        'maintenance.request' => fn (User $u) => $this->actingAs($u)
+            ->postJson(route('maintenance.tasks.store'), maintenancePayload()),
+    ];
+
+    foreach ($matrix as $ability => $call) {
+        $without = maintenanceUser([]);
+        expect($call($without)->status())->toBe(403);
+
+        $with = maintenanceUser([$ability]);
+        expect($call($with)->status())->not->toBe(403);
+    }
+
+    // Les deux dernières portent sur une tâche existante.
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceTaskFor($author, [
+        'comment' => 'Masqué',
+        'comment_hidden' => true,
+    ]);
+
+    $withoutHidden = maintenanceUser(['maintenance.view']);
+    $withHidden = maintenanceUser(['maintenance.view', 'maintenance.comment_hidden.view']);
+
+    // Plusieurs tâches coexistent : on cible celle qui porte le commentaire.
+    $findTask = function (User $viewer) use ($task): array {
+        $response = $this->actingAs($viewer)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk();
+
+        return collect($response->json('groups'))
+            ->flatMap(fn (array $group): array => $group['tasks'])
+            ->firstWhere('id', $task->id);
+    };
+
+    expect($findTask($withoutHidden))->not->toHaveKey('comment');
+    expect($findTask($withHidden)['comment'])->toBe('Masqué');
+
+    $withoutPoint = maintenanceUser(['maintenance.view']);
+    $withPoint = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    expect($this->actingAs($withoutPoint)
+        ->patchJson(route('maintenance.tasks.point', $task), ['pointed' => true])->status())->toBe(403);
+    expect($this->actingAs($withPoint)
+        ->patchJson(route('maintenance.tasks.point', $task), ['pointed' => true])->status())->not->toBe(403);
+});
+
+it('combine correctement demander et afficher les commentaires masqués', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.request', 'maintenance.comment_hidden.view']);
+
+    $this->actingAs($user)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'comment' => 'Note masquée',
+            'comment_hidden' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    expect($task->origin)->toBe(MaintenanceTask::ORIGIN_REQUEST)
+        ->and($task->requested_by_user_id)->toBe($user->id);
+
+    // Il relit son propre commentaire masqué, mais ne peut toujours pas pointer.
+    $this->actingAs($user)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.tasks.0.comment', 'Note masquée');
+
+    $this->actingAs($user)
+        ->patchJson(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertForbidden();
+});
