@@ -7,11 +7,13 @@ use App\Models\Depot;
 use App\Models\MaintenanceTask;
 use App\Models\User;
 use App\Services\AuditLogService;
+use App\Services\Maintenance\MaintenanceNotifier;
 use App\Services\Maintenance\MaintenanceService;
 use App\Support\Access\AccessManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -24,6 +26,7 @@ class MaintenanceController extends Controller
         private readonly MaintenanceService $service,
         private readonly AuditLogService $auditLogService,
         private readonly AccessManager $accessManager,
+        private readonly MaintenanceNotifier $notifier,
     ) {}
 
     public function index(Request $request): Response
@@ -31,6 +34,12 @@ class MaintenanceController extends Controller
         $this->authorize('viewAny', MaintenanceTask::class);
 
         $filters = $this->validateFilters($request);
+        $focusTaskId = $this->focusTaskId($request);
+
+        if ($focusTaskId !== null) {
+            $filters['pointed_filter'] = 'all';
+        }
+
         $result = $this->service->getGroupedTasks($filters, $request->user());
 
         return Inertia::render('Maintenance/Index', [
@@ -39,6 +48,7 @@ class MaintenanceController extends Controller
             'filters' => $filters,
             'reference' => $this->referenceData(),
             'permissions' => $this->permissionFlags($request->user()),
+            'focus_task_id' => $focusTaskId,
         ]);
     }
 
@@ -62,13 +72,19 @@ class MaintenanceController extends Controller
         $actor = $request->user();
         $origin = $this->resolveOrigin($request, $actor);
 
-        $task = new MaintenanceTask;
-        $task->fill($request->taskAttributes());
-        $task->origin = $origin;
-        $task->created_by_user_id = $actor->id;
-        $task->requested_by_user_id = $origin === MaintenanceTask::ORIGIN_REQUEST ? $actor->id : null;
-        $task->updated_by_user_id = $actor->id;
-        $task->save();
+        // Écriture isolée : les notifications ne partent qu'une fois la tâche
+        // réellement enregistrée.
+        $task = DB::transaction(function () use ($request, $actor, $origin): MaintenanceTask {
+            $task = new MaintenanceTask;
+            $task->fill($request->taskAttributes());
+            $task->origin = $origin;
+            $task->created_by_user_id = $actor->id;
+            $task->requested_by_user_id = $origin === MaintenanceTask::ORIGIN_REQUEST ? $actor->id : null;
+            $task->updated_by_user_id = $actor->id;
+            $task->save();
+
+            return $task;
+        });
 
         $this->auditLogService->log([
             'action' => $origin === MaintenanceTask::ORIGIN_REQUEST
@@ -85,6 +101,12 @@ class MaintenanceController extends Controller
                 'after' => $this->auditSnapshot($task),
             ],
         ]);
+
+        if ($origin === MaintenanceTask::ORIGIN_REQUEST) {
+            $this->notifier->requestSubmitted($task, $actor);
+        }
+
+        $this->notifier->taskAssigned($task, $actor->id);
 
         return back()->with('status', 'Tâche Maintenance enregistrée.');
     }
@@ -105,9 +127,13 @@ class MaintenanceController extends Controller
             unset($attributes['comment'], $attributes['comment_hidden']);
         }
 
-        $task->fill($attributes);
-        $task->updated_by_user_id = $actor->id;
-        $task->save();
+        DB::transaction(function () use ($task, $attributes, $actor): void {
+            $task->fill($attributes);
+            $task->updated_by_user_id = $actor->id;
+            $task->save();
+        });
+
+        $after = $this->auditSnapshot($task);
 
         $this->auditLogService->log([
             'action' => 'update_maintenance_task',
@@ -116,9 +142,34 @@ class MaintenanceController extends Controller
             'payload' => [
                 'task_id' => $task->id,
                 'before' => $before,
-                'after' => $this->auditSnapshot($task),
+                'after' => $after,
             ],
         ]);
+
+        // Trace dédiée : un changement de personne affectée se cherche dans les
+        // logs sans avoir à comparer deux instantanés de modification.
+        if (($before['assignee_user_id'] ?? null) !== ($after['assignee_user_id'] ?? null)
+            || ($before['assignee_label_free'] ?? null) !== ($after['assignee_label_free'] ?? null)) {
+            $this->auditLogService->log([
+                'action' => 'reassign_maintenance_task',
+                'module' => self::LOG_MODULE,
+                'description' => sprintf(
+                    'Changement d\'affectation tâche Maintenance #%d (%s → %s)',
+                    (int) $task->id,
+                    $this->assigneeLabelForLog($before),
+                    $this->assigneeLabelForLog($after),
+                ),
+                'payload' => [
+                    'task_id' => $task->id,
+                    'before_assignee_user_id' => $before['assignee_user_id'] ?? null,
+                    'after_assignee_user_id' => $after['assignee_user_id'] ?? null,
+                    'before_assignee_label_free' => $before['assignee_label_free'] ?? null,
+                    'after_assignee_label_free' => $after['assignee_label_free'] ?? null,
+                ],
+            ]);
+        }
+
+        $this->notifier->taskUpdated($task, $before, $after, $actor->id);
 
         return back()->with('status', 'Tâche Maintenance mise à jour.');
     }
@@ -315,6 +366,7 @@ class MaintenanceController extends Controller
             'depot_id' => ['nullable', 'integer'],
             'origin' => ['nullable', Rule::in([MaintenanceTask::ORIGIN_CREATION, MaintenanceTask::ORIGIN_REQUEST])],
             'pointed_filter' => ['nullable', Rule::in(['all', 'pointed', 'unpointed', 'partial'])],
+            'focus_task_id' => ['nullable', 'integer'],
         ]);
 
         return [
@@ -326,6 +378,17 @@ class MaintenanceController extends Controller
             'origin' => $validated['origin'] ?? null,
             'pointed_filter' => $validated['pointed_filter'] ?? 'unpointed',
         ];
+    }
+
+    /**
+     * Une notification pointe vers une tâche précise : on élargit le filtre à
+     * tous les états pour qu'elle soit visible quel que soit son pointage.
+     */
+    private function focusTaskId(Request $request): ?int
+    {
+        $value = $request->query('focus_task_id');
+
+        return is_numeric($value) ? (int) $value : null;
     }
 
     /**
@@ -414,6 +477,20 @@ class MaintenanceController extends Controller
             'can_point' => $this->accessManager->can($user, 'maintenance.point'),
             'can_view_hidden_comments' => $this->accessManager->can($user, 'maintenance.comment_hidden.view'),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function assigneeLabelForLog(array $snapshot): string
+    {
+        if (! empty($snapshot['assignee_user_id'])) {
+            return 'utilisateur #'.$snapshot['assignee_user_id'];
+        }
+
+        $free = trim((string) ($snapshot['assignee_label_free'] ?? ''));
+
+        return $free !== '' ? $free : 'non affectée';
     }
 
     /**

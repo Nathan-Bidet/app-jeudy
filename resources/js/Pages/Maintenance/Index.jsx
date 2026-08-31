@@ -110,6 +110,7 @@ export default function MaintenanceIndex({
     filters = {},
     reference = {},
     permissions = {},
+    focus_task_id = null,
 }) {
     const [localFilters, setLocalFilters] = useState(() => buildFilterState(filters));
     const [showMobileFilters, setShowMobileFilters] = useState(false);
@@ -128,6 +129,8 @@ export default function MaintenanceIndex({
 
     const searchDebounceRef = useRef(null);
     const searchReadyRef = useRef(false);
+    const taskRefs = useRef(new Map());
+    const [highlightedTaskId, setHighlightedTaskId] = useState(null);
 
     const canCreate = Boolean(permissions?.can_create);
     const canRequest = Boolean(permissions?.can_request);
@@ -144,6 +147,21 @@ export default function MaintenanceIndex({
     useEffect(() => {
         setPointingOverrides({});
     }, [groups]);
+
+    // Arrivée depuis une notification : on amène la tâche à l'écran et on la
+    // souligne brièvement, comme le fait le Livre du travail.
+    useEffect(() => {
+        if (!focus_task_id) return undefined;
+
+        const node = taskRefs.current.get(Number(focus_task_id));
+        if (!node) return undefined;
+
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedTaskId(Number(focus_task_id));
+
+        const timeout = window.setTimeout(() => setHighlightedTaskId(null), 2000);
+        return () => window.clearTimeout(timeout);
+    }, [focus_task_id, groups]);
 
     const displayedGroups = useMemo(() => {
         if (Object.keys(pointingOverrides).length === 0) {
@@ -487,8 +505,22 @@ export default function MaintenanceIndex({
 
                                     <div className="grid gap-3">
                                         {(group.tasks || []).map((task) => (
-                                            <MaintenanceTaskCard
+                                            <div
                                                 key={task.id}
+                                                ref={(node) => {
+                                                    if (node) {
+                                                        taskRefs.current.set(Number(task.id), node);
+                                                    } else {
+                                                        taskRefs.current.delete(Number(task.id));
+                                                    }
+                                                }}
+                                                className={
+                                                    highlightedTaskId === Number(task.id)
+                                                        ? 'rounded-xl ring-2 ring-[var(--brand-yellow-dark)]'
+                                                        : undefined
+                                                }
+                                            >
+                                            <MaintenanceTaskCard
                                                 task={task}
                                                 placeResolver={reference?.depot_place_map || {}}
                                                 onEdit={openEdit}
@@ -499,6 +531,7 @@ export default function MaintenanceIndex({
                                                 deleting={deleting && taskToDelete?.id === task.id}
                                                 saving={Boolean(savingTaskIds[task.id])}
                                             />
+                                            </div>
                                         ))}
                                     </div>
                                 </section>

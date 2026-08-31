@@ -1206,3 +1206,377 @@ it('filtre les tâches par état de pointage', function (): void {
         ->and($collectIds('partial'))->toBe([$inProgress->id])
         ->and($collectIds('pointed'))->toBe([$done->id]);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Phase 5 — notifications, workflow de demande et traçabilité
+|--------------------------------------------------------------------------
+*/
+
+function maintenanceNotificationsOf(User $user): \Illuminate\Support\Collection
+{
+    return $user->notifications()->get()->map(fn ($n) => $n->data);
+}
+
+it('notifie les responsables du traitement lors d’une nouvelle demande', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $otherManager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $bystander = maintenanceUser(['maintenance.view']);
+
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester->forceFill(['first_name' => 'Léa', 'last_name' => 'Martin'])->save();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['task' => 'Fuite au compresseur']))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    foreach ([$manager, $otherManager] as $recipient) {
+        $data = maintenanceNotificationsOf($recipient)->sole();
+
+        expect($data['type'])->toBe('maintenance_request_submitted')
+            ->and($data['maintenance_task_id'])->toBe($task->id)
+            ->and($data['requester_label'])->toBe('Léa Martin')
+            ->and($data['message'])->toContain('Fuite au compresseur');
+    }
+
+    // Ni le demandeur, ni un simple lecteur ne sont notifiés.
+    expect(maintenanceNotificationsOf($requester))->toBeEmpty()
+        ->and(maintenanceNotificationsOf($bystander))->toBeEmpty();
+});
+
+it('ne notifie personne d’une création directe', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($manager))->toBeEmpty();
+});
+
+it('exclut des destinataires un responsable désactivé', function (): void {
+    $active = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $inactive = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $inactive->forceFill(['is_active' => false])->save();
+
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($active))->toHaveCount(1)
+        ->and(maintenanceNotificationsOf($inactive))->toBeEmpty();
+});
+
+it('notifie l’utilisateur affecté à la création', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'task' => 'Remplacement du filtre',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $data = maintenanceNotificationsOf($assignee)->sole();
+
+    expect($data['type'])->toBe('maintenance_task_assigned')
+        ->and($data['reason'])->toBe('assigned')
+        ->and($data['message'])->toContain('Remplacement du filtre');
+});
+
+it('n’envoie aucune notification pour une affectation en texte libre ou vide', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $witness = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_label_free' => 'SARL Legrand',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    expect(\Illuminate\Notifications\DatabaseNotification::query()->count())->toBe(0)
+        ->and(maintenanceNotificationsOf($witness))->toBeEmpty();
+});
+
+it('ne notifie pas un créateur qui s’affecte la tâche à lui-même', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $creator->id,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($creator))->toBeEmpty();
+});
+
+it('informe le nouvel affecté et l’ancien lors d’une réaffectation', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $first = maintenanceUser(['maintenance.view']);
+    $second = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $first->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'assignee_user_id' => $second->id,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $firstReasons = maintenanceNotificationsOf($first)->pluck('reason')->all();
+    $secondReasons = maintenanceNotificationsOf($second)->pluck('reason')->all();
+
+    expect($firstReasons)->toBe(['assigned', 'unassigned'])
+        ->and($secondReasons)->toBe(['assigned']);
+});
+
+it('ne renotifie pas l’affecté pour une modification sans changement métier', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    // Seul le commentaire change : pas de dérangement.
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'comment' => 'Note interne mise à jour',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($assignee))->toHaveCount(1);
+
+    // La date change : l'affecté doit le savoir.
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'comment' => 'Note interne mise à jour',
+            'date' => '2026-09-20',
+            'fin_date' => null,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $reasons = maintenanceNotificationsOf($assignee)->pluck('reason')->all();
+
+    expect($reasons)->toBe(['assigned', 'updated']);
+});
+
+it('ne laisse jamais fuiter un commentaire masqué dans une notification', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $secret = 'Amiante confirmée batiment C';
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'comment' => $secret,
+            'comment_hidden' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'comment' => $secret,
+            'comment_hidden' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    // Aucune notification stockée, quel que soit le destinataire, ne contient
+    // le commentaire — ni en clair, ni tronqué.
+    $allPayloads = \Illuminate\Notifications\DatabaseNotification::query()->pluck('data')->map(
+        fn ($data) => is_string($data) ? $data : json_encode($data, JSON_UNESCAPED_UNICODE)
+    );
+
+    expect($allPayloads)->not->toBeEmpty();
+
+    foreach ($allPayloads as $payload) {
+        expect($payload)->not->toContain('Amiante')
+            ->and($payload)->not->toContain('batiment C');
+    }
+
+    // Le destinataire non habilité ne voit rien non plus via le centre.
+    $response = $this->actingAs($assignee)
+        ->getJson(route('notifications.latest'))
+        ->assertOk();
+
+    expect($response->getContent())->not->toContain('Amiante');
+
+    unset($manager, $task);
+});
+
+it('renvoie une notification de maintenance vers le module, pas vers les heures', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+    $notification = $assignee->notifications()->sole();
+
+    $this->actingAs($assignee)
+        ->get(route('notifications.read_redirect', $notification->id))
+        ->assertRedirect(route('maintenance.index', ['focus_task_id' => $task->id]));
+
+    expect($assignee->notifications()->sole()->read_at)->not->toBeNull();
+});
+
+it('affiche la tâche visée par une notification quel que soit son pointage', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($creator)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+
+    // Sans focus, le filtre par défaut masque une tâche terminée.
+    $this->actingAs($assignee)
+        ->get(route('maintenance.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->where('meta.count_tasks', 0));
+
+    $this->actingAs($assignee)
+        ->get(route('maintenance.index', ['focus_task_id' => $task->id]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('meta.count_tasks', 1)
+            ->where('focus_task_id', $task->id)
+        );
+});
+
+it('journalise la demande, la modification et le changement d’affectation', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($manager)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $actions = DB::table('audit_logs')->where('module', 'maintenance')->pluck('action')->all();
+
+    expect($actions)->toContain('request_maintenance_task')
+        ->and($actions)->toContain('update_maintenance_task')
+        ->and($actions)->toContain('reassign_maintenance_task');
+
+    $reassign = DB::table('audit_logs')
+        ->where('action', 'reassign_maintenance_task')
+        ->first();
+
+    expect($reassign->description)->toContain('utilisateur #'.$assignee->id)
+        ->and($reassign->description)->toContain('non affectée');
+});
+
+it('journalise les pointages et la date métier', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($manager)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2026-08-15'])
+        ->assertRedirect();
+
+    $actions = DB::table('audit_logs')->where('module', 'maintenance')->pluck('action')->all();
+
+    expect($actions)->toContain('partial_point_maintenance_task')
+        ->and($actions)->toContain('point_maintenance_task')
+        ->and($actions)->toContain('update_maintenance_pointing_date');
+});
+
+it('n’écrit jamais un commentaire masqué en clair dans les logs', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.comment_hidden.view']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'comment' => 'Secret de maintenance',
+            'comment_hidden' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'comment' => 'Autre secret',
+            'comment_hidden' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $payloads = DB::table('audit_logs')->where('module', 'maintenance')->pluck('payload');
+
+    expect($payloads)->not->toBeEmpty();
+
+    foreach ($payloads as $payload) {
+        expect((string) $payload)->not->toContain('Secret de maintenance')
+            ->and((string) $payload)->not->toContain('Autre secret')
+            ->and((string) $payload)->toContain('MASQU');
+    }
+});
+
+it('journalise un commentaire visible sans le masquer', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'comment' => 'Commentaire ordinaire',
+            'comment_hidden' => false,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $payload = (string) DB::table('audit_logs')
+        ->where('action', 'create_maintenance_task')
+        ->value('payload');
+
+    expect($payload)->toContain('Commentaire ordinaire');
+});

@@ -70,8 +70,12 @@ class NotificationController extends Controller
         }
 
         $type = $notification?->data['type'] ?? null;
+        $maintenanceTaskId = $notification?->data['maintenance_task_id'] ?? null;
         $destination = match ($type) {
             'hours_missing_entry_reminder' => route('hours.index'),
+            'maintenance_request_submitted', 'maintenance_task_assigned' => $maintenanceTaskId
+                ? route('maintenance.index', ['focus_task_id' => (int) $maintenanceTaskId])
+                : route('maintenance.index'),
             'announcement' => isset($notification?->data['announcement_id'])
                 ? route('annonces.index', ['highlight' => (int) $notification->data['announcement_id']])
                 : route('annonces.index'),
@@ -194,6 +198,7 @@ class NotificationController extends Controller
         $type = (string) ($notification->data['type'] ?? $notification->type);
         $leaveRequestId = $notification->data['leave_request_id'] ?? null;
         $announcementId = $notification->data['announcement_id'] ?? null;
+        $maintenanceTaskId = $notification->data['maintenance_task_id'] ?? null;
 
         $title = isset($notification->data['title']) ? (string) $notification->data['title'] : null;
         $fullMessage = isset($notification->data['full_message']) ? (string) $notification->data['full_message'] : null;
@@ -232,7 +237,8 @@ class NotificationController extends Controller
             'requester_label' => $notification->data['requester_label'] ?? null,
             'leave_request_id' => $leaveRequestId,
             'announcement_id' => $announcementId,
-            'url' => $this->notificationUrl($type, $leaveRequestId, $announcementId),
+            'maintenance_task_id' => $maintenanceTaskId,
+            'url' => $this->notificationUrl($type, $leaveRequestId, $announcementId, $maintenanceTaskId),
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
@@ -250,8 +256,16 @@ class NotificationController extends Controller
         return $name !== '' ? $name : (string) ($user->email ?? '');
     }
 
-    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null): ?string
+    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null, mixed $maintenanceTaskId = null): ?string
     {
+        $maintenanceTypes = ['maintenance_request_submitted', 'maintenance_task_assigned'];
+
+        if (in_array($type, $maintenanceTypes, true) && Route::has('maintenance.index')) {
+            return $maintenanceTaskId
+                ? route('maintenance.index', ['focus_task_id' => (int) $maintenanceTaskId])
+                : route('maintenance.index');
+        }
+
         $leaveTypes = [
             'leave_request_submitted',
             'leave_request_approved',
