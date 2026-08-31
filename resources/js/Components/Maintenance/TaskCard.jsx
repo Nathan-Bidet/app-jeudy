@@ -1,22 +1,19 @@
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
 import { CalendarCheck, CalendarDays, CheckCircle2, Circle, EyeOff, Flag, Pencil, Trash2 } from 'lucide-react';
 
-/**
- * Socle commun à toutes les actions de la carte : compact et en ligne sur
- * mobile, pleine largeur dans la colonne de droite dès le format tablette.
- */
+const ACTION_TONES = {
+    neutral: 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:border-[var(--brand-yellow-dark)]',
+    danger: 'border-[var(--app-border)] bg-[var(--app-surface)] text-red-600 hover:border-red-400',
+    active: 'border-emerald-600 bg-emerald-600 text-white',
+    muted: 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] hover:border-[var(--brand-yellow-dark)]',
+    dashed: 'border-dashed border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] hover:border-[var(--brand-yellow-dark)]',
+};
+
 const ACTION_BASE =
-    'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-[10px] font-bold uppercase tracking-[0.08em] disabled:cursor-not-allowed disabled:opacity-60 sm:w-full';
+    'inline-flex items-center justify-center rounded-lg border disabled:cursor-not-allowed disabled:opacity-60';
 
+/** Action libellée : occupe toute la largeur de la colonne. */
 function ActionButton({ icon: Icon, label, title, onClick, disabled = false, tone = 'neutral', pressed }) {
-    const tones = {
-        neutral: 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:border-[var(--brand-yellow-dark)]',
-        danger: 'border-[var(--app-border)] bg-[var(--app-surface)] text-red-600 hover:border-red-400',
-        active: 'border-emerald-600 bg-emerald-600 text-white',
-        muted: 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] hover:border-[var(--brand-yellow-dark)]',
-        dashed: 'border-dashed border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] hover:border-[var(--brand-yellow-dark)]',
-    };
-
     return (
         <button
             type="button"
@@ -24,10 +21,29 @@ function ActionButton({ icon: Icon, label, title, onClick, disabled = false, ton
             disabled={disabled}
             title={title}
             aria-pressed={pressed}
-            className={`${ACTION_BASE} ${tones[tone]}`}
+            className={`${ACTION_BASE} w-full gap-1.5 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] ${ACTION_TONES[tone]}`}
         >
             <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
             <span>{label}</span>
+        </button>
+    );
+}
+
+/**
+ * Action réduite à son icône. Le libellé reste porté par title et aria-label,
+ * pour rester identifiable au survol comme aux technologies d'assistance.
+ */
+function IconActionButton({ icon: Icon, label, onClick, disabled = false, tone = 'neutral' }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            title={label}
+            aria-label={label}
+            className={`${ACTION_BASE} h-8 w-8 shrink-0 ${ACTION_TONES[tone]}`}
+        >
+            <Icon className="h-3.5 w-3.5" strokeWidth={2.2} />
         </button>
     );
 }
@@ -53,14 +69,14 @@ function PartialStateBadge({ active }) {
     return (
         <span
             title={active ? 'Pointé partiellement par la personne affectée' : 'Pas encore pointé par la personne affectée'}
-            className={`${ACTION_BASE} border-dashed ${
+            className={`${ACTION_BASE} w-full gap-1.5 border-dashed px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] ${
                 active
                     ? 'border-emerald-500 text-emerald-700'
                     : 'border-[var(--app-border)] text-[var(--app-muted)]'
             }`}
         >
             <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
-            <span>Pointage partiel</span>
+            <span>Partiel</span>
         </span>
     );
 }
@@ -180,6 +196,14 @@ export default function MaintenanceTaskCard({
                     </p>
                 ) : null}
 
+                {/* Le bouton « Dater » n'affiche plus la valeur : elle reste
+                    lisible ici, avec le reste de l'historique. */}
+                {task.first_pointed_on_label ? (
+                    <p className="mt-0.5 text-[11px] text-[var(--app-muted)]">
+                        Premier pointage le {task.first_pointed_on_label}
+                    </p>
+                ) : null}
+
                 <p className="mt-2 text-[11px] text-[var(--app-muted)]">
                     {task.is_request ? 'Demandé' : 'Créé'} par {task.created_by || '—'}
                     {task.updated_by && task.updated_by !== task.created_by ? ` • modifié par ${task.updated_by}` : ''}
@@ -189,23 +213,21 @@ export default function MaintenanceTaskCard({
                 {/* Colonne droite : toutes les actions, alignées verticalement.
                     Compactes et en ligne sur mobile, empilées dès sm. */}
                 {hasEditActions || hasPointingActions ? (
-                    <div className="flex shrink-0 flex-col gap-2 sm:w-48">
+                    <div className="flex shrink-0 flex-col gap-2 sm:w-32">
                         {hasEditActions ? (
-                            <div className="flex flex-wrap gap-2 sm:flex-col">
+                            <div className="flex items-center gap-2">
                                 {task.can_update ? (
-                                    <ActionButton
+                                    <IconActionButton
                                         icon={Pencil}
                                         label="Modifier"
-                                        title="Modifier la tâche"
                                         onClick={() => onEdit?.(task)}
                                     />
                                 ) : null}
 
                                 {task.can_delete ? (
-                                    <ActionButton
+                                    <IconActionButton
                                         icon={Trash2}
                                         label="Supprimer"
-                                        title="Supprimer la tâche"
                                         tone="danger"
                                         disabled={deleting}
                                         onClick={() => onDelete?.(task)}
@@ -216,14 +238,14 @@ export default function MaintenanceTaskCard({
 
                         {hasPointingActions ? (
                             <div
-                                className={`flex flex-wrap gap-2 sm:flex-col ${
+                                className={`flex flex-col gap-2 ${
                                     hasEditActions ? 'border-t border-[var(--app-border)] pt-2' : ''
                                 }`}
                             >
                                 {task.can_partial_point ? (
                                     <PointingButton
                                         active={partiallyPointed}
-                                        label="Pointage partiel"
+                                        label="Partiel"
                                         title={
                                             partiallyPointed
                                                 ? 'Retirer mon pointage partiel'
@@ -239,7 +261,7 @@ export default function MaintenanceTaskCard({
                                 {task.can_point ? (
                                     <PointingButton
                                         active={pointed}
-                                        label="Pointage définitif"
+                                        label="Pointer"
                                         title={
                                             pointed
                                                 ? 'Retirer le pointage définitif'
@@ -253,12 +275,10 @@ export default function MaintenanceTaskCard({
                                 {task.first_pointed_on_label ? (
                                     <ActionButton
                                         icon={CalendarCheck}
-                                        label={`1er pointage ${task.first_pointed_on_label}`}
-                                        title={
-                                            task.can_edit_pointing_date
-                                                ? 'Modifier la date du premier pointage'
-                                                : 'Date du premier pointage'
-                                        }
+                                        label="Dater"
+                                        title={`Premier pointage le ${task.first_pointed_on_label}${
+                                            task.can_edit_pointing_date ? ' — cliquer pour corriger' : ''
+                                        }`}
                                         tone="muted"
                                         disabled={!task.can_edit_pointing_date}
                                         onClick={
@@ -270,7 +290,7 @@ export default function MaintenanceTaskCard({
                                 ) : task.can_edit_pointing_date ? (
                                     <ActionButton
                                         icon={CalendarCheck}
-                                        label="Dater le 1er pointage"
+                                        label="Dater"
                                         title="Renseigner la date du premier pointage"
                                         tone="dashed"
                                         onClick={() => onEditPointingDate?.(task)}

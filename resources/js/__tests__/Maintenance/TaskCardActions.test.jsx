@@ -36,10 +36,16 @@ function actionNames() {
     return screen.getAllByRole('button').map((node) => node.textContent.trim());
 }
 
+function accessibleNames() {
+    return screen
+        .getAllByRole('button')
+        .map((node) => node.getAttribute('aria-label') || node.textContent.trim());
+}
+
 afterEach(cleanup);
 
 describe('colonne d’actions de la carte', () => {
-    it('empile les cinq actions dans l’ordre attendu', () => {
+    it('place les icônes en tête puis empile Partiel, Pointer et Dater', () => {
         render(
             <MaintenanceTaskCard
                 task={baseTask({
@@ -52,37 +58,40 @@ describe('colonne d’actions de la carte', () => {
             />,
         );
 
-        expect(actionNames()).toEqual([
-            'Modifier',
-            'Supprimer',
-            'Pointage partiel',
-            'Pointage définitif',
-            'Dater le 1er pointage',
-        ]);
+        // Modifier et Supprimer n'ont plus de texte : leur nom accessible vient
+        // de aria-label, et reste donc identifiable.
+        expect(screen.getByRole('button', { name: 'Modifier' })).toHaveTextContent('');
+        expect(screen.getByRole('button', { name: 'Supprimer' })).toHaveTextContent('');
+
+        expect(accessibleNames()).toEqual(['Modifier', 'Supprimer', 'Partiel', 'Pointer', 'Dater']);
+        expect(actionNames()).toEqual(['', '', 'Partiel', 'Pointer', 'Dater']);
     });
 
-    it('affiche la date du premier pointage à la place de l’invite quand elle existe', () => {
+    it('garde le libellé « Dater » et porte la date dans l’infobulle', () => {
         render(
             <MaintenanceTaskCard
                 task={baseTask({ can_point: true, can_edit_pointing_date: true, first_pointed_on_label: '04/09/2026' })}
             />,
         );
 
-        expect(actionNames()).toContain('1er pointage 04/09/2026');
-        expect(actionNames()).not.toContain('Dater le 1er pointage');
+        const dater = screen.getByRole('button', { name: 'Dater' });
+
+        expect(dater).toHaveAttribute('title', expect.stringContaining('04/09/2026'));
+        // La valeur reste lisible dans l'historique, à gauche.
+        expect(screen.getByText(/Premier pointage le 04\/09\/2026/)).toBeInTheDocument();
     });
 
     it('ne montre que le pointage partiel à la personne affectée', () => {
         render(<MaintenanceTaskCard task={baseTask({ can_partial_point: true })} />);
 
-        expect(actionNames()).toEqual(['Pointage partiel']);
+        expect(actionNames()).toEqual(['Partiel']);
     });
 
     it('montre au responsable l’état du partiel en lecture seule', () => {
         render(<MaintenanceTaskCard task={baseTask({ can_point: true, partially_pointed: true })} />);
 
         // L'état du partiel n'est pas un bouton : il ne peut pas être basculé.
-        expect(actionNames()).toEqual(['Pointage définitif']);
+        expect(actionNames()).toEqual(['Pointer']);
         expect(screen.getByTitle(/Pointé partiellement par la personne affectée/i)).toBeInTheDocument();
     });
 
@@ -121,9 +130,9 @@ describe('colonne d’actions de la carte', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Modifier' }));
         fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Pointage partiel' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Pointage définitif' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Dater le 1er pointage' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Partiel' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Pointer' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Dater' }));
 
         expect(onEdit).toHaveBeenCalledWith(task);
         expect(onDelete).toHaveBeenCalledWith(task);
@@ -142,7 +151,7 @@ describe('colonne d’actions de la carte', () => {
         );
 
         expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Pointage partiel' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Pointage définitif' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Partiel' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Pointer' })).toBeDisabled();
     });
 });
