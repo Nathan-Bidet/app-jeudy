@@ -68,6 +68,47 @@ describe('colonne d’actions de la carte', () => {
         expect(actionNames()).toEqual(['', '', '', 'Partiel', 'Dater']);
     });
 
+    it('espace les trois icônes régulièrement dans un seul conteneur centré', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({ can_update: true, can_delete: true, can_point: true })}
+            />,
+        );
+
+        const icons = ['Pointer', 'Modifier', 'Supprimer'].map((name) =>
+            screen.getByRole('button', { name }),
+        );
+
+        // Sœurs d'un même flex : une seule gouttière gouverne les deux écarts,
+        // qui ne peuvent donc pas différer.
+        const [row] = new Set(icons.map((node) => node.parentElement));
+        expect(row).toBeDefined();
+        icons.forEach((node) => expect(node.parentElement).toBe(row));
+
+        expect(row.className).toContain('gap-2');
+        expect(row.className).toContain('justify-center');
+        expect(row.className).not.toContain('ml-auto');
+
+        // Et elles se suivent dans l'ordre attendu.
+        expect(Array.from(row.children)).toEqual(icons);
+    });
+
+    it('garde les icônes sur une seule ligne quand une permission manque', () => {
+        const { rerender } = render(
+            <MaintenanceTaskCard task={baseTask({ can_point: true, can_delete: true })} />,
+        );
+
+        let row = screen.getByRole('button', { name: 'Pointer' }).parentElement;
+        expect(Array.from(row.children)).toHaveLength(2);
+        expect(screen.queryByRole('button', { name: 'Modifier' })).not.toBeInTheDocument();
+
+        rerender(<MaintenanceTaskCard task={baseTask({ can_update: true })} />);
+
+        row = screen.getByRole('button', { name: 'Modifier' }).parentElement;
+        expect(Array.from(row.children)).toHaveLength(1);
+        expect(screen.queryByRole('button', { name: 'Pointer' })).not.toBeInTheDocument();
+    });
+
     it('reflète l’état du pointage définitif sur son icône', () => {
         const { rerender } = render(<MaintenanceTaskCard task={baseTask({ can_point: true })} />);
 

@@ -218,7 +218,12 @@ export default function MaintenanceTaskCard({
                 {hasPrimaryRow || hasStackedActions ? (
                     <div className="flex shrink-0 flex-col gap-2 sm:w-32">
                         {hasPrimaryRow ? (
-                            <div className="flex items-center gap-2">
+                            /* Les trois icônes sont sœurs dans un unique flex :
+                               une seule gouttière, donc des écarts forcément
+                               identiques, et le groupe se centre dans la
+                               colonne. Un ml-auto sur une paire creusait au
+                               contraire l'écart avant Modifier. */
+                            <div className="flex items-center justify-center gap-2">
                                 {task.can_point ? (
                                     <IconActionButton
                                         icon={pointed ? CheckCircle2 : Circle}
@@ -235,26 +240,22 @@ export default function MaintenanceTaskCard({
                                     />
                                 ) : null}
 
-                                {task.can_update || task.can_delete ? (
-                                    <div className="ml-auto flex items-center gap-2">
-                                        {task.can_update ? (
-                                            <IconActionButton
-                                                icon={Pencil}
-                                                label="Modifier"
-                                                onClick={() => onEdit?.(task)}
-                                            />
-                                        ) : null}
+                                {task.can_update ? (
+                                    <IconActionButton
+                                        icon={Pencil}
+                                        label="Modifier"
+                                        onClick={() => onEdit?.(task)}
+                                    />
+                                ) : null}
 
-                                        {task.can_delete ? (
-                                            <IconActionButton
-                                                icon={Trash2}
-                                                label="Supprimer"
-                                                tone="danger"
-                                                disabled={deleting}
-                                                onClick={() => onDelete?.(task)}
-                                            />
-                                        ) : null}
-                                    </div>
+                                {task.can_delete ? (
+                                    <IconActionButton
+                                        icon={Trash2}
+                                        label="Supprimer"
+                                        tone="danger"
+                                        disabled={deleting}
+                                        onClick={() => onDelete?.(task)}
+                                    />
                                 ) : null}
                             </div>
                         ) : null}
