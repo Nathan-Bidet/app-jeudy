@@ -64,7 +64,7 @@ class MaintenanceService
                 ];
             }
 
-            $groups[$groupKey]['tasks'][] = $this->mapTask($task, $canSeeHiddenComments);
+            $groups[$groupKey]['tasks'][] = $this->mapTask($task, $canSeeHiddenComments, $viewer);
         }
 
         $sortedGroups = array_values($groups);
@@ -83,6 +83,30 @@ class MaintenanceService
         ];
     }
 
+    /**
+     * Adresses libres déjà saisies, pour l'autocomplétion du formulaire.
+     * Chaque ligne compte séparément, comme dans À Prévoir.
+     *
+     * @return array<int, string>
+     */
+    public function placeSuggestions(): array
+    {
+        return MaintenanceTask::query()
+            ->whereNotNull('address_free')
+            ->orderByDesc('id')
+            ->limit(3000)
+            ->pluck('address_free')
+            ->flatMap(static function (?string $value): array {
+                $lines = preg_split('/\r\n|\r|\n/', (string) $value) ?: [];
+
+                return array_values(array_filter(array_map('trim', $lines)));
+            })
+            ->unique(static fn (string $line): string => mb_strtolower($line))
+            ->take(500)
+            ->values()
+            ->all();
+    }
+
     public function canSeeHiddenComments(?User $viewer): bool
     {
         return $viewer !== null
@@ -96,7 +120,7 @@ class MaintenanceService
      *
      * @return array<string, mixed>
      */
-    public function mapTask(MaintenanceTask $task, bool $canSeeHiddenComments): array
+    public function mapTask(MaintenanceTask $task, bool $canSeeHiddenComments, ?User $viewer = null): array
     {
         $commentIsWithheld = $task->comment_hidden && ! $canSeeHiddenComments;
 
@@ -105,8 +129,9 @@ class MaintenanceService
             'origin' => $task->origin,
             'is_request' => $task->isRequest(),
             'date' => $task->date?->toDateString(),
+            'date_label' => $task->date?->format('d/m/Y'),
             'fin_date' => $task->fin_date?->toDateString(),
-            'fin_label' => $task->fin_date?->format('d/m'),
+            'fin_label' => $task->fin_date?->format('d/m/Y'),
             'due_date' => $task->due_date?->toDateString(),
             'due_label' => $task->due_date?->format('d/m/Y'),
             'task' => $task->task,
@@ -137,6 +162,10 @@ class MaintenanceService
             'created_by' => $this->personName($task->createdBy),
             'requested_by' => $this->personName($task->requestedBy),
             'updated_by' => $this->personName($task->updatedBy),
+            // Droits calculés par la Policy, tâche par tâche : le frontend
+            // n'a jamais à rejouer la règle métier.
+            'can_update' => $viewer !== null && $viewer->can('update', $task),
+            'can_delete' => $viewer !== null && $viewer->can('delete', $task),
         ];
 
         if (! $commentIsWithheld) {

@@ -533,3 +533,301 @@ it('limite un demandeur à ses propres tâches non pointées', function (): void
 
     expect(MaintenanceTask::query()->whereKey($ownTask->id)->exists())->toBeTrue();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Phase 3 — interface : props, droits par tâche, formulaire
+|--------------------------------------------------------------------------
+*/
+
+it('expose au menu la permission de voir le module', function (): void {
+    $withAccess = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($withAccess)
+        ->get(route('maintenance.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('auth.permissions.maintenance_view', true)
+        );
+
+    // Sur une page accessible à tous, le drapeau reste faux : le menu ne
+    // proposera pas l'entrée.
+    $withoutAccess = maintenanceUser([]);
+
+    $this->actingAs($withoutAccess)
+        ->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('auth.permissions.maintenance_view', false)
+        );
+});
+
+it('fournit au formulaire les utilisateurs de l’annuaire et les dépôts', function (): void {
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $depot = Depot::query()->create([
+        'name' => 'Dépôt Sud',
+        'address_line1' => '3 route de Blois',
+        'postal_code' => '41000',
+        'city' => 'Blois',
+    ]);
+
+    $inactive = User::factory()->create(['is_active' => false, 'sector_id' => $viewer->sector_id]);
+
+    $this->actingAs($viewer)
+        ->get(route('maintenance.index'))
+        ->assertOk()
+        ->assertInertia(function (Assert $page) use ($viewer, $depot, $inactive) {
+            $users = collect($page->toArray()['props']['reference']['assignee_users']);
+            $depots = collect($page->toArray()['props']['reference']['depots']);
+
+            expect($users->pluck('id'))->toContain($viewer->id)
+                ->and($users->pluck('id'))->not->toContain($inactive->id)
+                ->and($depots->pluck('id'))->toContain($depot->id);
+
+            $placeMap = $page->toArray()['props']['reference']['depot_place_map'];
+            expect($placeMap['Dépôt Sud'])->toContain('41000 Blois');
+        });
+});
+
+it('propose en autocomplétion les adresses libres déjà saisies', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    maintenanceTaskFor($user, [
+        'comment_hidden' => false,
+        'address_free' => "Atelier central\n7 impasse du Pont",
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('maintenance.index'))
+        ->assertOk()
+        ->assertInertia(function (Assert $page) {
+            $suggestions = $page->toArray()['props']['reference']['place_suggestions'];
+
+            expect($suggestions)->toContain('Atelier central')
+                ->and($suggestions)->toContain('7 impasse du Pont');
+        });
+});
+
+it('enregistre une période avec les deux dates et la date de fin souhaitée', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($user)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'date' => '2026-09-07',
+            'fin_date' => '2026-09-11',
+            'due_date' => '2026-09-15',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    expect($task->date->toDateString())->toBe('2026-09-07')
+        ->and($task->fin_date->toDateString())->toBe('2026-09-11')
+        ->and($task->due_date->toDateString())->toBe('2026-09-15');
+
+    $this->actingAs($user)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.tasks.0.date_label', '07/09/2026')
+        ->assertJsonPath('groups.0.tasks.0.fin_label', '11/09/2026')
+        ->assertJsonPath('groups.0.tasks.0.due_label', '15/09/2026');
+});
+
+it('affecte un utilisateur de l’annuaire et le restitue dans le groupe', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = User::factory()->create([
+        'first_name' => 'Camille',
+        'last_name' => 'Roux',
+        'is_active' => true,
+        'sector_id' => $user->sector_id,
+    ]);
+
+    $this->actingAs($user)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(MaintenanceTask::query()->sole()->assigneeType())->toBe('user');
+
+    $this->actingAs($user)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.assignee.type', 'user')
+        ->assertJsonPath('groups.0.assignee.name', 'Camille Roux');
+});
+
+it('accepte une personne saisie librement', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($user)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_label_free' => 'SARL Legrand',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(MaintenanceTask::query()->sole()->assigneeType())->toBe('free');
+
+    $this->actingAs($user)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.assignee.type', 'free')
+        ->assertJsonPath('groups.0.assignee.name', 'SARL Legrand');
+});
+
+it('regroupe sous « Non affectée » les tâches sans personne', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($user)
+        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($user)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.assignee.type', 'none')
+        ->assertJsonPath('groups.0.assignee.name', 'Non affectée');
+});
+
+it('construit un lieu cliquable à partir du dépôt et de l’adresse libre', function (): void {
+    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $depot = Depot::query()->create([
+        'name' => 'Dépôt Est',
+        'address_line1' => '9 avenue du Moulin',
+        'postal_code' => '45200',
+        'city' => 'Montargis',
+        'gps_lat' => 47.9989,
+        'gps_lng' => 2.7325,
+    ]);
+
+    $this->actingAs($user)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'depot_id' => $depot->id,
+            'address_free' => 'Bâtiment B',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $response = $this->actingAs($user)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    $task = $response->json('groups.0.tasks.0');
+
+    expect($task['place'])->toContain('9 avenue du Moulin')
+        ->and($task['place'])->toContain('Bâtiment B')
+        ->and($task['depot']['gps'])->toBe(['lat' => 47.9989, 'lng' => 2.7325]);
+});
+
+it('expose les droits de modification tâche par tâche', function (): void {
+    $owner = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $ownTask = maintenanceTaskFor($owner, ['comment_hidden' => false]);
+
+    $someoneElse = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    maintenanceTaskFor($someoneElse, ['comment_hidden' => false, 'task' => 'Tâche d’un autre']);
+
+    $response = $this->actingAs($owner)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    $tasks = collect($response->json('groups'))
+        ->flatMap(fn (array $group): array => $group['tasks'])
+        ->keyBy('id');
+
+    expect($tasks[$ownTask->id]['can_update'])->toBeTrue()
+        ->and($tasks[$ownTask->id]['can_delete'])->toBeTrue();
+
+    $otherId = $tasks->keys()->first(fn (int $id): bool => $id !== $ownTask->id);
+    expect($tasks[$otherId]['can_update'])->toBeFalse()
+        ->and($tasks[$otherId]['can_delete'])->toBeFalse();
+});
+
+it('ne donne aucun droit de modification à un simple lecteur', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    maintenanceTaskFor($author, ['comment_hidden' => false]);
+
+    $viewer = maintenanceUser(['maintenance.view']);
+
+    $response = $this->actingAs($viewer)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    expect($response->json('groups.0.tasks.0.can_update'))->toBeFalse()
+        ->and($response->json('groups.0.tasks.0.can_delete'))->toBeFalse();
+});
+
+it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistre la tâche', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.comment_hidden.view']);
+    $task = maintenanceTaskFor($author, [
+        'comment' => 'Diagnostic confidentiel',
+        'comment_hidden' => true,
+    ]);
+
+    // Un éditeur sans le droit de lecture : le champ commentaire lui arrive vide.
+    $editor = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($editor)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'task' => 'Description corrigée',
+            'comment' => '',
+            'comment_hidden' => false,
+        ]))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $task->refresh();
+
+    expect($task->task)->toBe('Description corrigée')
+        ->and($task->comment)->toBe('Diagnostic confidentiel')
+        ->and($task->comment_hidden)->toBeTrue();
+});
+
+it('laisse un éditeur autorisé modifier un commentaire masqué', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceTaskFor($author, [
+        'comment' => 'Ancien commentaire',
+        'comment_hidden' => true,
+    ]);
+
+    $editor = maintenanceUser([
+        'maintenance.view',
+        'maintenance.create',
+        'maintenance.comment_hidden.view',
+    ]);
+
+    $this->actingAs($editor)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'comment' => 'Nouveau commentaire',
+            'comment_hidden' => false,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task->refresh();
+
+    expect($task->comment)->toBe('Nouveau commentaire')
+        ->and($task->comment_hidden)->toBeFalse();
+});
+
+it('filtre la liste par origine création ou demande', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['task' => 'Création directe']))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['task' => 'Demande']))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['origin' => 'request', 'pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 1)
+        ->assertJsonPath('groups.0.tasks.0.is_request', true);
+
+    $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['origin' => 'creation', 'pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 1)
+        ->assertJsonPath('groups.0.tasks.0.is_request', false);
+});

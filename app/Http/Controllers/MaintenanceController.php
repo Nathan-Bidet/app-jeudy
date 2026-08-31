@@ -96,7 +96,16 @@ class MaintenanceController extends Controller
         $before = $this->auditSnapshot($task);
         $actor = $request->user();
 
-        $task->fill($request->taskAttributes());
+        $attributes = $request->taskAttributes();
+
+        // Un commentaire masqué que l'auteur de la modification n'a pas le droit
+        // de lire ne lui a pas été transmis : il ne doit pas pouvoir l'écraser
+        // avec un champ vide. On conserve l'existant tel quel.
+        if ($task->comment_hidden && ! $this->service->canSeeHiddenComments($actor)) {
+            unset($attributes['comment'], $attributes['comment_hidden']);
+        }
+
+        $task->fill($attributes);
         $task->updated_by_user_id = $actor->id;
         $task->save();
 
@@ -345,6 +354,8 @@ class MaintenanceController extends Controller
             'assignee_users' => $users,
             'depots' => $depots,
             'depot_place_map' => $depotPlaceMap,
+            'depot_name_suggestions' => array_values(array_keys($depotPlaceMap)),
+            'place_suggestions' => $this->service->placeSuggestions(),
         ];
     }
 

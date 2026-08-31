@@ -1,11 +1,250 @@
+import Modal from '@/Components/Modal';
+import MaintenanceTaskCard from '@/Components/Maintenance/TaskCard';
+import MaintenanceTaskModal from '@/Components/Maintenance/TaskModal';
 import AppLayout from '@/Layouts/AppLayout';
-import { Head } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
+import { CalendarDays, Filter, ListChecks, Plus, Search, Send, User } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-/**
- * Écran provisoire : les fondations backend du module sont en place, la
- * véritable interface (liste, formulaire, pointage) arrive en Phase 3.
- */
-export default function MaintenanceIndex({ groups = [], meta = {}, permissions = {} }) {
+const EMPTY_FILTER_STATE = {
+    date_from: '',
+    date_to: '',
+    search: '',
+    origin: '',
+    pointed_filter: 'unpointed',
+};
+
+const EMPTY_FORM_STATE = {
+    date: '',
+    fin_date: '',
+    due_date: '',
+    assignee_user_id: '',
+    assignee_label_free: '',
+    depot_id: '',
+    address_free: '',
+    task: '',
+    comment: '',
+    comment_hidden: false,
+};
+
+function buildFilterState(raw = {}) {
+    return {
+        ...EMPTY_FILTER_STATE,
+        ...Object.fromEntries(
+            Object.entries(raw || {}).map(([key, value]) => [key, value ?? '']),
+        ),
+        pointed_filter: raw?.pointed_filter || 'unpointed',
+    };
+}
+
+function FilterFields({ filters, setFilters, stacked = false }) {
+    return (
+        <>
+            <label className={`relative block ${stacked ? '' : 'lg:w-[165px]'}`}>
+                {stacked ? (
+                    <span className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">Du</span>
+                ) : null}
+                <CalendarDays className={`pointer-events-none absolute left-3 h-4 w-4 text-[var(--app-muted)] ${stacked ? 'top-[calc(50%+8px)] -translate-y-1/2' : 'top-1/2 -translate-y-1/2'}`} />
+                <input
+                    type="date"
+                    value={filters.date_from}
+                    onChange={(event) => setFilters((prev) => ({ ...prev, date_from: event.target.value }))}
+                    className={`${stacked ? 'mt-1' : ''} h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm`}
+                    title="Date début"
+                />
+            </label>
+
+            <label className={`relative block ${stacked ? '' : 'lg:w-[165px]'}`}>
+                {stacked ? (
+                    <span className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">Au</span>
+                ) : null}
+                <CalendarDays className={`pointer-events-none absolute left-3 h-4 w-4 text-[var(--app-muted)] ${stacked ? 'top-[calc(50%+8px)] -translate-y-1/2' : 'top-1/2 -translate-y-1/2'}`} />
+                <input
+                    type="date"
+                    value={filters.date_to}
+                    onChange={(event) => setFilters((prev) => ({ ...prev, date_to: event.target.value }))}
+                    className={`${stacked ? 'mt-1' : ''} h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm`}
+                    title="Date fin"
+                />
+            </label>
+
+            <label className={`relative block ${stacked ? '' : 'lg:w-[150px]'}`}>
+                {stacked ? (
+                    <span className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">Origine</span>
+                ) : null}
+                <User className={`pointer-events-none absolute left-3 h-4 w-4 text-[var(--app-muted)] ${stacked ? 'top-[calc(50%+8px)] -translate-y-1/2' : 'top-1/2 -translate-y-1/2'}`} />
+                <select
+                    value={filters.origin}
+                    onChange={(event) => setFilters((prev) => ({ ...prev, origin: event.target.value }))}
+                    className={`${stacked ? 'mt-1' : ''} h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm`}
+                >
+                    <option value="">Toutes origines</option>
+                    <option value="creation">Créations</option>
+                    <option value="request">Demandes</option>
+                </select>
+            </label>
+
+            <label className={`relative block ${stacked ? '' : 'lg:w-[150px]'}`}>
+                {stacked ? (
+                    <span className="block text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">Statut</span>
+                ) : null}
+                <ListChecks className={`pointer-events-none absolute left-3 h-4 w-4 text-[var(--app-muted)] ${stacked ? 'top-[calc(50%+8px)] -translate-y-1/2' : 'top-1/2 -translate-y-1/2'}`} />
+                <select
+                    value={filters.pointed_filter}
+                    onChange={(event) => setFilters((prev) => ({ ...prev, pointed_filter: event.target.value }))}
+                    className={`${stacked ? 'mt-1' : ''} h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm`}
+                >
+                    <option value="all">Toutes</option>
+                    <option value="unpointed">À faire</option>
+                    <option value="partial">En cours</option>
+                    <option value="pointed">Terminées</option>
+                </select>
+            </label>
+        </>
+    );
+}
+
+export default function MaintenanceIndex({
+    groups = [],
+    meta = {},
+    filters = {},
+    reference = {},
+    permissions = {},
+}) {
+    const [localFilters, setLocalFilters] = useState(() => buildFilterState(filters));
+    const [showMobileFilters, setShowMobileFilters] = useState(false);
+    const [mobileFilterDraft, setMobileFilterDraft] = useState(() => buildFilterState(filters));
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editingTask, setEditingTask] = useState(null);
+    const [taskToDelete, setTaskToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const searchDebounceRef = useRef(null);
+    const searchReadyRef = useRef(false);
+
+    const canCreate = Boolean(permissions?.can_create);
+    const canRequest = Boolean(permissions?.can_request);
+    const canSubmit = canCreate || canRequest;
+    // Sans le droit de créer, toute soumission est une demande.
+    const submitOrigin = canCreate ? 'creation' : 'request';
+
+    const form = useForm({ ...EMPTY_FORM_STATE });
+
+    useEffect(() => {
+        setLocalFilters(buildFilterState(filters));
+    }, [filters]);
+
+    const submitFilters = (nextFilters = localFilters) => {
+        router.get(
+            route('maintenance.index'),
+            {
+                date_from: nextFilters.date_from || undefined,
+                date_to: nextFilters.date_to || undefined,
+                search: nextFilters.search || undefined,
+                origin: nextFilters.origin || undefined,
+                pointed_filter: nextFilters.pointed_filter || undefined,
+            },
+            { preserveState: true, preserveScroll: true, replace: true },
+        );
+    };
+
+    useEffect(() => {
+        if (!searchReadyRef.current) {
+            searchReadyRef.current = true;
+            return undefined;
+        }
+
+        if (searchDebounceRef.current) {
+            window.clearTimeout(searchDebounceRef.current);
+        }
+
+        searchDebounceRef.current = window.setTimeout(() => submitFilters(localFilters), 300);
+
+        return () => {
+            if (searchDebounceRef.current) {
+                window.clearTimeout(searchDebounceRef.current);
+            }
+        };
+    }, [localFilters.search]);
+
+    const resetFilters = () => {
+        setLocalFilters({ ...EMPTY_FILTER_STATE });
+        submitFilters({ ...EMPTY_FILTER_STATE });
+    };
+
+    const openCreate = () => {
+        setEditingTask(null);
+        form.clearErrors();
+        form.setDefaults({ ...EMPTY_FORM_STATE });
+        form.reset();
+        setModalOpen(true);
+    };
+
+    const openEdit = (task) => {
+        setEditingTask(task);
+        form.clearErrors();
+        const next = {
+            date: task.date || '',
+            fin_date: task.fin_date || '',
+            due_date: task.due_date || '',
+            assignee_user_id: task.assignee?.type === 'user' ? String(task.assignee.id) : '',
+            assignee_label_free: task.assignee?.type === 'free' ? task.assignee.name : '',
+            depot_id: task.depot?.id ? String(task.depot.id) : '',
+            address_free: task.address_free || '',
+            task: task.task || '',
+            // Un commentaire masqué non transmis ne doit pas être écrasé par une
+            // chaîne vide : le champ reste vide et le backend conserve l'existant
+            // uniquement si l'utilisateur ne le remplace pas.
+            comment: task.comment_withheld ? '' : (task.comment || ''),
+            comment_hidden: Boolean(task.comment_hidden),
+        };
+        form.setDefaults(next);
+        Object.entries(next).forEach(([key, value]) => form.setData(key, value));
+        setModalOpen(true);
+    };
+
+    const closeModal = () => {
+        setModalOpen(false);
+        setEditingTask(null);
+        form.clearErrors();
+    };
+
+    const submitForm = () => {
+        const options = {
+            preserveScroll: true,
+            onSuccess: () => closeModal(),
+        };
+
+        if (editingTask) {
+            // transform() est persistant : on le neutralise explicitement pour
+            // ne pas rejouer l'origine d'une création précédente.
+            form.transform((data) => data).put(route('maintenance.tasks.update', editingTask.id), options);
+
+            return;
+        }
+
+        form.transform((data) => ({ ...data, origin: submitOrigin }))
+            .post(route('maintenance.tasks.store'), options);
+    };
+
+    const confirmDelete = () => {
+        if (!taskToDelete) return;
+
+        setDeleting(true);
+        router.delete(route('maintenance.tasks.destroy', taskToDelete.id), {
+            preserveScroll: true,
+            onFinish: () => {
+                setDeleting(false);
+                setTaskToDelete(null);
+            },
+        });
+    };
+
+    const createLabel = canCreate ? 'Nouvelle tâche' : 'Demander une tâche';
+    const CreateIcon = canCreate ? Plus : Send;
+
+    const totalTasks = meta?.count_tasks ?? 0;
+
     const pageHeader = (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <h1 className="text-[22px] leading-none">
@@ -13,6 +252,88 @@ export default function MaintenanceIndex({ groups = [], meta = {}, permissions =
                     Maintenance / Entretien
                 </span>
             </h1>
+
+            <div className="flex w-full flex-col gap-2 lg:hidden">
+                <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+                    <input
+                        type="text"
+                        value={localFilters.search}
+                        onChange={(event) => setLocalFilters((prev) => ({ ...prev, search: event.target.value }))}
+                        placeholder="Tâche, personne, lieu…"
+                        className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] py-2 pl-9 pr-3 text-sm"
+                    />
+                </div>
+
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setMobileFilterDraft({ ...localFilters });
+                            setShowMobileFilters(true);
+                        }}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em]"
+                    >
+                        <Filter className="h-3.5 w-3.5" strokeWidth={2.2} />
+                        <span>Filtres</span>
+                    </button>
+
+                    {canSubmit ? (
+                        <button
+                            type="button"
+                            onClick={openCreate}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
+                        >
+                            <CreateIcon className="h-3.5 w-3.5" strokeWidth={2.3} />
+                            <span>{canCreate ? 'Ajouter' : 'Demander'}</span>
+                        </button>
+                    ) : null}
+                </div>
+            </div>
+
+            <div className="hidden w-full flex-col gap-2 lg:flex lg:w-auto">
+                <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-center">
+                    <label className="relative block lg:w-[300px]">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+                        <input
+                            type="text"
+                            value={localFilters.search}
+                            onChange={(event) => setLocalFilters((prev) => ({ ...prev, search: event.target.value }))}
+                            placeholder="Tâche, personne, lieu, dépôt…"
+                            className="h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] py-2 pl-9 pr-3 text-sm"
+                        />
+                    </label>
+
+                    <FilterFields filters={localFilters} setFilters={setLocalFilters} />
+
+                    <button
+                        type="button"
+                        onClick={() => submitFilters(localFilters)}
+                        className="h-10 shrink-0 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
+                    >
+                        Appliquer
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={resetFilters}
+                        className="h-10 shrink-0 rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em]"
+                    >
+                        Effacer
+                    </button>
+
+                    {canSubmit ? (
+                        <button
+                            type="button"
+                            onClick={openCreate}
+                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-light)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
+                        >
+                            <CreateIcon className="h-3.5 w-3.5" strokeWidth={2.3} />
+                            <span>{createLabel}</span>
+                        </button>
+                    ) : null}
+                </div>
+            </div>
         </div>
     );
 
@@ -21,39 +342,143 @@ export default function MaintenanceIndex({ groups = [], meta = {}, permissions =
             <Head title="Maintenance / Entretien" />
 
             <div className="w-full max-w-full space-y-4 px-0 pb-20 pt-2 sm:pt-3 lg:mx-auto lg:max-w-[1460px] lg:pb-8">
-                <section className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-6 shadow-sm">
-                    <p className="text-sm font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                        Module en cours de construction
-                    </p>
-                    <p className="mt-2 text-sm text-[var(--app-text)]">
-                        Les fondations backend sont opérationnelles. L’interface complète (liste, création,
-                        demande et pointage) sera mise en place à l’étape suivante.
-                    </p>
+                {groups.length === 0 ? (
+                    <section className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
+                        Aucune tâche de maintenance pour les filtres sélectionnés.
+                    </section>
+                ) : (
+                    <>
+                        <p className="px-1 text-xs font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
+                            {totalTasks} tâche{totalTasks > 1 ? 's' : ''} • {groups.length} groupe
+                            {groups.length > 1 ? 's' : ''}
+                        </p>
 
-                    <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
-                            <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                                Groupes
-                            </dt>
-                            <dd className="mt-1 text-lg font-extrabold">{meta?.count_groups ?? groups.length}</dd>
+                        <div className="space-y-4">
+                            {groups.map((group) => (
+                                <section
+                                    key={group.key}
+                                    className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-2.5 shadow-sm sm:p-5"
+                                >
+                                    <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3 sm:mb-4">
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-[0.12em] text-[var(--app-muted)]">
+                                                {group.date_label || group.date}
+                                            </p>
+                                            <h3 className="mt-1 text-base font-extrabold text-[var(--app-text)]">
+                                                {group.assignee?.name || 'Non affectée'}
+                                            </h3>
+                                            <p className="mt-1 text-xs text-[var(--app-muted)]">
+                                                {group.assignee?.type === 'user'
+                                                    ? 'Utilisateur'
+                                                    : group.assignee?.type === 'free'
+                                                        ? 'Personne externe'
+                                                        : 'Sans affectation'}{' '}
+                                                • {group.tasks?.length || 0} tâche(s)
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid gap-3">
+                                        {(group.tasks || []).map((task) => (
+                                            <MaintenanceTaskCard
+                                                key={task.id}
+                                                task={task}
+                                                placeResolver={reference?.depot_place_map || {}}
+                                                onEdit={openEdit}
+                                                onDelete={setTaskToDelete}
+                                                deleting={deleting && taskToDelete?.id === task.id}
+                                            />
+                                        ))}
+                                    </div>
+                                </section>
+                            ))}
                         </div>
-                        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
-                            <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                                Tâches
-                            </dt>
-                            <dd className="mt-1 text-lg font-extrabold">{meta?.count_tasks ?? 0}</dd>
-                        </div>
-                        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
-                            <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                                Commentaires masqués
-                            </dt>
-                            <dd className="mt-1 text-lg font-extrabold">
-                                {permissions?.can_view_hidden_comments ? 'Visibles' : 'Masqués'}
-                            </dd>
-                        </div>
-                    </dl>
-                </section>
+                    </>
+                )}
             </div>
+
+            <MaintenanceTaskModal
+                show={modalOpen}
+                onClose={closeModal}
+                form={form}
+                reference={reference}
+                mode={editingTask ? 'edit' : 'create'}
+                origin={submitOrigin}
+                commentWithheld={Boolean(editingTask?.comment_withheld)}
+                onSubmit={submitForm}
+            />
+
+            <Modal show={showMobileFilters} onClose={() => setShowMobileFilters(false)} maxWidth="lg">
+                <div className="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                    <h3 className="text-sm font-black uppercase tracking-[0.08em]">Filtres</h3>
+                </div>
+
+                <div className="grid gap-4 bg-[var(--app-surface)] px-5 py-4">
+                    <FilterFields filters={mobileFilterDraft} setFilters={setMobileFilterDraft} stacked />
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const next = { ...EMPTY_FILTER_STATE };
+                            setMobileFilterDraft(next);
+                            setLocalFilters(next);
+                            submitFilters(next);
+                            setShowMobileFilters(false);
+                        }}
+                        className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em]"
+                    >
+                        Effacer
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const next = { ...mobileFilterDraft };
+                            setLocalFilters(next);
+                            submitFilters(next);
+                            setShowMobileFilters(false);
+                        }}
+                        className="rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
+                    >
+                        Appliquer
+                    </button>
+                </div>
+            </Modal>
+
+            <Modal show={Boolean(taskToDelete)} onClose={() => setTaskToDelete(null)} maxWidth="md">
+                <div className="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                    <h3 className="text-sm font-black uppercase tracking-[0.08em]">Supprimer la tâche</h3>
+                </div>
+
+                <div className="bg-[var(--app-surface)] px-5 py-4 text-sm">
+                    <p>Cette action est définitive. Confirmer la suppression&nbsp;?</p>
+                    {taskToDelete ? (
+                        <p className="mt-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 text-xs">
+                            {taskToDelete.date_label} — {taskToDelete.task}
+                        </p>
+                    ) : null}
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                    <button
+                        type="button"
+                        onClick={() => setTaskToDelete(null)}
+                        disabled={deleting}
+                        className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] disabled:opacity-60"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        type="button"
+                        onClick={confirmDelete}
+                        disabled={deleting}
+                        className="rounded-xl border-2 border-red-300 bg-red-600 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
+                    >
+                        {deleting ? 'Suppression…' : 'Supprimer'}
+                    </button>
+                </div>
+            </Modal>
         </AppLayout>
     );
 }
