@@ -27,6 +27,13 @@ const EMPTY_FORM_STATE = {
     comment_hidden: false,
 };
 
+/** Nombre de tâches d'un groupe, accordé (« 1 tâche », « 2 tâches »). */
+function taskCountLabel(group) {
+    const count = group?.tasks?.length || 0;
+
+    return `${count} tâche${count > 1 ? 's' : ''}`;
+}
+
 function buildFilterState(raw = {}) {
     return {
         ...EMPTY_FILTER_STATE,
@@ -509,19 +516,11 @@ export default function MaintenanceIndex({
                                     <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3 sm:mb-4">
                                         <div>
                                             <p className="text-xs font-black uppercase tracking-[0.12em] text-[var(--app-muted)]">
-                                                {group.date_label || group.date}
+                                                {group.date_label || group.date} • {taskCountLabel(group)}
                                             </p>
                                             <h3 className="mt-1 text-base font-extrabold text-[var(--app-text)]">
                                                 {group.assignee?.name || 'Non affectée'}
                                             </h3>
-                                            <p className="mt-1 text-xs text-[var(--app-muted)]">
-                                                {group.assignee?.type === 'user'
-                                                    ? 'Utilisateur'
-                                                    : group.assignee?.type === 'free'
-                                                        ? 'Personne externe'
-                                                        : 'Sans affectation'}{' '}
-                                                • {group.tasks?.length || 0} tâche(s)
-                                            </p>
                                         </div>
                                     </div>
 

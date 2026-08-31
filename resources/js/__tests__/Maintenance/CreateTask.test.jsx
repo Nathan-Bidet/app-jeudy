@@ -85,12 +85,12 @@ vi.mock('@inertiajs/react', async (importOriginal) => {
 
 const { default: MaintenanceIndex } = await import('@/Pages/Maintenance/Index');
 
-function renderPage(permissions = { can_create: true }) {
+function renderPage(permissions = { can_create: true }, groups = []) {
     formStub = createFormStub();
 
     return render(
         <MaintenanceIndex
-            groups={[]}
+            groups={groups}
             meta={{ count_tasks: 0, count_groups: 0 }}
             filters={{}}
             reference={{ assignee_users: [], depots: [], depot_place_map: {}, place_suggestions: [] }}
@@ -226,5 +226,55 @@ describe('réinitialisation du formulaire de création', () => {
         openCreation();
 
         expect(formStub.clearErrors).toHaveBeenCalled();
+    });
+});
+
+describe('en-tête des groupes', () => {
+    function group(taskCount, assignee) {
+        return {
+            key: `2026-08-31|${assignee.type}`,
+            date: '2026-08-31',
+            date_label: 'lundi 31/08/2026',
+            assignee,
+            tasks: Array.from({ length: taskCount }, (_, i) => ({
+                id: i + 1,
+                task: `Tâche ${i + 1}`,
+                can_update: false,
+                can_delete: false,
+                can_partial_point: false,
+                can_point: false,
+                can_edit_pointing_date: false,
+            })),
+        };
+    }
+
+    it('réunit la date et le nombre de tâches sur une seule ligne', () => {
+        renderPage({ can_create: true }, [group(2, { type: 'user', id: 4, name: 'Alice Blanchet' })]);
+
+        expect(screen.getByText('lundi 31/08/2026 • 2 tâches')).toBeInTheDocument();
+        expect(screen.getByText('Alice Blanchet')).toBeInTheDocument();
+    });
+
+    it('accorde le singulier', () => {
+        renderPage({ can_create: true }, [group(1, { type: 'user', id: 4, name: 'Alice Blanchet' })]);
+
+        expect(screen.getByText('lundi 31/08/2026 • 1 tâche')).toBeInTheDocument();
+        expect(screen.queryByText(/tâche\(s\)/)).not.toBeInTheDocument();
+    });
+
+    it('ne montre plus la ligne de type d’affectation', () => {
+        renderPage({ can_create: true }, [
+            group(2, { type: 'user', id: 4, name: 'Alice Blanchet' }),
+            group(1, { type: 'free', id: null, name: 'SARL Legrand' }),
+            group(1, { type: 'none', id: null, name: 'Non affectée' }),
+        ]);
+
+        expect(screen.queryByText(/^Utilisateur/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Personne externe/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Sans affectation/)).not.toBeInTheDocument();
+
+        // Les noms, eux, restent affichés.
+        expect(screen.getByText('SARL Legrand')).toBeInTheDocument();
+        expect(screen.getByText('Non affectée')).toBeInTheDocument();
     });
 });
