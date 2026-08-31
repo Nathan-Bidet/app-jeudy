@@ -149,12 +149,10 @@ export default function MaintenanceTaskCard({
                 </div>
             ) : null}
 
-            {task.comment_withheld ? (
-                <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-xs italic text-[var(--app-muted)]">
-                    <EyeOff className="h-3.5 w-3.5" strokeWidth={2.2} />
-                    <span>Commentaire masqué</span>
-                </p>
-            ) : task.comment ? (
+            {/* Aucun commentaire transmis : rien n'est rendu, pas même un
+                espace. Une tâche dont le commentaire est masqué se présente
+                exactement comme une tâche sans commentaire. */}
+            {task.comment ? (
                 <p className="mt-2 whitespace-pre-line break-words rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs text-[var(--app-muted)]">
                     {task.comment_hidden ? (
                         <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-[10px] font-black uppercase tracking-[0.06em] text-[var(--app-muted)]">

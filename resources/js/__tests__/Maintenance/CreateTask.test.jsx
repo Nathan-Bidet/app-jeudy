@@ -39,11 +39,25 @@ function createFormStub() {
         errors: {},
         processing: false,
         transformed: null,
-        setData: vi.fn((key, value) => {
-            stub.data[key] = value;
+        setData: vi.fn((keyOrData, value) => {
+            if (typeof keyOrData === 'string') {
+                stub.data[keyOrData] = value;
+            } else {
+                stub.data = { ...keyOrData };
+            }
         }),
-        setDefaults: vi.fn(),
-        reset: vi.fn(),
+        defaults: {},
+        setDefaults: vi.fn((fields) => {
+            // Fusionne, comme Object.assign dans @inertiajs/react.
+            stub.defaults = { ...stub.defaults, ...fields };
+        }),
+        reset: vi.fn(() => {
+            stub.data = { ...stub.defaults };
+        }),
+        // Reproduit la promotion des données en defaults après un succès.
+        succeed: () => {
+            stub.defaults = { ...stub.data };
+        },
         clearErrors: vi.fn(),
         transform: vi.fn((callback) => {
             stub.transformed = callback;
@@ -123,5 +137,94 @@ describe('création d’une tâche Maintenance', () => {
 
         expect(formStub.post).toHaveBeenCalledTimes(1);
         expect(formStub.transformed({})).toEqual({ origin: 'request' });
+    });
+});
+
+describe('réinitialisation du formulaire de création', () => {
+    const filled = {
+        date: '2026-09-10',
+        fin_date: '2026-09-14',
+        due_date: '2026-09-20',
+        assignee_user_id: '7',
+        assignee_label_free: '',
+        depot_id: '3',
+        address_free: 'Atelier central',
+        task: 'Révision compresseur',
+        comment: 'Prévoir la pièce',
+        comment_hidden: true,
+    };
+
+    function openCreation() {
+        fireEvent.click(screen.getByRole('button', { name: /nouvelle tâche/i }));
+    }
+
+    it('repart d’un formulaire vierge après une création réussie', () => {
+        renderPage();
+
+        openCreation();
+        formStub.data = { ...filled };
+        fireEvent.click(screen.getByRole('button', { name: /créer la tâche/i }));
+
+        // Inertia promeut les données envoyées au rang de valeurs par défaut.
+        formStub.succeed();
+        fireEvent.click(screen.getByRole('button', { name: /annuler/i }));
+
+        openCreation();
+
+        expect(formStub.data).toEqual({
+            date: '',
+            fin_date: '',
+            due_date: '',
+            assignee_user_id: '',
+            assignee_label_free: '',
+            depot_id: '',
+            address_free: '',
+            task: '',
+            comment: '',
+            comment_hidden: false,
+        });
+    });
+
+    it('reste vierge sur plusieurs créations successives', () => {
+        renderPage();
+
+        for (let i = 0; i < 3; i++) {
+            openCreation();
+            formStub.data = { ...filled, task: `Tâche ${i}` };
+            fireEvent.click(screen.getByRole('button', { name: /créer la tâche/i }));
+            formStub.succeed();
+            fireEvent.click(screen.getByRole('button', { name: /annuler/i }));
+        }
+
+        openCreation();
+
+        expect(formStub.data.task).toBe('');
+        expect(formStub.data.depot_id).toBe('');
+        expect(formStub.data.comment_hidden).toBe(false);
+    });
+
+    it('repart vierge après une fermeture sans enregistrement', () => {
+        renderPage();
+
+        openCreation();
+        formStub.data = { ...filled };
+        fireEvent.click(screen.getByRole('button', { name: /annuler/i }));
+
+        openCreation();
+
+        expect(formStub.data.task).toBe('');
+        expect(formStub.data.assignee_user_id).toBe('');
+    });
+
+    it('efface les erreurs de la tentative précédente', () => {
+        renderPage();
+
+        openCreation();
+        formStub.errors = { task: 'La description est obligatoire.' };
+        fireEvent.click(screen.getByRole('button', { name: /annuler/i }));
+
+        openCreation();
+
+        expect(formStub.clearErrors).toHaveBeenCalled();
     });
 });

@@ -334,10 +334,11 @@ it('ne transmet jamais un commentaire masqué sans la permission dédiée', func
         ->get(route('maintenance.index'))
         ->assertOk();
 
+    // Indiscernable d'une tâche sans commentaire : ni contenu, ni drapeau
+    // révélant qu'un commentaire existe.
     $response->assertInertia(fn (Assert $page) => $page
-        ->where('groups.0.tasks.0.comment_withheld', true)
-        ->where('groups.0.tasks.0.comment_hidden', true)
-        ->missing('groups.0.tasks.0.comment')
+        ->where('groups.0.tasks.0.comment_hidden', false)
+        ->where('groups.0.tasks.0.comment', null)
     );
 
     // Aucune trace du contenu dans la réponse complète.
@@ -361,8 +362,9 @@ it('ne transmet jamais un commentaire masqué via la réponse JSON', function ()
     expect($response->getContent())->not->toContain('Secret industriel');
 
     $task = $response->json('groups.0.tasks.0');
-    expect($task)->not->toHaveKey('comment')
-        ->and($task['comment_withheld'])->toBeTrue();
+    expect($task['comment'])->toBeNull()
+        ->and($task)->not->toHaveKey('comment_withheld')
+        ->and($task['comment_hidden'])->toBeFalse();
 });
 
 it('transmet le commentaire masqué à qui détient la permission', function (): void {
@@ -378,7 +380,7 @@ it('transmet le commentaire masqué à qui détient la permission', function ():
         ->getJson(route('maintenance.tasks.data'))
         ->assertOk()
         ->assertJsonPath('groups.0.tasks.0.comment', 'Secret industriel')
-        ->assertJsonPath('groups.0.tasks.0.comment_withheld', false);
+        ->assertJsonPath('groups.0.tasks.0.comment_hidden', true);
 });
 
 it('transmet un commentaire non masqué à tout lecteur du module', function (): void {
@@ -394,7 +396,7 @@ it('transmet un commentaire non masqué à tout lecteur du module', function ():
         ->getJson(route('maintenance.tasks.data'))
         ->assertOk()
         ->assertJsonPath('groups.0.tasks.0.comment', 'Information ordinaire')
-        ->assertJsonPath('groups.0.tasks.0.comment_withheld', false);
+        ->assertJsonPath('groups.0.tasks.0.comment_hidden', false);
 });
 
 it('exclut les commentaires masqués de la recherche sans la permission', function (): void {
@@ -1695,8 +1697,7 @@ it('affiche une tâche sans commentaire sans clé fantôme', function (): void {
     $task = $response->json('groups.0.tasks.0');
 
     expect($task['comment'])->toBeNull()
-        ->and($task['comment_hidden'])->toBeFalse()
-        ->and($task['comment_withheld'])->toBeFalse();
+        ->and($task['comment_hidden'])->toBeFalse();
 });
 
 it('garde un nombre de requêtes stable quand la liste grandit', function (): void {
@@ -1876,7 +1877,7 @@ it('vérifie les cinq permissions une à une sur leur route dédiée', function 
             ->firstWhere('id', $task->id);
     };
 
-    expect($findTask($withoutHidden))->not->toHaveKey('comment');
+    expect($findTask($withoutHidden)['comment'])->toBeNull();
     expect($findTask($withHidden)['comment'])->toBe('Masqué');
 
     $withoutPoint = maintenanceUser(['maintenance.view']);
@@ -2067,4 +2068,92 @@ it('confirme le succès par le message flash utilisé partout dans l’applicati
     ])->assertSessionHas('status', 'Tâche Maintenance enregistrée.');
 
     expect(MaintenanceTask::query()->count())->toBe(1);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Invisibilité complète d'un commentaire masqué
+|--------------------------------------------------------------------------
+*/
+
+it('rend une tâche à commentaire masqué indiscernable d’une tâche sans commentaire', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $withHiddenComment = maintenanceTaskFor($author, [
+        'task' => 'Tâche identique',
+        'comment' => 'Contenu strictement confidentiel',
+        'comment_hidden' => true,
+    ]);
+
+    $withoutComment = maintenanceTaskFor($author, [
+        'task' => 'Tâche identique',
+        'comment' => null,
+        'comment_hidden' => false,
+    ]);
+
+    $viewer = maintenanceUser(['maintenance.view']);
+
+    $response = $this->actingAs($viewer)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    $tasks = collect($response->json('groups'))
+        ->flatMap(fn (array $group): array => $group['tasks'])
+        ->keyBy('id');
+
+    $hidden = $tasks[$withHiddenComment->id];
+    $plain = $tasks[$withoutComment->id];
+
+    // On neutralise ce qui diffère légitimement, puis on compare le reste.
+    foreach (['id', 'position'] as $key) {
+        unset($hidden[$key], $plain[$key]);
+    }
+
+    expect($hidden)->toEqual($plain);
+
+    // Aucune clé ne trahit l'existence d'un commentaire.
+    expect($hidden['comment'])->toBeNull()
+        ->and(array_keys($hidden))->not->toContain('comment_withheld')
+        ->and($hidden['comment_hidden'])->toBeFalse();
+});
+
+it('ne laisse rien deviner dans le HTML rendu à un lecteur non autorisé', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    maintenanceTaskFor($author, [
+        'task' => 'Revision annuelle',
+        'comment' => 'Contenu strictement confidentiel',
+        'comment_hidden' => true,
+    ]);
+
+    $viewer = maintenanceUser(['maintenance.view']);
+
+    $html = $this->actingAs($viewer)
+        ->get(route('maintenance.index', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('Revision annuelle')
+        ->and($html)->not->toContain('Contenu strictement confidentiel')
+        ->and($html)->not->toContain('Commentaire masqué')
+        ->and($html)->not->toContain('comment_withheld');
+});
+
+it('conserve l’affichage normal pour un lecteur autorisé', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    maintenanceTaskFor($author, [
+        'comment' => 'Contenu strictement confidentiel',
+        'comment_hidden' => true,
+    ]);
+
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.comment_hidden.view']);
+
+    $task = $this->actingAs($viewer)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups.0.tasks.0');
+
+    // Contenu transmis, et le drapeau de masquage lui reste utile pour
+    // afficher la mention « Masqué » et cocher la case du formulaire.
+    expect($task['comment'])->toBe('Contenu strictement confidentiel')
+        ->and($task['comment_hidden'])->toBeTrue();
 });

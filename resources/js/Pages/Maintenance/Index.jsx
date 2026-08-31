@@ -300,8 +300,13 @@ export default function MaintenanceIndex({
     const openCreate = () => {
         setEditingTask(null);
         form.clearErrors();
+        // Après une soumission réussie, Inertia promeut les données envoyées au
+        // rang de valeurs par défaut du formulaire. reset() restaurerait donc la
+        // tâche qui vient d'être créée. On pose l'état vierge explicitement :
+        // setData avec un objet complet remplace les données sans dépendre de
+        // defaults, et setDefaults réaligne le point de référence.
+        form.setData({ ...EMPTY_FORM_STATE });
         form.setDefaults({ ...EMPTY_FORM_STATE });
-        form.reset();
         setModalOpen(true);
     };
 
@@ -317,14 +322,15 @@ export default function MaintenanceIndex({
             depot_id: task.depot?.id ? String(task.depot.id) : '',
             address_free: task.address_free || '',
             task: task.task || '',
-            // Un commentaire masqué non transmis ne doit pas être écrasé par une
-            // chaîne vide : le champ reste vide et le backend conserve l'existant
-            // uniquement si l'utilisateur ne le remplace pas.
-            comment: task.comment_withheld ? '' : (task.comment || ''),
+            // Un commentaire non transmis arrive vide ici ; le serveur conserve
+            // l'existant plutôt que de le laisser écraser.
+            comment: task.comment || '',
             comment_hidden: Boolean(task.comment_hidden),
         };
+        // Même logique en édition, à ceci près que l'état de référence est la
+        // tâche sélectionnée.
+        form.setData(next);
         form.setDefaults(next);
-        Object.entries(next).forEach(([key, value]) => form.setData(key, value));
         setModalOpen(true);
     };
 
@@ -564,7 +570,6 @@ export default function MaintenanceIndex({
                 reference={reference}
                 mode={editingTask ? 'edit' : 'create'}
                 origin={submitOrigin}
-                commentWithheld={Boolean(editingTask?.comment_withheld)}
                 currentAssignee={
                     editingTask?.assignee?.type === 'user' ? editingTask.assignee : null
                 }

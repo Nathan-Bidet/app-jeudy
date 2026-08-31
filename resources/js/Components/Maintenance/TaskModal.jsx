@@ -21,7 +21,6 @@ export default function MaintenanceTaskModal({
     reference = {},
     mode = 'create',
     origin = 'creation',
-    commentWithheld = false,
     currentAssignee = null,
     onSubmit,
 }) {
@@ -36,8 +35,21 @@ export default function MaintenanceTaskModal({
     // Le contenu du modal défile : une erreur portant sur un champ hors écran
     // passerait inaperçue. On remonte en tête, où le récapitulatif s'affiche.
     useEffect(() => {
-        if (errorMessages.length > 0) {
-            scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        if (errorMessages.length === 0) {
+            return;
+        }
+
+        const node = scrollRef.current;
+        if (!node) {
+            return;
+        }
+
+        // scrollTo n'est pas disponible sur tous les éléments selon
+        // l'environnement : on retombe sur scrollTop.
+        if (typeof node.scrollTo === 'function') {
+            node.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            node.scrollTop = 0;
         }
     }, [errorMessages.length]);
 
@@ -254,12 +266,6 @@ export default function MaintenanceTaskModal({
 
                     <div>
                         <FieldLabel>Commentaire</FieldLabel>
-                        {commentWithheld ? (
-                            <p className="mt-1 rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-soft)] p-2 text-xs text-[var(--app-muted)]">
-                                Le commentaire de cette tâche est masqué et ne vous est pas accessible.
-                                Il sera conservé tel quel : le laisser vide ne l’effacera pas.
-                            </p>
-                        ) : null}
                         <textarea
                             value={form.data.comment || ''}
                             onChange={(event) => form.setData('comment', event.target.value)}
@@ -268,16 +274,11 @@ export default function MaintenanceTaskModal({
                         />
                         <InputError className="mt-1" message={form.errors.comment} />
 
-                        <label
-                            className={`mt-2 inline-flex items-center gap-2 text-sm ${
-                                commentWithheld ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
-                            }`}
-                        >
+                        <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm">
                             <input
                                 type="checkbox"
                                 checked={Boolean(form.data.comment_hidden)}
                                 onChange={(event) => form.setData('comment_hidden', event.target.checked)}
-                                disabled={commentWithheld}
                                 className="h-4 w-4 rounded border-[var(--app-border)]"
                             />
                             <EyeOff className="h-3.5 w-3.5 text-[var(--app-muted)]" strokeWidth={2.2} />

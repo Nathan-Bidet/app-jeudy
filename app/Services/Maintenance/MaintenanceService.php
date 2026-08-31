@@ -171,8 +171,14 @@ class MaintenanceService
             'due_date' => $task->due_date?->toDateString(),
             'due_label' => $task->due_date?->format('d/m/Y'),
             'task' => $task->task,
-            'comment_hidden' => (bool) $task->comment_hidden,
-            'comment_withheld' => $commentIsWithheld,
+            // Pour qui n'a pas le droit de lire les commentaires masqués, une
+            // tâche qui en porte un doit être indiscernable d'une tâche sans
+            // commentaire : ni le contenu, ni le fait qu'il existe, ni un
+            // drapeau inspectable dans les props ne doivent sortir d'ici.
+            'comment_hidden' => $canSeeHiddenComments && (bool) $task->comment_hidden,
+            // Retenu, le commentaire vaut null — exactement comme une tâche qui
+            // n'en a pas. Omettre la clé rendrait l'absence elle-même parlante.
+            'comment' => $commentIsWithheld ? null : $task->comment,
             'assignee' => $this->assigneeMeta($task),
             'depot' => $task->depot ? [
                 'id' => $task->depot->id,
@@ -213,10 +219,6 @@ class MaintenanceService
             'can_point' => $abilities['point'],
             'can_edit_pointing_date' => $abilities['point'],
         ];
-
-        if (! $commentIsWithheld) {
-            $payload['comment'] = $task->comment;
-        }
 
         return $payload;
     }
