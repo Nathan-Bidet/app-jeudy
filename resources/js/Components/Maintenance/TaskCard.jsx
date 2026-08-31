@@ -131,7 +131,7 @@ export default function MaintenanceTaskCard({
                 </div>
             </div>
 
-            <p className="mt-2 whitespace-pre-line text-sm font-semibold text-[var(--app-text)]">{task.task}</p>
+            <p className="mt-2 whitespace-pre-line break-words text-sm font-semibold text-[var(--app-text)]">{task.task}</p>
 
             {task.place ? (
                 <div className="mt-2 text-xs">
@@ -141,6 +141,11 @@ export default function MaintenanceTaskCard({
                         coordinates={task.depot?.gps || null}
                         buttonClassName="font-semibold text-[var(--app-text)]"
                     />
+                    {task.address_free_is_detail ? (
+                        <p className="mt-0.5 whitespace-pre-line break-words pl-5 text-[var(--app-muted)]">
+                            {task.address_free}
+                        </p>
+                    ) : null}
                 </div>
             ) : null}
 
@@ -150,7 +155,7 @@ export default function MaintenanceTaskCard({
                     <span>Commentaire masqué</span>
                 </p>
             ) : task.comment ? (
-                <p className="mt-2 whitespace-pre-line rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs text-[var(--app-muted)]">
+                <p className="mt-2 whitespace-pre-line break-words rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs text-[var(--app-muted)]">
                     {task.comment_hidden ? (
                         <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-[10px] font-black uppercase tracking-[0.06em] text-[var(--app-muted)]">
                             <EyeOff className="h-3 w-3" strokeWidth={2.4} />

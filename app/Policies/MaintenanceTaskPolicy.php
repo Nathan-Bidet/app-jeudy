@@ -51,11 +51,27 @@ class MaintenanceTaskPolicy
      */
     public function update(User $user, MaintenanceTask $task): bool
     {
-        if ($this->create($user)) {
+        return self::decideUpdate(
+            $this->create($user),
+            $this->requestTask($user),
+            $task,
+            (int) $user->id,
+        );
+    }
+
+    /**
+     * Règle de modification isolée des lectures de permissions, pour qu'une
+     * liste puisse résoudre les habilitations une seule fois puis trancher
+     * tâche par tâche sans repasser en base. Unique expression de la règle :
+     * update() ci-dessus s'en sert aussi.
+     */
+    public static function decideUpdate(bool $canCreate, bool $canRequest, MaintenanceTask $task, int $userId): bool
+    {
+        if ($canCreate) {
             return true;
         }
 
-        if (! $this->requestTask($user)) {
+        if (! $canRequest) {
             return false;
         }
 
@@ -63,7 +79,7 @@ class MaintenanceTaskPolicy
             return false;
         }
 
-        return (int) $task->created_by_user_id === (int) $user->id;
+        return (int) $task->created_by_user_id === $userId;
     }
 
     public function delete(User $user, MaintenanceTask $task): bool

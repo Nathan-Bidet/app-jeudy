@@ -22,6 +22,7 @@ export default function MaintenanceTaskModal({
     mode = 'create',
     origin = 'creation',
     commentWithheld = false,
+    currentAssignee = null,
     onSubmit,
 }) {
     const taskRef = useRef(null);
@@ -29,14 +30,25 @@ export default function MaintenanceTaskModal({
     const isEditing = mode === 'edit';
     const isRequest = origin === 'request';
 
-    const userOptions = useMemo(
-        () =>
-            (reference?.assignee_users || []).map((item) => ({
-                value: String(item.id),
-                label: item.sector_name ? `${item.name} (${item.sector_name})` : item.name,
-            })),
-        [reference],
-    );
+    const userOptions = useMemo(() => {
+        const options = (reference?.assignee_users || []).map((item) => ({
+            value: String(item.id),
+            label: item.sector_name ? `${item.name} (${item.sector_name})` : item.name,
+        }));
+
+        // Un compte désactivé depuis l'affectation ne figure plus dans
+        // l'annuaire proposé. Sans cette option de repli, le champ paraîtrait
+        // vide et la personne serait désaffectée sans que personne l'ait voulu.
+        const currentId = currentAssignee?.id ? String(currentAssignee.id) : '';
+        if (currentId && !options.some((option) => option.value === currentId)) {
+            options.unshift({
+                value: currentId,
+                label: `${currentAssignee.name} (compte désactivé)`,
+            });
+        }
+
+        return options;
+    }, [reference, currentAssignee]);
 
     const depotOptions = useMemo(
         () =>

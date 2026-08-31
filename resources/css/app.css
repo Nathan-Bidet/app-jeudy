@@ -195,6 +195,51 @@ html.theme-dark textarea::placeholder {
     color: var(--app-muted);
 }
 
+/* Badges colorés de la page Maintenance : les utilitaires Tailwind clairs
+   (bg-*-50 / text-*-700) ne sont pas couverts par la passerelle générique
+   ci-dessus et formeraient des pavés clairs sur fond sombre. On les convertit
+   en teintes translucides lisibles, sans toucher aux autres modules. */
+html.theme-dark .maintenance-page .bg-emerald-50 {
+    background-color: rgba(16, 185, 129, 0.16) !important;
+}
+
+html.theme-dark .maintenance-page .bg-amber-50 {
+    background-color: rgba(245, 158, 11, 0.16) !important;
+}
+
+html.theme-dark .maintenance-page .bg-sky-50 {
+    background-color: rgba(14, 165, 233, 0.16) !important;
+}
+
+html.theme-dark .maintenance-page .text-emerald-700 {
+    color: #6ee7b7 !important;
+}
+
+html.theme-dark .maintenance-page .text-amber-700 {
+    color: #fcd34d !important;
+}
+
+html.theme-dark .maintenance-page .text-sky-700 {
+    color: #7dd3fc !important;
+}
+
+html.theme-dark .maintenance-page .border-emerald-300,
+html.theme-dark .maintenance-page .border-emerald-500 {
+    border-color: rgba(16, 185, 129, 0.5) !important;
+}
+
+html.theme-dark .maintenance-page .border-amber-300 {
+    border-color: rgba(245, 158, 11, 0.5) !important;
+}
+
+html.theme-dark .maintenance-page .border-sky-400 {
+    border-color: rgba(14, 165, 233, 0.5) !important;
+}
+
+html.theme-dark .maintenance-page .text-red-600 {
+    color: #fca5a5 !important;
+}
+
 .app-toast {
     overflow: hidden;
     border-radius: 12px;

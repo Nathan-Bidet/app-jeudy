@@ -707,8 +707,13 @@ it('construit un lieu cliquable à partir du dépôt et de l’adresse libre', f
 
     $task = $response->json('groups.0.tasks.0');
 
+    // Une seule destination GPS : l'adresse du dépôt. La précision de site
+    // reste affichée à part, sans lien propre, pour ne pas faire ouvrir les
+    // coordonnées du dépôt en cliquant dessus.
     expect($task['place'])->toContain('9 avenue du Moulin')
-        ->and($task['place'])->toContain('Bâtiment B')
+        ->and($task['place'])->not->toContain('Bâtiment B')
+        ->and($task['address_free'])->toBe('Bâtiment B')
+        ->and($task['address_free_is_detail'])->toBeTrue()
         ->and($task['depot']['gps'])->toBe(['lat' => 47.9989, 'lng' => 2.7325]);
 });
 
@@ -1579,4 +1584,157 @@ it('journalise un commentaire visible sans le masquer', function (): void {
         ->value('payload');
 
     expect($payload)->toContain('Commentaire ordinaire');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Phase 6 — cas limites d'affichage et lieux
+|--------------------------------------------------------------------------
+*/
+
+it('affiche sans erreur une tâche affectée à un compte désactivé', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = User::factory()->create([
+        'first_name' => 'Paul',
+        'last_name' => 'Durand',
+        'is_active' => true,
+        'sector_id' => $creator->sector_id,
+    ]);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $assignee->forceFill(['is_active' => false])->save();
+
+    $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.assignee.type', 'user')
+        ->assertJsonPath('groups.0.assignee.name', 'Paul Durand');
+
+    // Le compte désactivé n'est plus proposé à l'affectation : le formulaire
+    // doit donc pouvoir le reconstituer depuis la tâche elle-même.
+    $this->actingAs($creator)
+        ->get(route('maintenance.index', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertInertia(function (Assert $page) use ($assignee) {
+            $ids = collect($page->toArray()['props']['reference']['assignee_users'])->pluck('id');
+            expect($ids)->not->toContain($assignee->id);
+
+            $task = $page->toArray()['props']['groups'][0]['tasks'][0];
+            expect($task['assignee']['id'])->toBe($assignee->id)
+                ->and($task['assignee']['name'])->toBe('Paul Durand');
+        });
+});
+
+it('détache proprement une tâche dont l’utilisateur affecté est supprimé', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = User::factory()->create(['is_active' => true, 'sector_id' => $creator->sector_id]);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $assignee->delete();
+
+    expect(MaintenanceTask::query()->sole()->assignee_user_id)->toBeNull();
+
+    $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.assignee.type', 'none')
+        ->assertJsonPath('groups.0.assignee.name', 'Non affectée');
+});
+
+it('rend cliquable une adresse libre lorsqu’aucun dépôt n’est lié', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'address_free' => '4 rue des Vignes, 45000 Orléans',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $response = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    $task = $response->json('groups.0.tasks.0');
+
+    expect($task['place'])->toBe('4 rue des Vignes, 45000 Orléans')
+        ->and($task['address_free_is_detail'])->toBeFalse()
+        ->and($task['depot'])->toBeNull();
+});
+
+it('n’expose aucun lieu quand ni dépôt ni adresse ne sont renseignés', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['address_free' => null]))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('groups.0.tasks.0.place', null)
+        ->assertJsonPath('groups.0.tasks.0.address_free_is_detail', false);
+});
+
+it('affiche une tâche sans commentaire sans clé fantôme', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['comment' => null]))
+        ->assertSessionHasNoErrors();
+
+    $response = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    $task = $response->json('groups.0.tasks.0');
+
+    expect($task['comment'])->toBeNull()
+        ->and($task['comment_hidden'])->toBeFalse()
+        ->and($task['comment_withheld'])->toBeFalse();
+});
+
+it('garde un nombre de requêtes stable quand la liste grandit', function (): void {
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+
+    $seed = function (int $count) use ($viewer): void {
+        for ($i = 0; $i < $count; $i++) {
+            $assignee = User::factory()->create(['is_active' => true, 'sector_id' => $viewer->sector_id]);
+            $task = new MaintenanceTask;
+            $task->fill([
+                'date' => '2026-09-0'.(($i % 9) + 1),
+                'task' => 'Tâche '.$i,
+                'assignee_user_id' => $assignee->id,
+            ]);
+            $task->created_by_user_id = $viewer->id;
+            $task->save();
+        }
+    };
+
+    $measure = function () use ($viewer): int {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->actingAs($viewer)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk();
+        $count = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return $count;
+    };
+
+    $seed(3);
+    $small = $measure();
+
+    $seed(27);
+    $large = $measure();
+
+    // Les habilitations du lecteur sont résolues une fois pour la liste : le
+    // coût ne doit pas croître avec le nombre de tâches.
+    expect($large)->toBeLessThanOrEqual($small + 5);
 });

@@ -4,6 +4,7 @@ namespace App\Services\Maintenance;
 
 use App\Models\MaintenanceTask;
 use App\Models\User;
+use App\Policies\MaintenanceTaskPolicy;
 use App\Services\Visibility\DateRestrictionScope;
 use App\Support\Access\AccessManager;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,6 +26,11 @@ class MaintenanceService
     public function getGroupedTasks(array $filters, ?User $viewer): array
     {
         $canSeeHiddenComments = $this->canSeeHiddenComments($viewer);
+        // Les habilitations du lecteur ne dépendent pas de la tâche : on les
+        // résout une fois pour toute la liste. Les interroger par tâche via le
+        // Gate coûtait une dizaine de requêtes SQL par ligne, AccessManager
+        // n'étant pas partagé entre deux résolutions.
+        $abilities = $this->viewerAbilities($viewer);
 
         $query = MaintenanceTask::query()->with([
             'assigneeUser:id,name,first_name,last_name,sector_id,email,phone,mobile_phone,internal_number',
@@ -64,7 +70,7 @@ class MaintenanceService
                 ];
             }
 
-            $groups[$groupKey]['tasks'][] = $this->mapTask($task, $canSeeHiddenComments, $viewer);
+            $groups[$groupKey]['tasks'][] = $this->mapTask($task, $canSeeHiddenComments, $viewer, $abilities);
         }
 
         $sortedGroups = array_values($groups);
@@ -107,6 +113,22 @@ class MaintenanceService
             ->all();
     }
 
+    /**
+     * @return array{create: bool, request: bool, point: bool}
+     */
+    private function viewerAbilities(?User $viewer): array
+    {
+        if ($viewer === null) {
+            return ['create' => false, 'request' => false, 'point' => false];
+        }
+
+        return [
+            'create' => $this->accessManager->can($viewer, 'maintenance.create'),
+            'request' => $this->accessManager->can($viewer, 'maintenance.request'),
+            'point' => $this->accessManager->can($viewer, 'maintenance.point'),
+        ];
+    }
+
     public function canSeeHiddenComments(?User $viewer): bool
     {
         return $viewer !== null
@@ -120,8 +142,22 @@ class MaintenanceService
      *
      * @return array<string, mixed>
      */
-    public function mapTask(MaintenanceTask $task, bool $canSeeHiddenComments, ?User $viewer = null): array
-    {
+    /**
+     * @param  array<string, bool>|null  $abilities  habilitations du lecteur déjà résolues
+     */
+    public function mapTask(
+        MaintenanceTask $task,
+        bool $canSeeHiddenComments,
+        ?User $viewer = null,
+        ?array $abilities = null,
+    ): array {
+        $abilities ??= $this->viewerAbilities($viewer);
+        $canUpdate = $viewer !== null && MaintenanceTaskPolicy::decideUpdate(
+            $abilities['create'],
+            $abilities['request'],
+            $task,
+            (int) $viewer->id,
+        );
         $commentIsWithheld = $task->comment_hidden && ! $canSeeHiddenComments;
 
         $payload = [
@@ -148,6 +184,9 @@ class MaintenanceService
             ] : null,
             'address_free' => $task->address_free,
             'place' => $this->placeLabel($task),
+            // Vrai quand l'adresse libre complète un dépôt : elle s'affiche
+            // alors en texte, sans lien GPS propre.
+            'address_free_is_detail' => $task->depot_id !== null && trim((string) $task->address_free) !== '',
             'partially_pointed' => (bool) $task->partially_pointed,
             'partially_pointed_at' => $task->partially_pointed_at?->toIso8601String(),
             'partially_pointed_at_label' => $task->partially_pointed_at?->format('d/m/Y H:i'),
@@ -165,13 +204,14 @@ class MaintenanceService
             'updated_by' => $this->personName($task->updatedBy),
             // Droits calculés par la Policy, tâche par tâche : le frontend
             // n'a jamais à rejouer la règle métier.
-            'can_update' => $viewer !== null && $viewer->can('update', $task),
-            'can_delete' => $viewer !== null && $viewer->can('delete', $task),
+            // delete suit exactement update, comme dans la Policy.
+            'can_update' => $canUpdate,
+            'can_delete' => $canUpdate,
             // Pointage partiel : règle d'identité pure, évaluée hors du Gate
             // pour rester vraie même pour un administrateur.
             'can_partial_point' => $task->isPartialPointableBy($viewer),
-            'can_point' => $viewer !== null && $viewer->can('point', $task),
-            'can_edit_pointing_date' => $viewer !== null && $viewer->can('updatePointingDate', $task),
+            'can_point' => $abilities['point'],
+            'can_edit_pointing_date' => $abilities['point'],
         ];
 
         if (! $commentIsWithheld) {
@@ -317,17 +357,19 @@ class MaintenanceService
     }
 
     /**
-     * Libellé de lieu destiné à l'ouverture GPS : l'adresse du dépôt prime,
-     * l'adresse libre la complète ou la remplace.
+     * Destination unique de l'ouverture GPS.
+     *
+     * Un dépôt lié fournit une adresse géolocalisée : c'est elle la
+     * destination, et l'adresse libre n'est qu'une précision de site
+     * (« Bâtiment B ») affichée à côté. Sans dépôt, l'adresse libre devient
+     * elle-même la destination.
+     *
+     * Renvoyer les deux lignes ensemble ferait ouvrir les coordonnées du dépôt
+     * en cliquant sur la précision de site, ce qui est trompeur.
      */
     private function placeLabel(MaintenanceTask $task): ?string
     {
-        $parts = array_filter([
-            $this->depotAddress($task) ?? $task->depot?->name,
-            $task->address_free,
-        ]);
-
-        $place = trim(implode("\n", $parts));
+        $place = trim((string) ($this->depotAddress($task) ?? $task->depot?->name ?? $task->address_free));
 
         return $place !== '' ? $place : null;
     }
