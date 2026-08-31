@@ -350,18 +350,22 @@ export default function MaintenanceIndex({
                     }),
                 );
             },
+            // transform() est persistant sur le formulaire : on le remet à
+            // l'identité pour que l'origine d'une création ne soit pas rejouée
+            // lors d'une modification ultérieure.
+            onFinish: () => form.transform((data) => data),
         };
 
         if (editingTask) {
-            // transform() est persistant : on le neutralise explicitement pour
-            // ne pas rejouer l'origine d'une création précédente.
-            form.transform((data) => data).put(route('maintenance.tasks.update', editingTask.id), options);
+            form.put(route('maintenance.tasks.update', editingTask.id), options);
 
             return;
         }
 
-        form.transform((data) => ({ ...data, origin: submitOrigin }))
-            .post(route('maintenance.tasks.store'), options);
+        // transform() ne retourne rien dans l'adaptateur React : il se déclare
+        // avant l'envoi, il ne se chaîne pas.
+        form.transform((data) => ({ ...data, origin: submitOrigin }));
+        form.post(route('maintenance.tasks.store'), options);
     };
 
     const confirmDelete = () => {
