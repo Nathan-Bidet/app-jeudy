@@ -3,7 +3,7 @@ import MaintenanceTaskCard from '@/Components/Maintenance/TaskCard';
 import MaintenanceTaskModal from '@/Components/Maintenance/TaskModal';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, useForm } from '@inertiajs/react';
-import { CalendarDays, Filter, ListChecks, Plus, Search, Send, User } from 'lucide-react';
+import { CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, Send, User } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_FILTER_STATE = {
@@ -118,6 +118,13 @@ export default function MaintenanceIndex({
     const [editingTask, setEditingTask] = useState(null);
     const [taskToDelete, setTaskToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
+    // Bascules de pointage appliquées avant la réponse serveur, puis effacées
+    // dès que de nouvelles props arrivent (ou restaurées en cas d'échec).
+    const [pointingOverrides, setPointingOverrides] = useState({});
+    const [savingTaskIds, setSavingTaskIds] = useState({});
+    const [dateTask, setDateTask] = useState(null);
+    const [dateValue, setDateValue] = useState('');
+    const [savingDate, setSavingDate] = useState(false);
 
     const searchDebounceRef = useRef(null);
     const searchReadyRef = useRef(false);
@@ -133,6 +140,106 @@ export default function MaintenanceIndex({
     useEffect(() => {
         setLocalFilters(buildFilterState(filters));
     }, [filters]);
+
+    useEffect(() => {
+        setPointingOverrides({});
+    }, [groups]);
+
+    const displayedGroups = useMemo(() => {
+        if (Object.keys(pointingOverrides).length === 0) {
+            return groups;
+        }
+
+        return groups.map((group) => ({
+            ...group,
+            tasks: (group.tasks || []).map((task) =>
+                pointingOverrides[task.id] ? { ...task, ...pointingOverrides[task.id] } : task,
+            ),
+        }));
+    }, [groups, pointingOverrides]);
+
+    const notifyPointingError = () => {
+        window.dispatchEvent(
+            new CustomEvent('app:toast', {
+                detail: {
+                    type: 'error',
+                    message: "Échec du pointage. L'état précédent a été restauré.",
+                },
+            }),
+        );
+    };
+
+    /**
+     * Les deux pointages sont indépendants : basculer l'un ne touche pas l'autre.
+     * Le serveur reste seul juge — l'override n'est qu'un confort d'affichage.
+     */
+    const sendPointing = (task, routeName, payload, optimistic) => {
+        const taskId = Number(task?.id || 0);
+        if (!taskId || savingTaskIds[taskId]) return;
+
+        setSavingTaskIds((prev) => ({ ...prev, [taskId]: true }));
+        setPointingOverrides((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] || {}), ...optimistic } }));
+
+        router.patch(route(routeName, taskId), payload, {
+            preserveScroll: true,
+            preserveState: true,
+            onError: () => {
+                setPointingOverrides((prev) => {
+                    const next = { ...prev };
+                    delete next[taskId];
+                    return next;
+                });
+                notifyPointingError();
+            },
+            onFinish: () => {
+                setSavingTaskIds((prev) => {
+                    const next = { ...prev };
+                    delete next[taskId];
+                    return next;
+                });
+            },
+        });
+    };
+
+    const togglePartialPoint = (task, partiallyPointed) => {
+        sendPointing(
+            task,
+            'maintenance.tasks.partial-point',
+            { partially_pointed: Boolean(partiallyPointed) },
+            { partially_pointed: Boolean(partiallyPointed) },
+        );
+    };
+
+    const togglePoint = (task, pointed) => {
+        sendPointing(
+            task,
+            'maintenance.tasks.point',
+            { pointed: Boolean(pointed) },
+            { pointed: Boolean(pointed) },
+        );
+    };
+
+    const openPointingDate = (task) => {
+        setDateTask(task);
+        setDateValue(task?.first_pointed_on || '');
+    };
+
+    const savePointingDate = () => {
+        if (!dateTask) return;
+
+        setSavingDate(true);
+        router.patch(
+            route('maintenance.tasks.pointing-date', dateTask.id),
+            { first_pointed_on: dateValue || null },
+            {
+                preserveScroll: true,
+                onFinish: () => {
+                    setSavingDate(false);
+                    setDateTask(null);
+                },
+            },
+        );
+    };
 
     const submitFilters = (nextFilters = localFilters) => {
         router.get(
@@ -342,19 +449,19 @@ export default function MaintenanceIndex({
             <Head title="Maintenance / Entretien" />
 
             <div className="w-full max-w-full space-y-4 px-0 pb-20 pt-2 sm:pt-3 lg:mx-auto lg:max-w-[1460px] lg:pb-8">
-                {groups.length === 0 ? (
+                {displayedGroups.length === 0 ? (
                     <section className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
                         Aucune tâche de maintenance pour les filtres sélectionnés.
                     </section>
                 ) : (
                     <>
                         <p className="px-1 text-xs font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
-                            {totalTasks} tâche{totalTasks > 1 ? 's' : ''} • {groups.length} groupe
-                            {groups.length > 1 ? 's' : ''}
+                            {totalTasks} tâche{totalTasks > 1 ? 's' : ''} • {displayedGroups.length} groupe
+                            {displayedGroups.length > 1 ? 's' : ''}
                         </p>
 
                         <div className="space-y-4">
-                            {groups.map((group) => (
+                            {displayedGroups.map((group) => (
                                 <section
                                     key={group.key}
                                     className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-2.5 shadow-sm sm:p-5"
@@ -386,7 +493,11 @@ export default function MaintenanceIndex({
                                                 placeResolver={reference?.depot_place_map || {}}
                                                 onEdit={openEdit}
                                                 onDelete={setTaskToDelete}
+                                                onTogglePartialPoint={togglePartialPoint}
+                                                onTogglePoint={togglePoint}
+                                                onEditPointingDate={openPointingDate}
                                                 deleting={deleting && taskToDelete?.id === task.id}
+                                                saving={Boolean(savingTaskIds[task.id])}
                                             />
                                         ))}
                                     </div>
@@ -442,6 +553,65 @@ export default function MaintenanceIndex({
                         className="rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
                     >
                         Appliquer
+                    </button>
+                </div>
+            </Modal>
+
+            <Modal show={Boolean(dateTask)} onClose={() => setDateTask(null)} maxWidth="md">
+                <div className="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                    <h3 className="inline-flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em]">
+                        <CalendarCheck className="h-4 w-4" strokeWidth={2.3} />
+                        Date du premier pointage
+                    </h3>
+                </div>
+
+                <div className="space-y-3 bg-[var(--app-surface)] px-5 py-4">
+                    <p className="text-xs text-[var(--app-muted)]">
+                        Date métier, corrigeable à la main. Les horodatages techniques des pointages et leurs
+                        auteurs ne sont pas modifiés.
+                    </p>
+
+                    <input
+                        type="date"
+                        value={dateValue}
+                        onChange={(event) => setDateValue(event.target.value)}
+                        className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                    />
+
+                    {dateTask?.partially_pointed_at_label || dateTask?.pointed_at_label ? (
+                        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 text-xs text-[var(--app-muted)]">
+                            {dateTask?.partially_pointed_at_label ? (
+                                <p>Pointage partiel : {dateTask.partially_pointed_at_label}</p>
+                            ) : null}
+                            {dateTask?.pointed_at_label ? (
+                                <p>Pointage définitif : {dateTask.pointed_at_label}</p>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    {dateValue ? null : (
+                        <p className="text-xs text-[var(--app-muted)]">
+                            Laissée vide, la date restera vide : elle ne sera plus recalculée automatiquement.
+                        </p>
+                    )}
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
+                    <button
+                        type="button"
+                        onClick={() => setDateTask(null)}
+                        disabled={savingDate}
+                        className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] disabled:opacity-60"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        type="button"
+                        onClick={savePointingDate}
+                        disabled={savingDate}
+                        className="rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)] disabled:opacity-60"
+                    >
+                        {savingDate ? 'Enregistrement…' : 'Enregistrer'}
                     </button>
                 </div>
             </Modal>

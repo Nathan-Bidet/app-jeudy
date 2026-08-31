@@ -158,6 +158,7 @@ class MaintenanceService
             'pointed_by' => $this->personName($task->pointedBy),
             'first_pointed_on' => $task->first_pointed_on?->toDateString(),
             'first_pointed_on_label' => $task->first_pointed_on?->format('d/m/Y'),
+            'first_pointed_on_manual' => (bool) $task->first_pointed_on_manual,
             'position' => (int) $task->position,
             'created_by' => $this->personName($task->createdBy),
             'requested_by' => $this->personName($task->requestedBy),
@@ -166,6 +167,11 @@ class MaintenanceService
             // n'a jamais à rejouer la règle métier.
             'can_update' => $viewer !== null && $viewer->can('update', $task),
             'can_delete' => $viewer !== null && $viewer->can('delete', $task),
+            // Pointage partiel : règle d'identité pure, évaluée hors du Gate
+            // pour rester vraie même pour un administrateur.
+            'can_partial_point' => $task->isPartialPointableBy($viewer),
+            'can_point' => $viewer !== null && $viewer->can('point', $task),
+            'can_edit_pointing_date' => $viewer !== null && $viewer->can('updatePointingDate', $task),
         ];
 
         if (! $commentIsWithheld) {

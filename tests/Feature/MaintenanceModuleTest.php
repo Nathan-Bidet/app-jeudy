@@ -463,28 +463,22 @@ it('réserve le pointage définitif à la permission dédiée et horodate le pre
         ->and($task->first_pointed_on->toDateString())->toBe($firstPointedOn);
 });
 
-it('ouvre le pointage partiel aux lecteurs du module', function (): void {
+it('réserve le pointage partiel à la personne affectée', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
     $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $task = maintenanceTaskFor($author, ['comment_hidden' => false]);
+    $task = maintenanceTaskFor($author, [
+        'comment_hidden' => false,
+        'assignee_user_id' => $assignee->id,
+    ]);
 
-    $outsider = maintenanceUser([]);
-
-    $this->actingAs($outsider)
-        ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
-        ->assertForbidden();
-
-    expect($task->refresh()->partially_pointed)->toBeFalse();
-
-    $viewer = maintenanceUser(['maintenance.view']);
-
-    $this->actingAs($viewer)
+    $this->actingAs($assignee)
         ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
         ->assertRedirect();
 
     $task->refresh();
 
     expect($task->partially_pointed)->toBeTrue()
-        ->and($task->partially_pointed_by_user_id)->toBe($viewer->id)
+        ->and($task->partially_pointed_by_user_id)->toBe($assignee->id)
         ->and($task->first_pointed_on?->toDateString())->toBe(now()->toDateString());
 });
 
@@ -830,4 +824,385 @@ it('filtre la liste par origine création ou demande', function (): void {
         ->assertOk()
         ->assertJsonPath('meta.count_tasks', 1)
         ->assertJsonPath('groups.0.tasks.0.is_request', false);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Phase 4 — pointage partiel et définitif
+|--------------------------------------------------------------------------
+*/
+
+function maintenanceAssignedTask(User $assignee, ?User $author = null): MaintenanceTask
+{
+    $author ??= maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    return maintenanceTaskFor($author, [
+        'comment_hidden' => false,
+        'assignee_user_id' => $assignee->id,
+    ]);
+}
+
+it('refuse le pointage partiel à un utilisateur qui n’est pas l’affecté', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+
+    $intruder = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($intruder)
+        ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertForbidden();
+
+    expect($task->refresh()->partially_pointed)->toBeFalse();
+});
+
+it('refuse le pointage partiel au responsable, même avec le pointage définitif', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->actingAs($manager)
+        ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertForbidden();
+
+    expect($task->refresh()->partially_pointed)->toBeFalse();
+});
+
+it('refuse le pointage partiel à un administrateur non affecté', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+
+    $admin = maintenanceUser([]);
+    $admin->assignRole(Role::findOrCreate('admin', 'web'));
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    $this->actingAs($admin)
+        ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertForbidden();
+
+    expect($task->refresh()->partially_pointed)->toBeFalse();
+});
+
+it('interdit tout pointage partiel sur une personne saisie librement', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceTaskFor($author, [
+        'comment_hidden' => false,
+        'assignee_label_free' => 'SARL Legrand',
+    ]);
+
+    foreach ([$author, maintenanceUser(['maintenance.view', 'maintenance.point'])] as $candidate) {
+        $this->actingAs($candidate)
+            ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+            ->assertForbidden();
+    }
+
+    expect($task->refresh()->partially_pointed)->toBeFalse();
+});
+
+it('interdit tout pointage partiel sur une tâche sans affectation', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceTaskFor($author, ['comment_hidden' => false]);
+
+    $this->actingAs($author)
+        ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertForbidden();
+
+    expect($task->refresh()->partially_pointed)->toBeFalse();
+});
+
+it('montre au responsable l’état du partiel sans lui en donner le contrôle', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $before = $this->actingAs($manager)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    expect($before->json('groups.0.tasks.0.partially_pointed'))->toBeFalse()
+        ->and($before->json('groups.0.tasks.0.can_partial_point'))->toBeFalse()
+        ->and($before->json('groups.0.tasks.0.can_point'))->toBeTrue();
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    $after = $this->actingAs($manager)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk();
+
+    expect($after->json('groups.0.tasks.0.partially_pointed'))->toBeTrue()
+        ->and($after->json('groups.0.tasks.0.partially_pointed_by'))->not->toBeNull()
+        ->and($after->json('groups.0.tasks.0.can_partial_point'))->toBeFalse();
+});
+
+it('donne au porteur du pointage définitif un accès permanent à sa case', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    expect($task->pointed)->toBeTrue()
+        ->and($task->pointed_by_user_id)->toBe($manager->id);
+
+    // L'affecté ne peut pas pointer définitivement.
+    $this->actingAs($assignee)
+        ->patchJson(route('maintenance.tasks.point', $task), ['pointed' => false])
+        ->assertForbidden();
+
+    expect($task->refresh()->pointed)->toBeTrue();
+});
+
+it('accepte un pointage définitif avant le partiel, sans les rendre exclusifs', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->travelTo('2026-09-04 09:00:00');
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+
+    $this->travelTo('2026-09-06 09:00:00');
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    // Les deux coexistent : le partiel n'écrase pas le définitif.
+    expect($task->pointed)->toBeTrue()
+        ->and($task->partially_pointed)->toBeTrue()
+        ->and($task->first_pointed_on->toDateString())->toBe('2026-09-04');
+
+    $this->travelBack();
+});
+
+it('accepte un pointage partiel avant le définitif et garde la première date', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->travelTo('2026-09-04 08:00:00');
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    expect($task->refresh()->first_pointed_on->toDateString())->toBe('2026-09-04');
+
+    $this->travelTo('2026-09-06 08:00:00');
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    // Le second pointage ne remplace pas la date métier.
+    expect($task->pointed)->toBeTrue()
+        ->and($task->partially_pointed)->toBeTrue()
+        ->and($task->first_pointed_on->toDateString())->toBe('2026-09-04')
+        ->and($task->pointed_at->toDateString())->toBe('2026-09-06')
+        ->and($task->partially_pointed_at->toDateString())->toBe('2026-09-04');
+
+    $this->travelBack();
+});
+
+it('sépare les horodatages techniques de la date métier', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->travelTo('2026-09-04 10:30:00');
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+    $this->travelBack();
+
+    // Correction manuelle de la date métier : les traces techniques ne bougent pas.
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2026-08-28'])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    expect($task->first_pointed_on->toDateString())->toBe('2026-08-28')
+        ->and($task->first_pointed_on_manual)->toBeTrue()
+        ->and($task->partially_pointed_at->toDateTimeString())->toBe('2026-09-04 10:30:00')
+        ->and($task->partially_pointed_by_user_id)->toBe($assignee->id);
+});
+
+it('réserve la modification de la date métier au pointage définitif', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+
+    $this->actingAs($assignee)
+        ->patchJson(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2026-08-01'])
+        ->assertForbidden();
+
+    expect($task->refresh()->first_pointed_on)->toBeNull();
+});
+
+it('ne recalcule jamais une date métier fixée à la main', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2026-08-20'])
+        ->assertRedirect();
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    expect($task->refresh()->first_pointed_on->toDateString())->toBe('2026-08-20');
+
+    // Vidée manuellement, elle ne se repose pas non plus toute seule.
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => null])
+        ->assertRedirect();
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => false])
+        ->assertRedirect();
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    expect($task->refresh()->first_pointed_on)->toBeNull();
+});
+
+it('n’efface au décochage que les traces du pointage concerné', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->travelTo('2026-09-04 07:00:00');
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+    $this->travelBack();
+
+    // Décocher le définitif laisse le partiel intact.
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => false])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    expect($task->pointed)->toBeFalse()
+        ->and($task->pointed_at)->toBeNull()
+        ->and($task->pointed_by_user_id)->toBeNull()
+        ->and($task->partially_pointed)->toBeTrue()
+        ->and($task->partially_pointed_by_user_id)->toBe($assignee->id)
+        ->and($task->first_pointed_on->toDateString())->toBe('2026-09-04');
+
+    // Décocher le partiel laisse la date métier, seule trace du démarrage.
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => false])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    expect($task->partially_pointed)->toBeFalse()
+        ->and($task->partially_pointed_at)->toBeNull()
+        ->and($task->partially_pointed_by_user_id)->toBeNull()
+        ->and($task->first_pointed_on->toDateString())->toBe('2026-09-04');
+});
+
+it('rejette une requête de pointage forgée sans valeur booléenne', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $task = maintenanceAssignedTask($assignee);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->actingAs($assignee)
+        ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => 'peut-être'])
+        ->assertStatus(422);
+
+    $this->actingAs($manager)
+        ->patchJson(route('maintenance.tasks.point', $task), [])
+        ->assertStatus(422);
+
+    $this->actingAs($manager)
+        ->patchJson(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => 'hier'])
+        ->assertStatus(422);
+
+    $task->refresh();
+
+    expect($task->partially_pointed)->toBeFalse()
+        ->and($task->pointed)->toBeFalse()
+        ->and($task->first_pointed_on)->toBeNull();
+});
+
+it('ignore les champs de pointage glissés dans une modification de tâche', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceAssignedTask($assignee, $author);
+
+    $this->actingAs($author)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'pointed' => true,
+            'partially_pointed' => true,
+            'first_pointed_on' => '2020-01-01',
+            'pointed_by_user_id' => $author->id,
+        ]))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $task->refresh();
+
+    expect($task->pointed)->toBeFalse()
+        ->and($task->partially_pointed)->toBeFalse()
+        ->and($task->first_pointed_on)->toBeNull()
+        ->and($task->pointed_by_user_id)->toBeNull();
+});
+
+it('filtre les tâches par état de pointage', function (): void {
+    $assignee = maintenanceUser(['maintenance.view']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point', 'maintenance.create']);
+
+    $todo = maintenanceAssignedTask($assignee, $manager);
+    $inProgress = maintenanceAssignedTask($assignee, $manager);
+    $done = maintenanceAssignedTask($assignee, $manager);
+
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $inProgress), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $done), ['pointed' => true])
+        ->assertRedirect();
+
+    $collectIds = function (string $filter): array {
+        $response = $this->actingAs(auth()->user())
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => $filter]))
+            ->assertOk();
+
+        return collect($response->json('groups'))
+            ->flatMap(fn (array $group): array => $group['tasks'])
+            ->pluck('id')
+            ->all();
+    };
+
+    $this->actingAs($manager);
+
+    expect($collectIds('unpointed'))->toContain($todo->id, $inProgress->id)
+        ->and($collectIds('unpointed'))->not->toContain($done->id)
+        ->and($collectIds('partial'))->toBe([$inProgress->id])
+        ->and($collectIds('pointed'))->toBe([$done->id]);
 });

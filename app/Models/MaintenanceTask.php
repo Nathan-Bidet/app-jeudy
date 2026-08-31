@@ -39,6 +39,7 @@ class MaintenanceTask extends Model
             'fin_date' => 'date',
             'due_date' => 'date',
             'first_pointed_on' => 'date',
+            'first_pointed_on_manual' => 'boolean',
             'assignee_user_id' => 'integer',
             'depot_id' => 'integer',
             'comment_hidden' => 'boolean',
@@ -110,6 +111,39 @@ class MaintenanceTask extends Model
         }
 
         return 'none';
+    }
+
+    /**
+     * Le pointage partiel appartient à la personne réellement affectée, et à
+     * elle seule. Ce n'est pas une permission mais une règle d'identité : elle
+     * vit donc dans le domaine, hors du Gate, pour qu'aucun contournement
+     * global (y compris le Gate::before administrateur) ne puisse l'annuler.
+     *
+     * Une tâche affectée à un texte libre ou à personne n'est pointable
+     * partiellement par aucun utilisateur.
+     */
+    public function isPartialPointableBy(?User $user): bool
+    {
+        if ($user === null || $this->assignee_user_id === null) {
+            return false;
+        }
+
+        return (int) $this->assignee_user_id === (int) $user->id;
+    }
+
+    /**
+     * Date métier du premier pointage : posée une seule fois, jamais recalculée.
+     * Une valeur fixée à la main par un responsable est définitive.
+     */
+    public function stampFirstPointingDate(): void
+    {
+        if ($this->first_pointed_on_manual) {
+            return;
+        }
+
+        if ($this->first_pointed_on === null) {
+            $this->first_pointed_on = now()->toDateString();
+        }
     }
 
     public function scopePending(Builder $query): Builder

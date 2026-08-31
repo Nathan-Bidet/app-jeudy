@@ -155,18 +155,18 @@ class MaintenanceController extends Controller
         $pointed = (bool) $validated['pointed'];
         $before = $this->auditSnapshot($task);
 
+        // Les deux pointages sont indépendants : le définitif peut précéder ou
+        // suivre le partiel, et ne l'efface pas. Le dépointage ne remet à zéro
+        // que ses propres traces techniques.
         $task->forceFill([
             'pointed' => $pointed,
             'pointed_at' => $pointed ? now() : null,
             'pointed_by_user_id' => $pointed ? $request->user()?->id : null,
-            'partially_pointed' => false,
-            'partially_pointed_at' => null,
-            'partially_pointed_by_user_id' => null,
             'updated_by_user_id' => $request->user()?->id,
         ]);
 
         if ($pointed) {
-            $this->stampFirstPointing($task);
+            $task->stampFirstPointingDate();
         }
 
         $task->save();
@@ -192,7 +192,10 @@ class MaintenanceController extends Controller
 
     public function partialPoint(Request $request, MaintenanceTask $task): RedirectResponse
     {
-        $this->authorize('partialPoint', $task);
+        // Règle d'identité vérifiée hors du Gate : le Gate::before accorde tout
+        // aux administrateurs, ce qui ouvrirait le pointage partiel à un autre
+        // que la personne affectée.
+        abort_unless($task->isPartialPointableBy($request->user()), 403);
 
         $validated = $request->validate([
             'partially_pointed' => ['required', 'boolean'],
@@ -209,7 +212,7 @@ class MaintenanceController extends Controller
         ]);
 
         if ($partiallyPointed) {
-            $this->stampFirstPointing($task);
+            $task->stampFirstPointingDate();
         }
 
         $task->save();
@@ -234,14 +237,46 @@ class MaintenanceController extends Controller
     }
 
     /**
-     * La date métier du premier pointage n'est écrite qu'une fois et n'est
-     * jamais réécrite, y compris si la tâche est dépointée puis repointée.
+     * Correction manuelle de la date métier du premier pointage. Les
+     * horodatages techniques des deux pointages ne sont pas touchés : la
+     * traçabilité de qui a pointé et quand reste intacte.
      */
-    private function stampFirstPointing(MaintenanceTask $task): void
+    public function updatePointingDate(Request $request, MaintenanceTask $task): RedirectResponse
     {
-        if ($task->first_pointed_on === null) {
-            $task->first_pointed_on = now()->toDateString();
-        }
+        $this->authorize('updatePointingDate', $task);
+
+        $validated = $request->validate([
+            'first_pointed_on' => ['present', 'nullable', 'date'],
+        ]);
+
+        $before = $this->auditSnapshot($task);
+        $newDate = $validated['first_pointed_on'] ?? null;
+
+        $task->forceFill([
+            'first_pointed_on' => $newDate,
+            // Une fois posée à la main, la date échappe définitivement au
+            // calcul automatique, y compris si elle est vidée.
+            'first_pointed_on_manual' => true,
+            'updated_by_user_id' => $request->user()?->id,
+        ])->save();
+
+        $this->auditLogService->log([
+            'action' => 'update_maintenance_pointing_date',
+            'module' => self::LOG_MODULE,
+            'description' => sprintf(
+                'Date du premier pointage de la tâche Maintenance #%d fixée manuellement (%s → %s)',
+                (int) $task->id,
+                $before['first_pointed_on'] ?? 'vide',
+                $task->first_pointed_on?->toDateString() ?? 'vide'
+            ),
+            'payload' => [
+                'task_id' => $task->id,
+                'before' => $before,
+                'after' => $this->auditSnapshot($task),
+            ],
+        ]);
+
+        return back()->with('status', 'Date du premier pointage mise à jour.');
     }
 
     private function resolveOrigin(MaintenanceTaskRequest $request, User $actor): string
@@ -404,6 +439,7 @@ class MaintenanceController extends Controller
             'partially_pointed' => (bool) $task->partially_pointed,
             'pointed' => (bool) $task->pointed,
             'first_pointed_on' => $task->first_pointed_on?->toDateString(),
+            'first_pointed_on_manual' => (bool) $task->first_pointed_on_manual,
         ];
     }
 }

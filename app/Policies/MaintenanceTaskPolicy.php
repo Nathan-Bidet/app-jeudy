@@ -85,16 +85,26 @@ class MaintenanceTaskPolicy
     }
 
     /**
-     * Pointage partiel : ouvert à tout utilisateur du module, tant que la tâche
-     * n'a pas été verrouillée par un pointage définitif.
+     * Modification manuelle de la date métier du premier pointage : réservée
+     * aux détenteurs du pointage définitif.
+     */
+    public function updatePointingDate(User $user, MaintenanceTask $task): bool
+    {
+        return $this->can($user, 'maintenance.point');
+    }
+
+    /**
+     * Pointage partiel : réservé à la personne affectée.
+     *
+     * Attention — cette règle est délibérément hors du Gate dans le contrôleur
+     * (voir MaintenanceTask::isPartialPointableBy) : le Gate::before accorde
+     * tout aux administrateurs, ce qui contredirait la règle d'identité. La
+     * méthode reste ici pour rester conforme à l'usage du projet, mais elle
+     * n'est pas la barrière effective.
      */
     public function partialPoint(User $user, MaintenanceTask $task): bool
     {
-        if ($task->pointed) {
-            return false;
-        }
-
-        return $this->can($user, 'maintenance.view');
+        return $task->isPartialPointableBy($user);
     }
 
     private function can(User $user, string $ability): bool

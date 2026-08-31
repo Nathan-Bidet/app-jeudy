@@ -134,6 +134,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::patch('/maintenance/tasks/{task}/partial-point', [MaintenanceController::class, 'partialPoint'])
         ->middleware('sector.access:maintenance.view')
         ->name('maintenance.tasks.partial-point');
+    Route::patch('/maintenance/tasks/{task}/pointing-date', [MaintenanceController::class, 'updatePointingDate'])
+        ->middleware('sector.access:maintenance.point')
+        ->name('maintenance.tasks.pointing-date');
 
     Route::get('/ldt', [LdtController::class, 'index'])
         ->middleware('sector.access:ldt.view')
