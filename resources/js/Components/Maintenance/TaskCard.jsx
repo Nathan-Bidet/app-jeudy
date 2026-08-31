@@ -33,14 +33,15 @@ function ActionButton({ icon: Icon, label, title, onClick, disabled = false, ton
  * Action réduite à son icône. Le libellé reste porté par title et aria-label,
  * pour rester identifiable au survol comme aux technologies d'assistance.
  */
-function IconActionButton({ icon: Icon, label, onClick, disabled = false, tone = 'neutral' }) {
+function IconActionButton({ icon: Icon, label, title, onClick, disabled = false, tone = 'neutral', pressed }) {
     return (
         <button
             type="button"
             onClick={onClick}
             disabled={disabled}
-            title={label}
+            title={title || label}
             aria-label={label}
+            aria-pressed={pressed}
             className={`${ACTION_BASE} h-8 w-8 shrink-0 ${ACTION_TONES[tone]}`}
         >
             <Icon className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -109,10 +110,12 @@ export default function MaintenanceTaskCard({
     const pointed = Boolean(task.pointed);
     // Le responsable voit l'état du partiel sans pouvoir le modifier.
     const showPartialState = !task.can_partial_point && task.can_point;
-    const hasPointingActions =
-        task.can_partial_point || task.can_point || showPartialState || task.first_pointed_on_label
+    // Première ligne : les actions les plus utilisées, réduites à leur icône.
+    const hasPrimaryRow = task.can_point || task.can_update || task.can_delete;
+    // Dessous : les actions libellées, chacune sur sa ligne.
+    const hasStackedActions =
+        task.can_partial_point || showPartialState || task.first_pointed_on_label
         || task.can_edit_pointing_date;
-    const hasEditActions = task.can_update || task.can_delete;
 
     return (
         <article className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 sm:p-4">
@@ -212,34 +215,54 @@ export default function MaintenanceTaskCard({
 
                 {/* Colonne droite : toutes les actions, alignées verticalement.
                     Compactes et en ligne sur mobile, empilées dès sm. */}
-                {hasEditActions || hasPointingActions ? (
+                {hasPrimaryRow || hasStackedActions ? (
                     <div className="flex shrink-0 flex-col gap-2 sm:w-32">
-                        {hasEditActions ? (
+                        {hasPrimaryRow ? (
                             <div className="flex items-center gap-2">
-                                {task.can_update ? (
+                                {task.can_point ? (
                                     <IconActionButton
-                                        icon={Pencil}
-                                        label="Modifier"
-                                        onClick={() => onEdit?.(task)}
+                                        icon={pointed ? CheckCircle2 : Circle}
+                                        label="Pointer"
+                                        title={
+                                            pointed
+                                                ? 'Retirer le pointage définitif'
+                                                : 'Pointer définitivement'
+                                        }
+                                        tone={pointed ? 'active' : 'neutral'}
+                                        pressed={pointed}
+                                        disabled={saving}
+                                        onClick={() => onTogglePoint?.(task, !pointed)}
                                     />
                                 ) : null}
 
-                                {task.can_delete ? (
-                                    <IconActionButton
-                                        icon={Trash2}
-                                        label="Supprimer"
-                                        tone="danger"
-                                        disabled={deleting}
-                                        onClick={() => onDelete?.(task)}
-                                    />
+                                {task.can_update || task.can_delete ? (
+                                    <div className="ml-auto flex items-center gap-2">
+                                        {task.can_update ? (
+                                            <IconActionButton
+                                                icon={Pencil}
+                                                label="Modifier"
+                                                onClick={() => onEdit?.(task)}
+                                            />
+                                        ) : null}
+
+                                        {task.can_delete ? (
+                                            <IconActionButton
+                                                icon={Trash2}
+                                                label="Supprimer"
+                                                tone="danger"
+                                                disabled={deleting}
+                                                onClick={() => onDelete?.(task)}
+                                            />
+                                        ) : null}
+                                    </div>
                                 ) : null}
                             </div>
                         ) : null}
 
-                        {hasPointingActions ? (
+                        {hasStackedActions ? (
                             <div
                                 className={`flex flex-col gap-2 ${
-                                    hasEditActions ? 'border-t border-[var(--app-border)] pt-2' : ''
+                                    hasPrimaryRow ? 'border-t border-[var(--app-border)] pt-2' : ''
                                 }`}
                             >
                                 {task.can_partial_point ? (
@@ -256,20 +279,6 @@ export default function MaintenanceTaskCard({
                                     />
                                 ) : showPartialState ? (
                                     <PartialStateBadge active={partiallyPointed} />
-                                ) : null}
-
-                                {task.can_point ? (
-                                    <PointingButton
-                                        active={pointed}
-                                        label="Pointer"
-                                        title={
-                                            pointed
-                                                ? 'Retirer le pointage définitif'
-                                                : 'Pointer définitivement'
-                                        }
-                                        disabled={saving}
-                                        onClick={() => onTogglePoint?.(task, !pointed)}
-                                    />
                                 ) : null}
 
                                 {task.first_pointed_on_label ? (

@@ -45,7 +45,7 @@ function accessibleNames() {
 afterEach(cleanup);
 
 describe('colonne d’actions de la carte', () => {
-    it('place les icônes en tête puis empile Partiel, Pointer et Dater', () => {
+    it('réunit Pointer, Modifier et Supprimer sur la première ligne', () => {
         render(
             <MaintenanceTaskCard
                 task={baseTask({
@@ -58,13 +58,28 @@ describe('colonne d’actions de la carte', () => {
             />,
         );
 
-        // Modifier et Supprimer n'ont plus de texte : leur nom accessible vient
-        // de aria-label, et reste donc identifiable.
-        expect(screen.getByRole('button', { name: 'Modifier' })).toHaveTextContent('');
-        expect(screen.getByRole('button', { name: 'Supprimer' })).toHaveTextContent('');
+        // Les trois boutons de tête n'ont plus de texte : leur nom accessible
+        // vient de aria-label, et reste donc identifiable.
+        for (const name of ['Pointer', 'Modifier', 'Supprimer']) {
+            expect(screen.getByRole('button', { name })).toHaveTextContent('');
+        }
 
-        expect(accessibleNames()).toEqual(['Modifier', 'Supprimer', 'Partiel', 'Pointer', 'Dater']);
-        expect(actionNames()).toEqual(['', '', 'Partiel', 'Pointer', 'Dater']);
+        expect(accessibleNames()).toEqual(['Pointer', 'Modifier', 'Supprimer', 'Partiel', 'Dater']);
+        expect(actionNames()).toEqual(['', '', '', 'Partiel', 'Dater']);
+    });
+
+    it('reflète l’état du pointage définitif sur son icône', () => {
+        const { rerender } = render(<MaintenanceTaskCard task={baseTask({ can_point: true })} />);
+
+        expect(screen.getByRole('button', { name: 'Pointer' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'Pointer' }))
+            .toHaveAttribute('title', 'Pointer définitivement');
+
+        rerender(<MaintenanceTaskCard task={baseTask({ can_point: true, pointed: true })} />);
+
+        expect(screen.getByRole('button', { name: 'Pointer' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Pointer' }))
+            .toHaveAttribute('title', 'Retirer le pointage définitif');
     });
 
     it('garde le libellé « Dater » et porte la date dans l’infobulle', () => {
@@ -91,7 +106,7 @@ describe('colonne d’actions de la carte', () => {
         render(<MaintenanceTaskCard task={baseTask({ can_point: true, partially_pointed: true })} />);
 
         // L'état du partiel n'est pas un bouton : il ne peut pas être basculé.
-        expect(actionNames()).toEqual(['Pointer']);
+        expect(accessibleNames()).toEqual(['Pointer']);
         expect(screen.getByTitle(/Pointé partiellement par la personne affectée/i)).toBeInTheDocument();
     });
 
