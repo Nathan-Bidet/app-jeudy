@@ -183,7 +183,7 @@ export default function MaintenanceTaskCard({
 
                         {pointed ? (
                             <span className="rounded-md border border-emerald-500 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.06em] text-emerald-700">
-                                Terminée
+                                Pointée
                             </span>
                         ) : null}
                     </div>

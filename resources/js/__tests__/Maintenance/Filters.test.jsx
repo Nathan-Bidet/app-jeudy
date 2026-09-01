@@ -381,3 +381,29 @@ describe('barre d’actions flottante', () => {
         expect(screen.queryByRole('button', { name: 'Effacer les filtres' })).not.toBeInTheDocument();
     });
 });
+
+describe('libellés du filtre de pointage', () => {
+    it('affiche les nouveaux intitulés sans changer les valeurs envoyées', () => {
+        renderPage();
+
+        const select = screen.getAllByDisplayValue('À faire')[0];
+        const labels = Array.from(select.options).map((option) => option.textContent);
+        const values = Array.from(select.options).map((option) => option.value);
+
+        expect(labels).toEqual(['Toutes', 'À faire', 'Effectuées', 'Pointées']);
+        // Les valeurs internes sont inchangées : rien à migrer côté serveur.
+        expect(values).toEqual(['all', 'unpointed', 'partial', 'pointed']);
+    });
+
+    it('envoie toujours partial et pointed au serveur', () => {
+        renderPage();
+
+        const select = screen.getAllByDisplayValue('À faire')[0];
+
+        fireEvent.change(select, { target: { value: 'partial' } });
+        expect(lastVisit()[1].pointed_filter).toBe('partial');
+
+        fireEvent.change(select, { target: { value: 'pointed' } });
+        expect(lastVisit()[1].pointed_filter).toBe('pointed');
+    });
+});

@@ -194,10 +194,19 @@ describe('colonne d’actions de la carte', () => {
         expect(screen.getByRole('button', { name: 'Dater' })).toBeInTheDocument();
     });
 
-    it('n’affiche plus le badge « En cours »', () => {
+    it('ne badge pas une tâche seulement effectuée', () => {
         render(<MaintenanceTaskCard task={baseTask({ partially_pointed: true })} />);
 
         expect(screen.queryByText(/En cours/i)).not.toBeInTheDocument();
+        expect(screen.queryByText('Pointée')).not.toBeInTheDocument();
+    });
+
+    it('badge « Pointée » une tâche pointée définitivement', () => {
+        render(<MaintenanceTaskCard task={baseTask({ pointed: true })} />);
+
+        // Même mot que le filtre « Pointées », pour une terminologie unique.
+        expect(screen.getByText('Pointée')).toBeInTheDocument();
+        expect(screen.queryByText('Terminée')).not.toBeInTheDocument();
     });
 
     it('expose Modifier et Supprimer sur une tâche réelle selon les droits', () => {

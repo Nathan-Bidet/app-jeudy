@@ -140,8 +140,8 @@ function FilterFields({ filters, setFilters, onSelectChange = null, stacked = fa
                 >
                     <option value="all">Toutes</option>
                     <option value="unpointed">À faire</option>
-                    <option value="partial">En cours</option>
-                    <option value="pointed">Terminées</option>
+                    <option value="partial">Effectuées</option>
+                    <option value="pointed">Pointées</option>
                 </select>
             </label>
         </>
