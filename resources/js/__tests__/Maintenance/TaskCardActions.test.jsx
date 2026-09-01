@@ -49,8 +49,6 @@ describe('colonne d’actions de la carte', () => {
         render(
             <MaintenanceTaskCard
                 task={baseTask({
-                    can_update: true,
-                    can_delete: true,
                     can_partial_point: true,
                     can_point: true,
                     can_edit_pointing_date: true,
@@ -59,24 +57,22 @@ describe('colonne d’actions de la carte', () => {
             />,
         );
 
-        // Les trois boutons de tête n'ont plus de texte : leur nom accessible
-        // vient de aria-label, et reste donc identifiable.
-        for (const name of ['Pointer', 'Modifier', 'Supprimer']) {
-            expect(screen.getByRole('button', { name })).toHaveTextContent('');
-        }
-
-        expect(accessibleNames()).toEqual(['Pointer', 'Modifier', 'Supprimer', 'Effectué', 'Dater']);
-        expect(actionNames()).toEqual(['', '', '', 'Effectué', 'Dater']);
+        // Une tâche réelle ne garde que ses actions de pointage : ni Modifier
+        // ni Supprimer, la Policy les refusant désormais.
+        expect(screen.getByRole('button', { name: 'Pointer' })).toHaveTextContent('');
+        expect(accessibleNames()).toEqual(['Pointer', 'Effectué', 'Dater']);
+        expect(actionNames()).toEqual(['', 'Effectué', 'Dater']);
     });
 
     it('espace les trois icônes régulièrement dans un seul conteneur centré', () => {
+        // Modifier et Supprimer ne coexistent plus que sur une demande.
         render(
             <MaintenanceTaskCard
-                task={baseTask({ can_update: true, can_delete: true, can_point: true })}
+                task={baseTask({ is_request: true, can_update: true, can_delete: true })}
             />,
         );
 
-        const icons = ['Pointer', 'Modifier', 'Supprimer'].map((name) =>
+        const icons = ['Modifier', 'Supprimer'].map((name) =>
             screen.getByRole('button', { name }),
         );
 
@@ -96,18 +92,18 @@ describe('colonne d’actions de la carte', () => {
 
     it('garde les icônes sur une seule ligne quand une permission manque', () => {
         const { rerender } = render(
-            <MaintenanceTaskCard task={baseTask({ can_point: true, can_delete: true })} />,
+            <MaintenanceTaskCard task={baseTask({ is_request: true, can_delete: true })} />,
         );
 
-        let row = screen.getByRole('button', { name: 'Pointer' }).parentElement;
-        expect(Array.from(row.children)).toHaveLength(2);
+        let row = screen.getByRole('button', { name: 'Supprimer' }).parentElement;
+        expect(Array.from(row.children)).toHaveLength(1);
         expect(screen.queryByRole('button', { name: 'Modifier' })).not.toBeInTheDocument();
 
-        rerender(<MaintenanceTaskCard task={baseTask({ can_update: true })} />);
+        rerender(<MaintenanceTaskCard task={baseTask({ is_request: true, can_update: true })} />);
 
         row = screen.getByRole('button', { name: 'Modifier' }).parentElement;
         expect(Array.from(row.children)).toHaveLength(1);
-        expect(screen.queryByRole('button', { name: 'Pointer' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument();
     });
 
     it('reflète l’état du pointage définitif sur son icône', () => {
@@ -159,7 +155,7 @@ describe('colonne d’actions de la carte', () => {
             />,
         );
 
-        expect(accessibleNames()).toEqual(['Pointer', 'Modifier']);
+        expect(accessibleNames()).toEqual(['Pointer']);
         expect(screen.queryByText('Effectué')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Dater' })).not.toBeInTheDocument();
     });
@@ -204,6 +200,19 @@ describe('colonne d’actions de la carte', () => {
         expect(screen.queryByText(/En cours/i)).not.toBeInTheDocument();
     });
 
+    it('n’expose ni Modifier ni Supprimer sur une tâche réelle', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({ can_point: true, can_update: true, can_delete: true })}
+            />,
+        );
+
+        // Même si les drapeaux étaient forcés, la carte ne les propose plus.
+        expect(screen.queryByRole('button', { name: 'Modifier' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Pointer' })).toBeInTheDocument();
+    });
+
     it('n’affiche aucune action à un simple lecteur', () => {
         render(<MaintenanceTaskCard task={baseTask()} />);
 
@@ -212,16 +221,12 @@ describe('colonne d’actions de la carte', () => {
     });
 
     it('déclenche les bons gestionnaires sans changer de comportement', () => {
-        const onEdit = vi.fn();
-        const onDelete = vi.fn();
         const onTogglePartialPoint = vi.fn();
         const onTogglePoint = vi.fn();
         const onEditPointingDate = vi.fn();
 
         // Effectué déjà coché : sans quoi Dater resterait masqué, par règle.
         const task = baseTask({
-            can_update: true,
-            can_delete: true,
             can_partial_point: true,
             can_point: true,
             can_edit_pointing_date: true,
@@ -231,22 +236,16 @@ describe('colonne d’actions de la carte', () => {
         render(
             <MaintenanceTaskCard
                 task={task}
-                onEdit={onEdit}
-                onDelete={onDelete}
                 onTogglePartialPoint={onTogglePartialPoint}
                 onTogglePoint={onTogglePoint}
                 onEditPointingDate={onEditPointingDate}
             />,
         );
 
-        fireEvent.click(screen.getByRole('button', { name: 'Modifier' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
         fireEvent.click(screen.getByRole('button', { name: 'Effectué' }));
         fireEvent.click(screen.getByRole('button', { name: 'Pointer' }));
         fireEvent.click(screen.getByRole('button', { name: 'Dater' }));
 
-        expect(onEdit).toHaveBeenCalledWith(task);
-        expect(onDelete).toHaveBeenCalledWith(task);
         // La tâche part déjà marquée effectuée : le clic la débascule.
         expect(onTogglePartialPoint).toHaveBeenCalledWith(task, false);
         expect(onTogglePoint).toHaveBeenCalledWith(task, true);
@@ -256,13 +255,12 @@ describe('colonne d’actions de la carte', () => {
     it('désactive les actions pendant un enregistrement en cours', () => {
         render(
             <MaintenanceTaskCard
-                task={baseTask({ can_delete: true, can_partial_point: true, can_point: true })}
+                task={baseTask({ can_partial_point: true, can_point: true })}
                 deleting
                 saving
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Effectué' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Pointer' })).toBeDisabled();
     });
@@ -408,7 +406,7 @@ describe('carte d’une demande en attente', () => {
             />,
         );
 
-        for (const name of ['Modifier', 'Supprimer', 'Pointer', 'Effectué', 'Dater']) {
+        for (const name of ['Pointer', 'Effectué', 'Dater']) {
             expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
         }
     });

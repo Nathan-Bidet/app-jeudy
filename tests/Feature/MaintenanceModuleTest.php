@@ -490,18 +490,27 @@ it('réserve le pointage partiel à la personne affectée', function (): void {
 |--------------------------------------------------------------------------
 */
 
-it('laisse un créateur modifier n’importe quelle tâche', function (): void {
-    $owner = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $task = maintenanceTaskFor($owner, ['comment_hidden' => false]);
+it('fige une tâche réelle : plus personne ne la modifie ni ne la supprime', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceTaskFor($creator, ['comment_hidden' => false, 'task' => 'Contenu figé']);
 
-    $editor = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    // Même le détenteur du droit de créer ne peut plus y toucher.
+    $this->actingAs($creator)
+        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
+        ->assertForbidden();
 
-    $this->actingAs($editor)
-        ->put(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Description corrigée']))
-        ->assertRedirect();
+    $this->actingAs($creator)
+        ->deleteJson(route('maintenance.tasks.destroy', $task))
+        ->assertForbidden();
 
-    expect($task->refresh()->task)->toBe('Description corrigée')
-        ->and($task->updated_by_user_id)->toBe($editor->id);
+    $pointer = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->actingAs($pointer)
+        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
+        ->assertForbidden();
+
+    expect($task->refresh()->task)->toBe('Contenu figé')
+        ->and(MaintenanceTask::query()->whereKey($task->id)->exists())->toBeTrue();
 });
 
 it('limite un demandeur à ses propres tâches non pointées', function (): void {
@@ -719,27 +728,43 @@ it('construit un lieu cliquable à partir du dépôt et de l’adresse libre', f
         ->and($task['depot']['gps'])->toBe(['lat' => 47.9989, 'lng' => 2.7325]);
 });
 
-it('expose les droits de modification tâche par tâche', function (): void {
+it('n’ouvre modification et suppression qu’au demandeur, sur sa demande', function (): void {
     $owner = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $ownTask = maintenanceTaskFor($owner, ['comment_hidden' => false]);
+    $other = maintenanceUser(['maintenance.view', 'maintenance.request']);
 
-    $someoneElse = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    maintenanceTaskFor($someoneElse, ['comment_hidden' => false, 'task' => 'Tâche d’un autre']);
+    $this->actingAs($owner)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Ma demande']))
+        ->assertSessionHasNoErrors();
 
-    $response = $this->actingAs($owner)
-        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
-        ->assertOk();
+    $this->actingAs($other)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Sa demande']))
+        ->assertSessionHasNoErrors();
 
-    $tasks = collect($response->json('groups'))
-        ->flatMap(fn (array $group): array => $group['tasks'])
-        ->keyBy('id');
+    $mine = MaintenanceTask::query()->where('task', 'Ma demande')->sole();
+    $theirs = MaintenanceTask::query()->where('task', 'Sa demande')->sole();
 
-    expect($tasks[$ownTask->id]['can_update'])->toBeTrue()
-        ->and($tasks[$ownTask->id]['can_delete'])->toBeTrue();
+    $tasks = collect(
+        $this->actingAs($owner)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk()
+            ->json('groups.0.tasks')
+    )->keyBy('id');
 
-    $otherId = $tasks->keys()->first(fn (int $id): bool => $id !== $ownTask->id);
-    expect($tasks[$otherId]['can_update'])->toBeFalse()
-        ->and($tasks[$otherId]['can_delete'])->toBeFalse();
+    expect($tasks[$mine->id]['can_update'])->toBeTrue()
+        ->and($tasks[$mine->id]['can_delete'])->toBeTrue()
+        ->and($tasks[$theirs->id]['can_update'])->toBeFalse()
+        ->and($tasks[$theirs->id]['can_delete'])->toBeFalse();
+
+    // Et la requête directe suit la même règle.
+    $this->actingAs($owner)
+        ->putJson(route('maintenance.tasks.update', $theirs), maintenanceRequestPayload(['task' => 'Intrusion']))
+        ->assertForbidden();
+
+    $this->actingAs($owner)
+        ->deleteJson(route('maintenance.tasks.destroy', $theirs))
+        ->assertForbidden();
+
+    expect($theirs->refresh()->task)->toBe('Sa demande');
 });
 
 it('ne donne aucun droit de modification à un simple lecteur', function (): void {
@@ -757,13 +782,16 @@ it('ne donne aucun droit de modification à un simple lecteur', function (): voi
 });
 
 it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistre la tâche', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.comment_hidden.view']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.request', 'maintenance.comment_hidden.view']);
     $task = maintenanceTaskFor($author, [
         'comment' => 'Diagnostic confidentiel',
         'comment_hidden' => true,
+        'origin' => MaintenanceTask::ORIGIN_REQUEST,
     ]);
+    $task->forceFill(['requested_by_user_id' => $author->id])->save();
 
-    // Un éditeur sans le droit de lecture : le champ commentaire lui arrive vide.
+    // Un éditeur sans le droit de lecture : le champ commentaire lui arrive
+    // vide. Le seul geste qui écrit encore sur une tâche est la conversion.
     $editor = maintenanceUser(['maintenance.view', 'maintenance.create']);
 
     $this->actingAs($editor)
@@ -771,6 +799,7 @@ it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistr
             'task' => 'Description corrigée',
             'comment' => '',
             'comment_hidden' => false,
+            'convert' => true,
         ]))
         ->assertRedirect()
         ->assertSessionHasNoErrors();
@@ -783,11 +812,13 @@ it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistr
 });
 
 it('laisse un éditeur autorisé modifier un commentaire masqué', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.request']);
     $task = maintenanceTaskFor($author, [
         'comment' => 'Ancien commentaire',
         'comment_hidden' => true,
+        'origin' => MaintenanceTask::ORIGIN_REQUEST,
     ]);
+    $task->forceFill(['requested_by_user_id' => $author->id])->save();
 
     $editor = maintenanceUser([
         'maintenance.view',
@@ -799,6 +830,7 @@ it('laisse un éditeur autorisé modifier un commentaire masqué', function (): 
         ->put(route('maintenance.tasks.update', $task), maintenancePayload([
             'comment' => 'Nouveau commentaire',
             'comment_hidden' => false,
+            'convert' => true,
         ]))
         ->assertSessionHasNoErrors();
 
@@ -1327,66 +1359,64 @@ it('ne notifie pas un créateur qui s’affecte la tâche à lui-même', functio
     expect(maintenanceNotificationsOf($creator))->toBeEmpty();
 });
 
-it('informe le nouvel affecté et l’ancien lors d’une réaffectation', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $first = maintenanceUser(['maintenance.view']);
-    $second = maintenanceUser(['maintenance.view']);
-
-    $this->actingAs($creator)
-        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $first->id]))
-        ->assertSessionHasNoErrors();
-
-    $task = MaintenanceTask::query()->sole();
-
-    $this->actingAs($creator)
-        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
-            'assignee_user_id' => $second->id,
-        ]))
-        ->assertSessionHasNoErrors();
-
-    // Comparaison indépendante de l'ordre : deux notifications émises dans la
-    // même seconde ne se relisent pas dans un ordre garanti, et ce test porte
-    // sur qui reçoit quoi, pas sur la chronologie.
-    $firstReasons = maintenanceNotificationsOf($first)->pluck('reason')->sort()->values()->all();
-    $secondReasons = maintenanceNotificationsOf($second)->pluck('reason')->all();
-
-    expect($firstReasons)->toBe(['assigned', 'unassigned'])
-        ->and($secondReasons)->toBe(['assigned']);
-});
-
-it('ne renotifie pas l’affecté pour une modification sans changement métier', function (): void {
+it('informe l’affecté désigné au moment de la transformation', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
     $assignee = maintenanceUser(['maintenance.view']);
 
-    $this->actingAs($creator)
-        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
         ->assertSessionHasNoErrors();
 
     $task = MaintenanceTask::query()->sole();
 
-    // Seul le commentaire change : pas de dérangement.
+    // Une tâche réelle n'étant plus modifiable, l'affectation se joue
+    // désormais au moment de transformer la demande.
     $this->actingAs($creator)
         ->put(route('maintenance.tasks.update', $task), maintenancePayload([
-            'assignee_user_id' => $assignee->id,
-            'comment' => 'Note interne mise à jour',
-        ]))
-        ->assertSessionHasNoErrors();
-
-    expect(maintenanceNotificationsOf($assignee))->toHaveCount(1);
-
-    // La date change : l'affecté doit le savoir.
-    $this->actingAs($creator)
-        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
-            'assignee_user_id' => $assignee->id,
-            'comment' => 'Note interne mise à jour',
-            'date' => '2026-09-20',
+            'date' => '2026-09-08',
             'fin_date' => null,
+            'assignee_user_id' => $assignee->id,
+            'convert' => true,
         ]))
         ->assertSessionHasNoErrors();
 
-    $reasons = maintenanceNotificationsOf($assignee)->pluck('reason')->sort()->values()->all();
+    expect(maintenanceNotificationsOf($assignee)->pluck('reason')->all())->toBe(['assigned'])
+        ->and(maintenanceNotificationsOf($requester)->pluck('reason')->all())->toBe(['converted']);
+});
 
-    expect($reasons)->toBe(['assigned', 'updated']);
+it('ne renotifie pas l’affecté quand aucun champ métier ne change', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+    $task->forceFill(['assignee_user_id' => $assignee->id])->save();
+    $assignee->notifications()->delete();
+
+    // Le demandeur amende sa demande sans toucher à un champ métier.
+    $this->actingAs($requester)
+        ->put(route('maintenance.tasks.update', $task), maintenanceRequestPayload([
+            'assignee_user_id' => $assignee->id,
+            'comment' => 'Note ajoutée',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($assignee))->toBeEmpty();
+
+    // La date souhaitée change : l'affecté doit le savoir.
+    $this->actingAs($requester)
+        ->put(route('maintenance.tasks.update', $task), maintenanceRequestPayload([
+            'assignee_user_id' => $assignee->id,
+            'comment' => 'Note ajoutée',
+            'due_date' => '2026-10-01',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($assignee)->pluck('reason')->all())->toBe(['updated']);
 });
 
 it('ne laisse jamais fuiter un commentaire masqué dans une notification', function (): void {
@@ -1484,20 +1514,23 @@ it('affiche la tâche visée par une notification quel que soit son pointage', f
         );
 });
 
-it('journalise la demande, la modification et le changement d’affectation', function (): void {
+it('journalise la demande, sa transformation et le changement d’affectation', function (): void {
     $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
     $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
     $assignee = maintenanceUser(['maintenance.view']);
 
     $this->actingAs($requester)
-        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
         ->assertSessionHasNoErrors();
 
     $task = MaintenanceTask::query()->sole();
 
     $this->actingAs($manager)
         ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
             'assignee_user_id' => $assignee->id,
+            'convert' => true,
         ]))
         ->assertSessionHasNoErrors();
 
@@ -1505,14 +1538,12 @@ it('journalise la demande, la modification et le changement d’affectation', fu
 
     expect($actions)->toContain('request_maintenance_task')
         ->and($actions)->toContain('update_maintenance_task')
-        ->and($actions)->toContain('reassign_maintenance_task');
+        ->and($actions)->toContain('reassign_maintenance_task')
+        ->and($actions)->toContain('convert_maintenance_request');
 
-    $reassign = DB::table('audit_logs')
-        ->where('action', 'reassign_maintenance_task')
-        ->first();
+    $reassign = DB::table('audit_logs')->where('action', 'reassign_maintenance_task')->first();
 
-    expect($reassign->description)->toContain('utilisateur #'.$assignee->id)
-        ->and($reassign->description)->toContain('non affectée');
+    expect($reassign->description)->toContain('utilisateur #'.$assignee->id);
 });
 
 it('journalise les pointages et la date métier', function (): void {
@@ -2608,4 +2639,170 @@ it('journalise la transformation d’une demande', function (): void {
 
     expect(DB::table('audit_logs')->where('module', 'maintenance')->pluck('action')->all())
         ->toContain('convert_maintenance_request');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Verrouillage des tâches réelles, ouverture des demandes
+|--------------------------------------------------------------------------
+*/
+
+it('laisse le demandeur amender et retirer sa propre demande', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($requester)
+        ->put(route('maintenance.tasks.update', $task), maintenanceRequestPayload([
+            'task' => 'Demande corrigée',
+        ]))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($task->refresh()->task)->toBe('Demande corrigée');
+
+    $this->actingAs($requester)
+        ->delete(route('maintenance.tasks.destroy', $task))
+        ->assertRedirect();
+
+    expect(MaintenanceTask::query()->count())->toBe(0);
+});
+
+it('laisse qui peut créer écarter une demande sans la traiter', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    // Il peut la supprimer, mais pas en modifier le contenu.
+    $this->actingAs($creator)
+        ->putJson(route('maintenance.tasks.update', $task), maintenanceRequestPayload(['task' => 'Réécriture']))
+        ->assertForbidden();
+
+    $this->actingAs($creator)
+        ->delete(route('maintenance.tasks.destroy', $task))
+        ->assertRedirect();
+
+    expect(MaintenanceTask::query()->count())->toBe(0);
+});
+
+it('ferme modification et suppression dès que la demande est transformée', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'convert' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    // Le demandeur n'a plus la main sur ce qui est devenu une tâche.
+    $this->actingAs($requester)
+        ->putJson(route('maintenance.tasks.update', $task), maintenanceRequestPayload(['task' => 'Trop tard']))
+        ->assertForbidden();
+
+    $this->actingAs($requester)
+        ->deleteJson(route('maintenance.tasks.destroy', $task))
+        ->assertForbidden();
+
+    // Ni celui qui l'a transformée.
+    $this->actingAs($creator)
+        ->deleteJson(route('maintenance.tasks.destroy', $task))
+        ->assertForbidden();
+
+    // Et on ne la transforme pas deux fois.
+    $this->actingAs($creator)
+        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['convert' => true]))
+        ->assertForbidden();
+
+    expect(MaintenanceTask::query()->count())->toBe(1);
+});
+
+it('laisse intactes les actions de pointage sur une tâche verrouillée', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    // Le contenu est figé…
+    $this->actingAs($creator)
+        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
+        ->assertForbidden();
+
+    // …mais les trois gestes de pointage fonctionnent toujours.
+    $this->actingAs($assignee)
+        ->patch(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
+        ->assertRedirect();
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
+        ->assertRedirect();
+
+    $this->actingAs($manager)
+        ->patch(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2026-09-01'])
+        ->assertRedirect();
+
+    $task->refresh();
+
+    expect($task->partially_pointed)->toBeTrue()
+        ->and($task->pointed)->toBeTrue()
+        ->and($task->first_pointed_on->toDateString())->toBe('2026-09-01');
+});
+
+it('n’affiche plus modification ni suppression sur une tâche réelle', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    $task = $this->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups.0.tasks.0');
+
+    expect($task['can_update'])->toBeFalse()
+        ->and($task['can_delete'])->toBeFalse()
+        ->and($task['can_convert'])->toBeFalse()
+        // Les actions de pointage restent ouvertes.
+        ->and($task['can_point'])->toBeTrue()
+        ->and($task['can_edit_pointing_date'])->toBeTrue();
+});
+
+it('ouvre suppression mais pas modification à qui peut créer, sur une demande', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $seen = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups.0.tasks.0');
+
+    expect($seen['can_update'])->toBeFalse()
+        ->and($seen['can_delete'])->toBeTrue()
+        ->and($seen['can_convert'])->toBeTrue();
 });

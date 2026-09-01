@@ -113,7 +113,15 @@ class MaintenanceController extends Controller
 
     public function update(MaintenanceTaskRequest $request, MaintenanceTask $task): RedirectResponse
     {
-        $this->authorize('update', $task);
+        // Deux gestes distincts passent par cette route : amender sa propre
+        // demande, ou la transformer en tâche. Chacun a sa règle ; la seconde
+        // n'est pas une modification ordinaire et ne s'appuie donc pas sur
+        // l'autorisation « update », désormais réservée au demandeur.
+        if ($request->wantsConversion()) {
+            $this->authorize('convert', $task);
+        } else {
+            $this->authorize('update', $task);
+        }
 
         $before = $this->auditSnapshot($task);
         $actor = $request->user();
@@ -132,10 +140,6 @@ class MaintenanceController extends Controller
         // conservés, seul converted_at fait sortir la tâche des demandes en
         // attente.
         $converting = $request->wantsConversion();
-
-        if ($converting) {
-            $this->authorize('convert', $task);
-        }
 
         DB::transaction(function () use ($task, $attributes, $actor, $converting): void {
             $task->fill($attributes);

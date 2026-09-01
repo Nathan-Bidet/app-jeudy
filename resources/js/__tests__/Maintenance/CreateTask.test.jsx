@@ -132,7 +132,7 @@ describe('création d’une tâche Maintenance', () => {
     it('soumet une demande quand l’utilisateur ne peut que demander', () => {
         renderPage({ can_create: false, can_request: true });
 
-        fireEvent.click(screen.getByRole('button', { name: /demander une tâche/i }));
+        fireEvent.click(screen.getByRole('button', { name: /nouvelle demande/i }));
         fireEvent.click(screen.getByRole('button', { name: /envoyer la demande/i }));
 
         expect(formStub.post).toHaveBeenCalledTimes(1);

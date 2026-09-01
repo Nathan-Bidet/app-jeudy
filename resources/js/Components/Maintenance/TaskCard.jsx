@@ -137,7 +137,9 @@ export default function MaintenanceTaskCard({
     ].filter(Boolean);
 
     // Première ligne : les actions les plus utilisées, réduites à leur icône.
-    const hasPrimaryRow = ! isPendingRequest && (task.can_point || task.can_update || task.can_delete);
+    // Sur une tâche réelle, seules subsistent les actions de pointage : la
+    // Policy refuse désormais d'y modifier ou d'y supprimer quoi que ce soit.
+    const hasPrimaryRow = ! isPendingRequest && task.can_point;
     // Dessous : les actions libellées, chacune sur sa ligne.
     const hasStackedActions =
         ! isPendingRequest && (task.can_partial_point || showPartialState || showPointingDate);
@@ -245,14 +247,49 @@ export default function MaintenanceTaskCard({
                 {/* Colonne droite : toutes les actions, alignées verticalement.
                     Compactes et en ligne sur mobile, empilées dès sm. */}
                 {isPendingRequest ? (
-                    task.can_convert ? (
+                    /* Une seule zone d'actions, quels que soient les droits :
+                       le demandeur qui peut aussi créer ne voit pas deux
+                       boutons Supprimer. */
+                    task.can_update || task.can_delete || task.can_convert ? (
                         <div className="flex shrink-0 flex-col gap-2 sm:w-32">
-                            <ActionButton
-                                icon={ClipboardCheck}
-                                label="Créer la tâche"
-                                title="Transformer cette demande en tâche"
-                                onClick={() => onConvert?.(task)}
-                            />
+                            {task.can_update || task.can_delete ? (
+                                <div className="flex items-center justify-center gap-2">
+                                    {task.can_update ? (
+                                        <IconActionButton
+                                            icon={Pencil}
+                                            label="Modifier"
+                                            onClick={() => onEdit?.(task)}
+                                        />
+                                    ) : null}
+
+                                    {task.can_delete ? (
+                                        <IconActionButton
+                                            icon={Trash2}
+                                            label="Supprimer"
+                                            tone="danger"
+                                            disabled={deleting}
+                                            onClick={() => onDelete?.(task)}
+                                        />
+                                    ) : null}
+                                </div>
+                            ) : null}
+
+                            {task.can_convert ? (
+                                <div
+                                    className={
+                                        task.can_update || task.can_delete
+                                            ? 'border-t border-[var(--app-border)] pt-2'
+                                            : ''
+                                    }
+                                >
+                                    <ActionButton
+                                        icon={ClipboardCheck}
+                                        label="Créer la tâche"
+                                        title="Transformer cette demande en tâche"
+                                        onClick={() => onConvert?.(task)}
+                                    />
+                                </div>
+                            ) : null}
                         </div>
                     ) : null
                 ) : hasPrimaryRow || hasStackedActions ? (
@@ -277,24 +314,6 @@ export default function MaintenanceTaskCard({
                                         pressed={pointed}
                                         disabled={saving}
                                         onClick={() => onTogglePoint?.(task, !pointed)}
-                                    />
-                                ) : null}
-
-                                {task.can_update ? (
-                                    <IconActionButton
-                                        icon={Pencil}
-                                        label="Modifier"
-                                        onClick={() => onEdit?.(task)}
-                                    />
-                                ) : null}
-
-                                {task.can_delete ? (
-                                    <IconActionButton
-                                        icon={Trash2}
-                                        label="Supprimer"
-                                        tone="danger"
-                                        disabled={deleting}
-                                        onClick={() => onDelete?.(task)}
                                     />
                                 ) : null}
                             </div>

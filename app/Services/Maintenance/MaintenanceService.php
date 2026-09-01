@@ -136,13 +136,17 @@ class MaintenanceService
     private function viewerAbilities(?User $viewer): array
     {
         if ($viewer === null) {
-            return ['create' => false, 'request' => false, 'point' => false];
+            return ['create' => false, 'request' => false, 'point' => false, 'admin' => false];
         }
 
         return [
             'create' => $this->accessManager->can($viewer, 'maintenance.create'),
             'request' => $this->accessManager->can($viewer, 'maintenance.request'),
             'point' => $this->accessManager->can($viewer, 'maintenance.point'),
+            // Le Gate accorde tout à l'administrateur : les drapeaux envoyés à
+            // l'interface doivent dire la même chose que le serveur, sans quoi
+            // un bouton manquerait là où l'action reste possible.
+            'admin' => (bool) $viewer->hasRole('admin'),
         ];
     }
 
@@ -169,12 +173,11 @@ class MaintenanceService
         ?array $abilities = null,
     ): array {
         $abilities ??= $this->viewerAbilities($viewer);
-        $canUpdate = $viewer !== null && MaintenanceTaskPolicy::decideUpdate(
-            $abilities['create'],
-            $abilities['request'],
-            $task,
-            (int) $viewer->id,
-        );
+        $viewerId = (int) ($viewer?->id ?? 0);
+        $canUpdate = $viewer !== null
+            && ($abilities['admin'] || MaintenanceTaskPolicy::decideUpdate($task, $viewerId));
+        $canDelete = $viewer !== null
+            && ($abilities['admin'] || MaintenanceTaskPolicy::decideDelete($abilities['create'], $task, $viewerId));
         $commentIsWithheld = $task->comment_hidden && ! $canSeeHiddenComments;
 
         $payload = [
@@ -230,9 +233,8 @@ class MaintenanceService
             'updated_by' => $this->personName($task->updatedBy),
             // Droits calculés par la Policy, tâche par tâche : le frontend
             // n'a jamais à rejouer la règle métier.
-            // delete suit exactement update, comme dans la Policy.
             'can_update' => $canUpdate,
-            'can_delete' => $canUpdate,
+            'can_delete' => $canDelete,
             // Pointage partiel : règle d'identité pure, évaluée hors du Gate
             // pour rester vraie même pour un administrateur.
             'can_partial_point' => $task->isPartialPointableBy($viewer),

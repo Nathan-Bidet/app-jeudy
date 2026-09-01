@@ -44,47 +44,49 @@ class MaintenanceTaskPolicy
     }
 
     /**
-     * Créer directement donne la main sur toutes les tâches.
-     * Ne disposer que du droit de demander ne permet de reprendre que ses
-     * propres tâches, et seulement tant qu'elles ne sont pas pointées
-     * définitivement.
+     * Modification des informations d'une tâche.
+     *
+     * Une tâche réellement créée n'est plus modifiable : le contenu est figé
+     * une fois la tâche entrée dans le circuit. Seule une demande encore en
+     * attente reste amendable, et par son seul demandeur.
+     *
+     * Les actions de pointage ne passent pas par ici : elles ont leurs propres
+     * règles (point, partialPoint, updatePointingDate) et restent ouvertes.
      */
     public function update(User $user, MaintenanceTask $task): bool
     {
-        return self::decideUpdate(
-            $this->create($user),
-            $this->requestTask($user),
-            $task,
-            (int) $user->id,
-        );
+        return self::decideUpdate($task, (int) $user->id);
     }
 
     /**
-     * Règle de modification isolée des lectures de permissions, pour qu'une
-     * liste puisse résoudre les habilitations une seule fois puis trancher
-     * tâche par tâche sans repasser en base. Unique expression de la règle :
-     * update() ci-dessus s'en sert aussi.
+     * Règles isolées des lectures de permissions, pour qu'une liste résolve les
+     * habilitations une seule fois puis tranche tâche par tâche sans repasser
+     * en base. Unique expression des règles : les méthodes de Policy ci-dessus
+     * s'en servent aussi.
      */
-    public static function decideUpdate(bool $canCreate, bool $canRequest, MaintenanceTask $task, int $userId): bool
+    public static function decideUpdate(MaintenanceTask $task, int $userId): bool
     {
-        if ($canCreate) {
-            return true;
-        }
-
-        if (! $canRequest) {
-            return false;
-        }
-
-        if ($task->pointed) {
-            return false;
-        }
-
-        return (int) $task->created_by_user_id === $userId;
+        return $task->isPendingRequest()
+            && (int) $task->requested_by_user_id === $userId;
     }
 
+    /**
+     * Suppression : réservée aux demandes encore en attente. Leur demandeur
+     * peut retirer la sienne, et qui sait créer les tâches peut écarter une
+     * demande qu'il ne traitera pas. Une tâche réelle ne se supprime plus.
+     */
     public function delete(User $user, MaintenanceTask $task): bool
     {
-        return $this->update($user, $task);
+        return self::decideDelete($this->create($user), $task, (int) $user->id);
+    }
+
+    public static function decideDelete(bool $canCreate, MaintenanceTask $task, int $userId): bool
+    {
+        if (! $task->isPendingRequest()) {
+            return false;
+        }
+
+        return $canCreate || (int) $task->requested_by_user_id === $userId;
     }
 
     public function viewHiddenComment(User $user): bool

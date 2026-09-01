@@ -3,7 +3,7 @@ import MaintenanceTaskCard from '@/Components/Maintenance/TaskCard';
 import MaintenanceTaskModal from '@/Components/Maintenance/TaskModal';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, useForm } from '@inertiajs/react';
-import { CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, Send, User, UserRound } from 'lucide-react';
+import { CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, User, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_FILTER_STATE = {
@@ -460,8 +460,9 @@ export default function MaintenanceIndex({
         });
     };
 
-    const createLabel = canCreate ? 'Nouvelle tâche' : 'Demander une tâche';
-    const CreateIcon = canCreate ? Plus : Send;
+    const createLabel = canCreate ? 'Nouvelle tâche' : 'Nouvelle demande';
+    // Même icône dans les deux cas : le geste est le même, ouvrir le formulaire.
+    const CreateIcon = Plus;
 
     const totalTasks = meta?.count_tasks ?? 0;
 
@@ -502,10 +503,10 @@ export default function MaintenanceIndex({
                         <button
                             type="button"
                             onClick={openCreate}
-                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)] hover:brightness-95 disabled:opacity-60"
                         >
                             <CreateIcon className="h-3.5 w-3.5" strokeWidth={2.3} />
-                            <span>{canCreate ? 'Ajouter' : 'Demander'}</span>
+                            <span>{canCreate ? 'Ajouter' : 'Demande'}</span>
                         </button>
                     ) : null}
                 </div>
@@ -546,7 +547,7 @@ export default function MaintenanceIndex({
                         <button
                             type="button"
                             onClick={openCreate}
-                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-light)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
+                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)] hover:brightness-95 disabled:opacity-60"
                         >
                             <CreateIcon className="h-3.5 w-3.5" strokeWidth={2.3} />
                             <span>{createLabel}</span>
