@@ -155,7 +155,7 @@ describe('colonne d’actions de la carte', () => {
             />,
         );
 
-        expect(accessibleNames()).toEqual(['Pointer']);
+        expect(accessibleNames()).toEqual(['Pointer', 'Modifier']);
         expect(screen.queryByText('Effectué')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Dater' })).not.toBeInTheDocument();
     });
@@ -200,17 +200,22 @@ describe('colonne d’actions de la carte', () => {
         expect(screen.queryByText(/En cours/i)).not.toBeInTheDocument();
     });
 
-    it('n’expose ni Modifier ni Supprimer sur une tâche réelle', () => {
-        render(
+    it('expose Modifier et Supprimer sur une tâche réelle selon les droits', () => {
+        const { rerender } = render(
             <MaintenanceTaskCard
                 task={baseTask({ can_point: true, can_update: true, can_delete: true })}
             />,
         );
 
-        // Même si les drapeaux étaient forcés, la carte ne les propose plus.
+        expect(accessibleNames()).toEqual(['Pointer', 'Modifier', 'Supprimer']);
+
+        // Sans le droit de créer, le serveur renvoie les drapeaux à faux et la
+        // carte n'affiche plus que le pointage.
+        rerender(<MaintenanceTaskCard task={baseTask({ can_point: true })} />);
+
+        expect(accessibleNames()).toEqual(['Pointer']);
         expect(screen.queryByRole('button', { name: 'Modifier' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Pointer' })).toBeInTheDocument();
     });
 
     it('n’affiche aucune action à un simple lecteur', () => {

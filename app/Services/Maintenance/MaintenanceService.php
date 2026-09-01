@@ -174,10 +174,11 @@ class MaintenanceService
     ): array {
         $abilities ??= $this->viewerAbilities($viewer);
         $viewerId = (int) ($viewer?->id ?? 0);
-        $canUpdate = $viewer !== null
-            && ($abilities['admin'] || MaintenanceTaskPolicy::decideUpdate($task, $viewerId));
-        $canDelete = $viewer !== null
-            && ($abilities['admin'] || MaintenanceTaskPolicy::decideDelete($abilities['create'], $task, $viewerId));
+        $canManage = $viewer !== null && ($abilities['admin'] || MaintenanceTaskPolicy::decideManage(
+            $abilities['create'],
+            $task,
+            $viewerId,
+        ));
         $commentIsWithheld = $task->comment_hidden && ! $canSeeHiddenComments;
 
         $payload = [
@@ -233,8 +234,9 @@ class MaintenanceService
             'updated_by' => $this->personName($task->updatedBy),
             // Droits calculés par la Policy, tâche par tâche : le frontend
             // n'a jamais à rejouer la règle métier.
-            'can_update' => $canUpdate,
-            'can_delete' => $canDelete,
+            // Modifier et supprimer partagent la même règle.
+            'can_update' => $canManage,
+            'can_delete' => $canManage,
             // Pointage partiel : règle d'identité pure, évaluée hors du Gate
             // pour rester vraie même pour un administrateur.
             'can_partial_point' => $task->isPartialPointableBy($viewer),

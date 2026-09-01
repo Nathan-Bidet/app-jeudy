@@ -490,27 +490,49 @@ it('réserve le pointage partiel à la personne affectée', function (): void {
 |--------------------------------------------------------------------------
 */
 
-it('fige une tâche réelle : plus personne ne la modifie ni ne la supprime', function (): void {
+it('ferme modification et suppression à qui ne peut pas créer', function (): void {
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $task = maintenanceTaskFor($creator, ['comment_hidden' => false, 'task' => 'Contenu figé']);
+    $task = maintenanceTaskFor($creator, ['comment_hidden' => false, 'task' => 'Contenu protégé']);
 
-    // Même le détenteur du droit de créer ne peut plus y toucher.
-    $this->actingAs($creator)
-        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
-        ->assertForbidden();
+    // Ni un lecteur, ni un pointeur, ni un simple demandeur n'y touchent.
+    foreach ([
+        maintenanceUser(['maintenance.view']),
+        maintenanceUser(['maintenance.view', 'maintenance.point']),
+        maintenanceUser(['maintenance.view', 'maintenance.request']),
+    ] as $outsider) {
+        $this->actingAs($outsider)
+            ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
+            ->assertForbidden();
 
-    $this->actingAs($creator)
-        ->deleteJson(route('maintenance.tasks.destroy', $task))
-        ->assertForbidden();
+        $this->actingAs($outsider)
+            ->deleteJson(route('maintenance.tasks.destroy', $task))
+            ->assertForbidden();
+    }
 
-    $pointer = maintenanceUser(['maintenance.view', 'maintenance.point']);
-
-    $this->actingAs($pointer)
-        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
-        ->assertForbidden();
-
-    expect($task->refresh()->task)->toBe('Contenu figé')
+    expect($task->refresh()->task)->toBe('Contenu protégé')
         ->and(MaintenanceTask::query()->whereKey($task->id)->exists())->toBeTrue();
+});
+
+it('rend toute tâche modifiable et supprimable à qui peut créer', function (): void {
+    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $task = maintenanceTaskFor($author, ['comment_hidden' => false]);
+
+    // Un autre détenteur du droit de créer : la tâche n'est pas la sienne.
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($manager)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Description corrigée']))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($task->refresh()->task)->toBe('Description corrigée')
+        ->and($task->updated_by_user_id)->toBe($manager->id);
+
+    $this->actingAs($manager)
+        ->delete(route('maintenance.tasks.destroy', $task))
+        ->assertRedirect();
+
+    expect(MaintenanceTask::query()->count())->toBe(0);
 });
 
 it('limite un demandeur à ses propres tâches non pointées', function (): void {
@@ -2672,7 +2694,7 @@ it('laisse le demandeur amender et retirer sa propre demande', function (): void
     expect(MaintenanceTask::query()->count())->toBe(0);
 });
 
-it('laisse qui peut créer écarter une demande sans la traiter', function (): void {
+it('laisse qui peut créer amender ou écarter une demande sans la traiter', function (): void {
     $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
 
@@ -2682,10 +2704,14 @@ it('laisse qui peut créer écarter une demande sans la traiter', function (): v
 
     $task = MaintenanceTask::query()->sole();
 
-    // Il peut la supprimer, mais pas en modifier le contenu.
     $this->actingAs($creator)
-        ->putJson(route('maintenance.tasks.update', $task), maintenanceRequestPayload(['task' => 'Réécriture']))
-        ->assertForbidden();
+        ->put(route('maintenance.tasks.update', $task), maintenanceRequestPayload(['task' => 'Reformulée']))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($task->refresh()->task)->toBe('Reformulée')
+        // Amender n'est pas traiter : la demande reste en attente.
+        ->and($task->isPendingRequest())->toBeTrue();
 
     $this->actingAs($creator)
         ->delete(route('maintenance.tasks.destroy', $task))
@@ -2694,7 +2720,7 @@ it('laisse qui peut créer écarter une demande sans la traiter', function (): v
     expect(MaintenanceTask::query()->count())->toBe(0);
 });
 
-it('ferme modification et suppression dès que la demande est transformée', function (): void {
+it('ferme la demande à son demandeur dès qu’elle est transformée', function (): void {
     $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
 
@@ -2721,11 +2747,6 @@ it('ferme modification et suppression dès que la demande est transformée', fun
         ->deleteJson(route('maintenance.tasks.destroy', $task))
         ->assertForbidden();
 
-    // Ni celui qui l'a transformée.
-    $this->actingAs($creator)
-        ->deleteJson(route('maintenance.tasks.destroy', $task))
-        ->assertForbidden();
-
     // Et on ne la transforme pas deux fois.
     $this->actingAs($creator)
         ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['convert' => true]))
@@ -2734,7 +2755,7 @@ it('ferme modification et suppression dès que la demande est transformée', fun
     expect(MaintenanceTask::query()->count())->toBe(1);
 });
 
-it('laisse intactes les actions de pointage sur une tâche verrouillée', function (): void {
+it('laisse intactes les actions de pointage, indépendamment du droit de créer', function (): void {
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
     $assignee = maintenanceUser(['maintenance.view']);
     $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
@@ -2745,8 +2766,8 @@ it('laisse intactes les actions de pointage sur une tâche verrouillée', functi
 
     $task = MaintenanceTask::query()->sole();
 
-    // Le contenu est figé…
-    $this->actingAs($creator)
+    // Le pointeur ne peut pas modifier le contenu…
+    $this->actingAs($manager)
         ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
         ->assertForbidden();
 
@@ -2770,26 +2791,36 @@ it('laisse intactes les actions de pointage sur une tâche verrouillée', functi
         ->and($task->first_pointed_on->toDateString())->toBe('2026-09-01');
 });
 
-it('n’affiche plus modification ni suppression sur une tâche réelle', function (): void {
+it('expose modification et suppression selon le droit de créer', function (): void {
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
         ->assertSessionHasNoErrors();
 
-    $task = $this->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+    $seenByCreator = $this->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
         ->assertOk()
         ->json('groups.0.tasks.0');
 
-    expect($task['can_update'])->toBeFalse()
-        ->and($task['can_delete'])->toBeFalse()
-        ->and($task['can_convert'])->toBeFalse()
-        // Les actions de pointage restent ouvertes.
-        ->and($task['can_point'])->toBeTrue()
-        ->and($task['can_edit_pointing_date'])->toBeTrue();
+    expect($seenByCreator['can_update'])->toBeTrue()
+        ->and($seenByCreator['can_delete'])->toBeTrue()
+        ->and($seenByCreator['can_convert'])->toBeFalse()
+        ->and($seenByCreator['can_point'])->toBeTrue();
+
+    // Sans le droit de créer, aucun des deux.
+    $pointer = maintenanceUser(['maintenance.view', 'maintenance.point']);
+
+    $seenByPointer = $this->actingAs($pointer)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups.0.tasks.0');
+
+    expect($seenByPointer['can_update'])->toBeFalse()
+        ->and($seenByPointer['can_delete'])->toBeFalse()
+        ->and($seenByPointer['can_point'])->toBeTrue();
 });
 
-it('ouvre suppression mais pas modification à qui peut créer, sur une demande', function (): void {
+it('ouvre modification, suppression et transformation à qui peut créer, sur une demande', function (): void {
     $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
     $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
 
@@ -2802,7 +2833,7 @@ it('ouvre suppression mais pas modification à qui peut créer, sur une demande'
         ->assertOk()
         ->json('groups.0.tasks.0');
 
-    expect($seen['can_update'])->toBeFalse()
+    expect($seen['can_update'])->toBeTrue()
         ->and($seen['can_delete'])->toBeTrue()
         ->and($seen['can_convert'])->toBeTrue();
 });

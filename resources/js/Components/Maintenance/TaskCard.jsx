@@ -137,9 +137,8 @@ export default function MaintenanceTaskCard({
     ].filter(Boolean);
 
     // Première ligne : les actions les plus utilisées, réduites à leur icône.
-    // Sur une tâche réelle, seules subsistent les actions de pointage : la
-    // Policy refuse désormais d'y modifier ou d'y supprimer quoi que ce soit.
-    const hasPrimaryRow = ! isPendingRequest && task.can_point;
+    const hasPrimaryRow =
+        ! isPendingRequest && (task.can_point || task.can_update || task.can_delete);
     // Dessous : les actions libellées, chacune sur sa ligne.
     const hasStackedActions =
         ! isPendingRequest && (task.can_partial_point || showPartialState || showPointingDate);
@@ -314,6 +313,24 @@ export default function MaintenanceTaskCard({
                                         pressed={pointed}
                                         disabled={saving}
                                         onClick={() => onTogglePoint?.(task, !pointed)}
+                                    />
+                                ) : null}
+
+                                {task.can_update ? (
+                                    <IconActionButton
+                                        icon={Pencil}
+                                        label="Modifier"
+                                        onClick={() => onEdit?.(task)}
+                                    />
+                                ) : null}
+
+                                {task.can_delete ? (
+                                    <IconActionButton
+                                        icon={Trash2}
+                                        label="Supprimer"
+                                        tone="danger"
+                                        disabled={deleting}
+                                        onClick={() => onDelete?.(task)}
                                     />
                                 ) : null}
                             </div>

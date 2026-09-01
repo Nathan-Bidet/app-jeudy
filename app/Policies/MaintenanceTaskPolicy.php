@@ -46,47 +46,42 @@ class MaintenanceTaskPolicy
     /**
      * Modification des informations d'une tâche.
      *
-     * Une tâche réellement créée n'est plus modifiable : le contenu est figé
-     * une fois la tâche entrée dans le circuit. Seule une demande encore en
-     * attente reste amendable, et par son seul demandeur.
+     * Le droit de créer emporte celui de reprendre : son détenteur amende
+     * n'importe quelle tâche, quel qu'en soit l'auteur. À défaut, seule une
+     * demande encore en attente reste amendable, et par son seul demandeur.
      *
      * Les actions de pointage ne passent pas par ici : elles ont leurs propres
      * règles (point, partialPoint, updatePointingDate) et restent ouvertes.
      */
     public function update(User $user, MaintenanceTask $task): bool
     {
-        return self::decideUpdate($task, (int) $user->id);
+        return self::decideManage($this->create($user), $task, (int) $user->id);
     }
 
     /**
-     * Règles isolées des lectures de permissions, pour qu'une liste résolve les
-     * habilitations une seule fois puis tranche tâche par tâche sans repasser
-     * en base. Unique expression des règles : les méthodes de Policy ci-dessus
-     * s'en servent aussi.
-     */
-    public static function decideUpdate(MaintenanceTask $task, int $userId): bool
-    {
-        return $task->isPendingRequest()
-            && (int) $task->requested_by_user_id === $userId;
-    }
-
-    /**
-     * Suppression : réservée aux demandes encore en attente. Leur demandeur
-     * peut retirer la sienne, et qui sait créer les tâches peut écarter une
-     * demande qu'il ne traitera pas. Une tâche réelle ne se supprime plus.
+     * Suppression : mêmes ayants droit que la modification. Qui peut créer
+     * peut retirer n'importe quelle tâche ; à défaut, un demandeur ne retire
+     * que sa propre demande, tant qu'elle est en attente.
      */
     public function delete(User $user, MaintenanceTask $task): bool
     {
-        return self::decideDelete($this->create($user), $task, (int) $user->id);
+        return self::decideManage($this->create($user), $task, (int) $user->id);
     }
 
-    public static function decideDelete(bool $canCreate, MaintenanceTask $task, int $userId): bool
+    /**
+     * Règle isolée des lectures de permissions, pour qu'une liste résolve les
+     * habilitations une seule fois puis tranche tâche par tâche sans repasser
+     * en base. Unique expression de la règle : update() et delete() ci-dessus
+     * s'en servent aussi.
+     */
+    public static function decideManage(bool $canCreate, MaintenanceTask $task, int $userId): bool
     {
-        if (! $task->isPendingRequest()) {
-            return false;
+        if ($canCreate) {
+            return true;
         }
 
-        return $canCreate || (int) $task->requested_by_user_id === $userId;
+        return $task->isPendingRequest()
+            && (int) $task->requested_by_user_id === $userId;
     }
 
     public function viewHiddenComment(User $user): bool
