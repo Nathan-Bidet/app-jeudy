@@ -283,3 +283,74 @@ describe('en-tête des groupes', () => {
         expect(screen.getByText('Non affectée')).toBeInTheDocument();
     });
 });
+
+describe('avatars et mise en avant des demandes', () => {
+    function group(overrides = {}) {
+        return {
+            key: 'g',
+            is_request: false,
+            date: '2026-08-31',
+            date_label: 'lundi 31/08/2026',
+            assignee: { type: 'user', id: 4, name: 'Alice Blanchet', photo_url: null },
+            tasks: [{ id: 1, task: 'Tâche', can_update: false, can_delete: false }],
+            ...overrides,
+        };
+    }
+
+    it('affiche la photo de la personne affectée quand elle en a une', () => {
+        renderPage({}, [
+            group({
+                assignee: {
+                    type: 'user',
+                    id: 4,
+                    name: 'Alice Blanchet',
+                    photo_url: '/storage/photos/alice.jpg',
+                },
+            }),
+        ]);
+
+        const photo = screen.getByAltText('Alice Blanchet');
+
+        expect(photo).toHaveAttribute('src', '/storage/photos/alice.jpg');
+        // Mêmes dimensions et bordure que le Livre du travail.
+        expect(photo.className).toContain('h-8');
+        expect(photo.className).toContain('rounded-full');
+    });
+
+    it('replie sur une vignette générique sans photo, et pour une personne libre', () => {
+        renderPage({}, [
+            group(),
+            group({ key: 'g2', assignee: { type: 'free', id: null, name: 'SARL Legrand' } }),
+        ]);
+
+        expect(screen.queryByAltText('Alice Blanchet')).not.toBeInTheDocument();
+        expect(screen.getByText('Alice Blanchet')).toBeInTheDocument();
+        expect(screen.getByText('SARL Legrand')).toBeInTheDocument();
+    });
+
+    it('n’affiche aucune vignette pour une tâche sans affectation', () => {
+        renderPage({}, [
+            group({ assignee: { type: 'none', id: null, name: 'Non affectée' } }),
+        ]);
+
+        const heading = screen.getByText('Non affectée').closest('h3');
+
+        expect(heading.querySelector('img')).toBeNull();
+        expect(heading.querySelector('svg')).toBeNull();
+    });
+
+    it('hachure le bloc d’une demande, pas celui d’une tâche classique', () => {
+        renderPage({}, [
+            group({ key: 'req', is_request: true }),
+            group({ key: 'std', is_request: false }),
+        ]);
+
+        const [requestSection, standardSection] = screen
+            .getAllByText('lundi 31/08/2026')
+            .map((node) => node.closest('section'));
+
+        expect(requestSection.className).toContain('maintenance-request-group');
+        expect(standardSection.className).not.toContain('maintenance-request-group');
+        expect(standardSection.className).toContain('bg-[var(--app-surface)]');
+    });
+});

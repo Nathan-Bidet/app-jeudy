@@ -3,7 +3,7 @@ import MaintenanceTaskCard from '@/Components/Maintenance/TaskCard';
 import MaintenanceTaskModal from '@/Components/Maintenance/TaskModal';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, useForm } from '@inertiajs/react';
-import { CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, Send, User } from 'lucide-react';
+import { CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, Send, User, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_FILTER_STATE = {
@@ -26,6 +26,36 @@ const EMPTY_FORM_STATE = {
     comment: '',
     comment_hidden: false,
 };
+
+/**
+ * Avatar de la personne affectée, calqué sur celui du Livre du travail
+ * (Components/Ldt/EntryCard) : mêmes dimensions, même bordure, même repli.
+ * Une tâche sans affectation n'affiche aucune vignette, pour ne pas suggérer
+ * un utilisateur qui n'existe pas.
+ */
+function AssigneeAvatar({ assignee }) {
+    const type = String(assignee?.type || '');
+
+    if (type === 'none') {
+        return null;
+    }
+
+    if (type === 'user' && assignee?.photo_url) {
+        return (
+            <img
+                src={assignee.photo_url}
+                alt={assignee.name}
+                className="h-8 w-8 shrink-0 rounded-full border-2 border-[var(--app-border)] object-cover"
+            />
+        );
+    }
+
+    return (
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--brand-yellow-dark)]">
+            <UserRound className="h-4 w-4" strokeWidth={2.2} />
+        </span>
+    );
+}
 
 /** Nombre de tâches d'un groupe, accordé (« 1 tâche », « 2 tâches »). */
 function taskCountLabel(group) {
@@ -511,7 +541,11 @@ export default function MaintenanceIndex({
                             {displayedGroups.map((group) => (
                                 <section
                                     key={group.key}
-                                    className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface)] p-2.5 shadow-sm sm:p-5"
+                                    className={`rounded-2xl border-2 border-[var(--app-border)] p-2.5 shadow-sm sm:p-5 ${
+                                        group.is_request
+                                            ? 'maintenance-request-group'
+                                            : 'bg-[var(--app-surface)]'
+                                    }`}
                                 >
                                     <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3 sm:mb-4">
                                         <div>
@@ -526,8 +560,11 @@ export default function MaintenanceIndex({
                                                     {taskCountLabel(group)}
                                                 </span>
                                             </div>
-                                            <h3 className="mt-1 text-base font-extrabold text-[var(--app-text)]">
-                                                {group.assignee?.name || 'Non affectée'}
+                                            <h3 className="mt-1.5 flex min-w-0 items-center gap-2 text-base font-extrabold text-[var(--app-text)]">
+                                                <AssigneeAvatar assignee={group.assignee} />
+                                                <span className="min-w-0 break-words">
+                                                    {group.assignee?.name || 'Non affectée'}
+                                                </span>
                                             </h3>
                                         </div>
                                     </div>

@@ -356,3 +356,22 @@ describe('ligne de suivi', () => {
         expect(trackingRow()).not.toHaveTextContent('Modifié par');
     });
 });
+
+describe('style des demandes', () => {
+    function card() {
+        return screen.getByText('Révision du compresseur').closest('article');
+    }
+
+    it('donne un fond uni à la carte d’une demande', () => {
+        render(<MaintenanceTaskCard task={baseTask({ is_request: true })} />);
+
+        expect(card().className).toContain('bg-[var(--app-surface)]');
+        expect(card().className).not.toContain('bg-[var(--app-surface-soft)]');
+    });
+
+    it('laisse son fond habituel à une tâche classique', () => {
+        render(<MaintenanceTaskCard task={baseTask()} />);
+
+        expect(card().className).toContain('bg-[var(--app-surface-soft)]');
+    });
+});

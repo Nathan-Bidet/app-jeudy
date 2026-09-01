@@ -138,7 +138,12 @@ export default function MaintenanceTaskCard({
     const hasStackedActions = task.can_partial_point || showPartialState || showPointingDate;
 
     return (
-        <article className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 sm:p-4">
+        <article
+            className={`rounded-xl border border-[var(--app-border)] p-3 sm:p-4 ${
+                // Une demande se détache sur le fond hachuré de son groupe.
+                task.is_request ? 'bg-[var(--app-surface)]' : 'bg-[var(--app-surface-soft)]'
+            }`}
+        >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                 {/* Colonne gauche : tout ce qui décrit la tâche. */}
                 <div className="min-w-0 flex-1">

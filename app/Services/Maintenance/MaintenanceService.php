@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Policies\MaintenanceTaskPolicy;
 use App\Services\Visibility\DateRestrictionScope;
 use App\Support\Access\AccessManager;
+use App\Support\Media\ProfilePhotoUrl;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -34,7 +35,7 @@ class MaintenanceService
         $abilities = $this->viewerAbilities($viewer);
 
         $query = MaintenanceTask::query()->with([
-            'assigneeUser:id,name,first_name,last_name,sector_id,email,phone,mobile_phone,internal_number',
+            'assigneeUser:id,name,first_name,last_name,sector_id,email,phone,mobile_phone,internal_number,photo_path',
             'depot:id,name,address_line1,address_line2,postal_code,city,country,gps_lat,gps_lng',
             'createdBy:id,name,first_name,last_name',
             'requestedBy:id,name,first_name,last_name',
@@ -64,6 +65,7 @@ class MaintenanceService
             if (! isset($groups[$groupKey])) {
                 $groups[$groupKey] = [
                     'key' => $groupKey,
+                    'is_request' => $task->isRequest(),
                     'date' => $task->date?->toDateString(),
                     'date_label' => $task->date?->translatedFormat('l d/m/Y') ?? $task->date?->toDateString(),
                     'assignee' => $this->assigneeMeta($task),
@@ -76,8 +78,12 @@ class MaintenanceService
 
         $sortedGroups = array_values($groups);
 
+        // Les demandes passent devant, puis l'ordre habituel date + affecté.
+        // Le tri est fait ici, avec les filtres déjà appliqués : il reste donc
+        // identique d'un rechargement à l'autre, quel que soit le filtre actif.
         usort($sortedGroups, function (array $left, array $right): int {
-            return [$left['date'], $left['assignee']['name']] <=> [$right['date'], $right['assignee']['name']];
+            return [! $left['is_request'], $left['date'], $left['assignee']['name']]
+                <=> [! $right['is_request'], $right['date'], $right['assignee']['name']];
         });
 
         return [
@@ -290,15 +296,22 @@ class MaintenanceService
         });
     }
 
+    /**
+     * L'origine fait partie de la clé : un groupe ne mélange donc jamais une
+     * demande et une tâche créée directement, ce qui permet de traiter le
+     * groupe entier comme une demande sans ambiguïté à l'affichage.
+     */
     private function groupKey(MaintenanceTask $task): string
     {
         $date = $task->date?->toDateString() ?? '0000-00-00';
 
-        return match ($task->assigneeType()) {
-            'user' => $date.'|user:'.$task->assignee_user_id,
-            'free' => $date.'|free:'.mb_strtolower(trim((string) $task->assignee_label_free)),
-            default => $date.'|none',
+        $assignee = match ($task->assigneeType()) {
+            'user' => 'user:'.$task->assignee_user_id,
+            'free' => 'free:'.mb_strtolower(trim((string) $task->assignee_label_free)),
+            default => 'none',
         };
+
+        return $date.'|'.$assignee.'|'.$task->origin;
     }
 
     /**
@@ -315,6 +328,7 @@ class MaintenanceService
                 'name' => trim((string) $task->assignee_label_free),
                 'phone' => null,
                 'email' => null,
+                'photo_url' => null,
             ];
         }
 
@@ -325,6 +339,7 @@ class MaintenanceService
                 'name' => 'Non affectée',
                 'phone' => null,
                 'email' => null,
+                'photo_url' => null,
             ];
         }
 
@@ -336,6 +351,8 @@ class MaintenanceService
             'name' => $this->personName($user) ?? ('Utilisateur #'.$task->assignee_user_id),
             'phone' => $user?->mobile_phone ?: $user?->phone,
             'email' => $user?->email,
+            // Même résolution d'URL que le Livre du travail.
+            'photo_url' => ProfilePhotoUrl::resolve($user?->photo_path),
         ];
     }
 

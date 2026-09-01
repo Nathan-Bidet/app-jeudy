@@ -195,6 +195,29 @@ html.theme-dark textarea::placeholder {
     color: var(--app-muted);
 }
 
+/* Groupe contenant une demande de maintenance : hachures blanc / #FBEBC0.
+   Bandes larges et faiblement contrastées, pour signaler la zone sans gêner la
+   lecture des cartes, elles-mêmes en aplat. */
+.maintenance-page .maintenance-request-group {
+    background-color: #ffffff;
+    background-image: repeating-linear-gradient(
+        45deg,
+        #ffffff 0 14px,
+        #fbebc0 14px 28px
+    );
+}
+
+/* En thème sombre, des bandes blanches seraient aveuglantes : on garde la
+   surface habituelle et on n'y pose qu'un voile ambré. */
+html.theme-dark .maintenance-page .maintenance-request-group {
+    background-color: var(--app-surface);
+    background-image: repeating-linear-gradient(
+        45deg,
+        transparent 0 14px,
+        rgba(251, 235, 192, 0.07) 14px 28px
+    );
+}
+
 /* Badges colorés de la page Maintenance : les utilitaires Tailwind clairs
    (bg-*-50 / text-*-700) ne sont pas couverts par la passerelle générique
    ci-dessus et formeraient des pavés clairs sur fond sombre. On les convertit

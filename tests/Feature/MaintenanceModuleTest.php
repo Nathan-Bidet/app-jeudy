@@ -2160,3 +2160,171 @@ it('conserve l’affichage normal pour un lecteur autorisé', function (): void 
     expect($task['comment'])->toBe('Contenu strictement confidentiel')
         ->and($task['comment_hidden'])->toBeTrue();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Avatars et priorité d'affichage des demandes
+|--------------------------------------------------------------------------
+*/
+
+it('expose la photo de profil de la personne affectée', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $withPhoto = User::factory()->create([
+        'is_active' => true,
+        'sector_id' => $creator->sector_id,
+        'photo_path' => 'photos/alice.jpg',
+    ]);
+    $withoutPhoto = User::factory()->create([
+        'is_active' => true,
+        'sector_id' => $creator->sector_id,
+        'photo_path' => null,
+    ]);
+
+    $this->actingAs($creator);
+
+    foreach ([$withPhoto->id, $withoutPhoto->id] as $id) {
+        $this->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $id]))
+            ->assertSessionHasNoErrors();
+    }
+
+    $this->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_label_free' => 'SARL Legrand']))
+        ->assertSessionHasNoErrors();
+    $this->post(route('maintenance.tasks.store'), maintenancePayload())
+        ->assertSessionHasNoErrors();
+
+    $groups = collect(
+        $this->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk()
+            ->json('groups')
+    )->keyBy(fn (array $group): string => $group['assignee']['type'].':'.($group['assignee']['id'] ?? ''));
+
+    // Même résolution d'URL que le Livre du travail : /storage/ pour un chemin relatif.
+    expect($groups["user:{$withPhoto->id}"]['assignee']['photo_url'])->toBe('/storage/photos/alice.jpg')
+        ->and($groups["user:{$withoutPhoto->id}"]['assignee']['photo_url'])->toBeNull()
+        ->and($groups['free:']['assignee']['photo_url'])->toBeNull()
+        ->and($groups['none:']['assignee']['photo_url'])->toBeNull();
+});
+
+it('remonte les demandes en tête, avant les tâches créées directement', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    // Créée en premier et à une date antérieure : sans priorité, elle passerait devant.
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'date' => '2026-09-01',
+            'task' => 'Création directe',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'date' => '2026-09-20',
+            'fin_date' => null,
+            'task' => 'Demande tardive',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $groups = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups');
+
+    expect($groups[0]['is_request'])->toBeTrue()
+        ->and($groups[0]['tasks'][0]['task'])->toBe('Demande tardive')
+        ->and($groups[1]['is_request'])->toBeFalse()
+        ->and($groups[1]['tasks'][0]['task'])->toBe('Création directe');
+});
+
+it('ne mélange jamais demande et création dans un même groupe', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    // Même date, même personne affectée : seul l'origine les sépare.
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'task' => 'Classique',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'task' => 'Demandée',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $groups = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups');
+
+    expect($groups)->toHaveCount(2);
+
+    foreach ($groups as $group) {
+        $origins = collect($group['tasks'])->pluck('is_request')->unique();
+        expect($origins)->toHaveCount(1)
+            ->and($origins->first())->toBe($group['is_request']);
+    }
+});
+
+it('regroupe plusieurs demandes de même date et même personne', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($requester);
+
+    foreach (['Première demande', 'Seconde demande'] as $label) {
+        $this->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $assignee->id,
+            'task' => $label,
+        ]))->assertSessionHasNoErrors();
+    }
+
+    $groups = $this->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups');
+
+    expect($groups)->toHaveCount(1)
+        ->and($groups[0]['is_request'])->toBeTrue()
+        ->and($groups[0]['tasks'])->toHaveCount(2);
+});
+
+it('conserve la priorité des demandes sous filtre actif', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'date' => '2026-09-02',
+            'task' => 'Classique filtrée',
+            'address_free' => 'Atelier commun',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'date' => '2026-09-25',
+            'fin_date' => null,
+            'task' => 'Demande filtrée',
+            'address_free' => 'Atelier commun',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    // Une tâche hors filtre, pour vérifier que le filtre s'applique bien.
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['task' => 'Hors périmètre']))
+        ->assertSessionHasNoErrors();
+
+    $groups = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['search' => 'Atelier commun', 'pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups');
+
+    expect($groups)->toHaveCount(2)
+        ->and($groups[0]['is_request'])->toBeTrue()
+        ->and($groups[1]['is_request'])->toBeFalse();
+});
