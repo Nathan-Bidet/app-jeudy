@@ -251,14 +251,19 @@ describe('en-tête des groupes', () => {
     it('réunit la date et le nombre de tâches sur une seule ligne', () => {
         renderPage({ can_create: true }, [group(2, { type: 'user', id: 4, name: 'Alice Blanchet' })]);
 
-        expect(screen.getByText('lundi 31/08/2026 • 2 tâches')).toBeInTheDocument();
+        // Deux badges distincts, côte à côte, sans point de séparation entre eux.
+        const dateBadge = screen.getByText('lundi 31/08/2026');
+        const countBadge = screen.getByText('2 tâches');
+
+        expect(dateBadge.parentElement).toBe(countBadge.parentElement);
+        expect(dateBadge.parentElement.textContent).not.toContain('•');
         expect(screen.getByText('Alice Blanchet')).toBeInTheDocument();
     });
 
     it('accorde le singulier', () => {
         renderPage({ can_create: true }, [group(1, { type: 'user', id: 4, name: 'Alice Blanchet' })]);
 
-        expect(screen.getByText('lundi 31/08/2026 • 1 tâche')).toBeInTheDocument();
+        expect(screen.getByText('1 tâche')).toBeInTheDocument();
         expect(screen.queryByText(/tâche\(s\)/)).not.toBeInTheDocument();
     });
 

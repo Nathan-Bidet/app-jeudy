@@ -515,9 +515,17 @@ export default function MaintenanceIndex({
                                 >
                                     <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3 sm:mb-4">
                                         <div>
-                                            <p className="text-xs font-black uppercase tracking-[0.12em] text-[var(--app-muted)]">
-                                                {group.date_label || group.date} • {taskCountLabel(group)}
-                                            </p>
+                                            {/* Deux badges, comme l'en-tête d'une
+                                                entrée du Livre du travail. */}
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="inline-flex items-center gap-1 rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-[11px] font-black uppercase tracking-[0.12em]">
+                                                    <CalendarDays className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                                    {group.date_label || group.date}
+                                                </span>
+                                                <span className="inline-flex items-center rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-[10px] font-bold uppercase text-[var(--app-muted)]">
+                                                    {taskCountLabel(group)}
+                                                </span>
+                                            </div>
                                             <h3 className="mt-1 text-base font-extrabold text-[var(--app-text)]">
                                                 {group.assignee?.name || 'Non affectée'}
                                             </h3>

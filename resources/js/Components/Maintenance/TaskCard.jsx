@@ -69,7 +69,7 @@ function PartialStateBadge({ active }) {
 
     return (
         <span
-            title={active ? 'Pointé partiellement par la personne affectée' : 'Pas encore pointé par la personne affectée'}
+            title="Marqué effectué par la personne affectée"
             className={`${ACTION_BASE} w-full gap-1.5 border-dashed px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] ${
                 active
                     ? 'border-emerald-500 text-emerald-700'
@@ -77,7 +77,7 @@ function PartialStateBadge({ active }) {
             }`}
         >
             <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
-            <span>Partiel</span>
+            <span>Effectué</span>
         </span>
     );
 }
@@ -108,13 +108,19 @@ export default function MaintenanceTaskCard({
 }) {
     const partiallyPointed = Boolean(task.partially_pointed);
     const pointed = Boolean(task.pointed);
-    // Le responsable voit l'état du partiel sans pouvoir le modifier.
-    const showPartialState = !task.can_partial_point && task.can_point;
+    // Le pointage a commencé dès qu'il y a quelque chose à dater : la personne
+    // affectée a validé, ou le définitif a déjà été posé.
+    const pointingStarted = partiallyPointed || pointed || Boolean(task.first_pointed_on_label);
+    // Le responsable ne voit l'état « Effectué » qu'une fois la personne
+    // affectée passée par là — jamais une case vide en attente.
+    const showPartialState = !task.can_partial_point && task.can_point && partiallyPointed;
+    // Dater n'a de sens qu'à partir du moment où une date existe ou peut naître.
+    const showPointingDate = Boolean(task.can_edit_pointing_date) && pointingStarted;
     // Traces de pointage, dans l'ordre chronologique du suivi. Une seule dans
     // le cas courant : elle occupe alors la droite de la ligne de suivi.
     const trackingNotes = [
         partiallyPointed && task.partially_pointed_by
-            ? `Partiel par ${task.partially_pointed_by}${
+            ? `Effectué par ${task.partially_pointed_by}${
                 task.partially_pointed_at_label ? ` le ${task.partially_pointed_at_label}` : ''
             }`
             : null,
@@ -129,9 +135,7 @@ export default function MaintenanceTaskCard({
     // Première ligne : les actions les plus utilisées, réduites à leur icône.
     const hasPrimaryRow = task.can_point || task.can_update || task.can_delete;
     // Dessous : les actions libellées, chacune sur sa ligne.
-    const hasStackedActions =
-        task.can_partial_point || showPartialState || task.first_pointed_on_label
-        || task.can_edit_pointing_date;
+    const hasStackedActions = task.can_partial_point || showPartialState || showPointingDate;
 
     return (
         <article className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 sm:p-4">
@@ -160,10 +164,6 @@ export default function MaintenanceTaskCard({
                         {pointed ? (
                             <span className="rounded-md border border-emerald-500 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.06em] text-emerald-700">
                                 Terminée
-                            </span>
-                        ) : partiallyPointed ? (
-                            <span className="rounded-md border border-sky-400 bg-sky-50 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.06em] text-sky-700">
-                                En cours
                             </span>
                         ) : null}
                     </div>
@@ -279,11 +279,11 @@ export default function MaintenanceTaskCard({
                                 {task.can_partial_point ? (
                                     <PointingButton
                                         active={partiallyPointed}
-                                        label="Partiel"
+                                        label="Effectué"
                                         title={
                                             partiallyPointed
-                                                ? 'Retirer mon pointage partiel'
-                                                : 'Pointer partiellement'
+                                                ? 'Revenir sur « effectué »'
+                                                : 'Marquer la tâche comme effectuée'
                                         }
                                         disabled={saving}
                                         onClick={() => onTogglePartialPoint?.(task, !partiallyPointed)}
@@ -292,27 +292,20 @@ export default function MaintenanceTaskCard({
                                     <PartialStateBadge active={partiallyPointed} />
                                 ) : null}
 
-                                {task.first_pointed_on_label ? (
+                                {/* Dater n'apparaît qu'une fois le pointage
+                                    entamé, et seulement à qui peut le corriger.
+                                    La date reste lisible dans la ligne de suivi
+                                    pour tous les autres. */}
+                                {showPointingDate ? (
                                     <ActionButton
                                         icon={CalendarCheck}
                                         label="Dater"
-                                        title={`Premier pointage le ${task.first_pointed_on_label}${
-                                            task.can_edit_pointing_date ? ' — cliquer pour corriger' : ''
-                                        }`}
-                                        tone="muted"
-                                        disabled={!task.can_edit_pointing_date}
-                                        onClick={
-                                            task.can_edit_pointing_date
-                                                ? () => onEditPointingDate?.(task)
-                                                : undefined
+                                        title={
+                                            task.first_pointed_on_label
+                                                ? `Premier pointage le ${task.first_pointed_on_label} — cliquer pour corriger`
+                                                : 'Renseigner la date du premier pointage'
                                         }
-                                    />
-                                ) : task.can_edit_pointing_date ? (
-                                    <ActionButton
-                                        icon={CalendarCheck}
-                                        label="Dater"
-                                        title="Renseigner la date du premier pointage"
-                                        tone="dashed"
+                                        tone={task.first_pointed_on_label ? 'muted' : 'dashed'}
                                         onClick={() => onEditPointingDate?.(task)}
                                     />
                                 ) : null}

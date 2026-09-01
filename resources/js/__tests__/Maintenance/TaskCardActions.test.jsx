@@ -54,6 +54,7 @@ describe('colonne d’actions de la carte', () => {
                     can_partial_point: true,
                     can_point: true,
                     can_edit_pointing_date: true,
+                    partially_pointed: true,
                 })}
             />,
         );
@@ -64,8 +65,8 @@ describe('colonne d’actions de la carte', () => {
             expect(screen.getByRole('button', { name })).toHaveTextContent('');
         }
 
-        expect(accessibleNames()).toEqual(['Pointer', 'Modifier', 'Supprimer', 'Partiel', 'Dater']);
-        expect(actionNames()).toEqual(['', '', '', 'Partiel', 'Dater']);
+        expect(accessibleNames()).toEqual(['Pointer', 'Modifier', 'Supprimer', 'Effectué', 'Dater']);
+        expect(actionNames()).toEqual(['', '', '', 'Effectué', 'Dater']);
     });
 
     it('espace les trois icônes régulièrement dans un seul conteneur centré', () => {
@@ -140,15 +141,67 @@ describe('colonne d’actions de la carte', () => {
     it('ne montre que le pointage partiel à la personne affectée', () => {
         render(<MaintenanceTaskCard task={baseTask({ can_partial_point: true })} />);
 
-        expect(actionNames()).toEqual(['Partiel']);
+        expect(actionNames()).toEqual(['Effectué']);
     });
 
-    it('montre au responsable l’état du partiel en lecture seule', () => {
+    it('montre au responsable l’état effectué, en lecture seule', () => {
         render(<MaintenanceTaskCard task={baseTask({ can_point: true, partially_pointed: true })} />);
 
-        // L'état du partiel n'est pas un bouton : il ne peut pas être basculé.
+        // L'état n'est pas un bouton : le responsable ne peut pas le basculer.
         expect(accessibleNames()).toEqual(['Pointer']);
-        expect(screen.getByTitle(/Pointé partiellement par la personne affectée/i)).toBeInTheDocument();
+        expect(screen.getByTitle(/Marqué effectué par la personne affectée/i)).toBeInTheDocument();
+    });
+
+    it('cache au responsable Effectué et Dater tant que rien n’a été fait', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({ can_point: true, can_edit_pointing_date: true, can_update: true })}
+            />,
+        );
+
+        expect(accessibleNames()).toEqual(['Pointer', 'Modifier']);
+        expect(screen.queryByText('Effectué')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Dater' })).not.toBeInTheDocument();
+    });
+
+    it('laisse la personne affectée valider même si rien n’a encore été fait', () => {
+        render(<MaintenanceTaskCard task={baseTask({ can_partial_point: true })} />);
+
+        expect(screen.getByRole('button', { name: 'Effectué' })).toBeEnabled();
+    });
+
+    it('révèle l’état et Dater une fois la tâche marquée effectuée', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({
+                    can_point: true,
+                    can_edit_pointing_date: true,
+                    partially_pointed: true,
+                    partially_pointed_by: 'Alice Blanchet',
+                })}
+            />,
+        );
+
+        expect(screen.getByTitle(/Marqué effectué par la personne affectée/i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Dater' })).toBeInTheDocument();
+    });
+
+    it('propose Dater après un pointage définitif sans passage par Effectué', () => {
+        render(
+            <MaintenanceTaskCard
+                task={baseTask({ can_point: true, can_edit_pointing_date: true, pointed: true })}
+            />,
+        );
+
+        // Le définitif peut précéder l'« effectué » : la date existe, donc elle
+        // doit rester corrigeable.
+        expect(screen.getByRole('button', { name: 'Dater' })).toBeInTheDocument();
+    });
+
+    it('n’affiche plus le badge « En cours »', () => {
+        render(<MaintenanceTaskCard task={baseTask({ partially_pointed: true })} />);
+
+        expect(screen.queryByText(/En cours/i)).not.toBeInTheDocument();
     });
 
     it('n’affiche aucune action à un simple lecteur', () => {
@@ -165,12 +218,14 @@ describe('colonne d’actions de la carte', () => {
         const onTogglePoint = vi.fn();
         const onEditPointingDate = vi.fn();
 
+        // Effectué déjà coché : sans quoi Dater resterait masqué, par règle.
         const task = baseTask({
             can_update: true,
             can_delete: true,
             can_partial_point: true,
             can_point: true,
             can_edit_pointing_date: true,
+            partially_pointed: true,
         });
 
         render(
@@ -186,13 +241,14 @@ describe('colonne d’actions de la carte', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Modifier' }));
         fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Partiel' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Effectué' }));
         fireEvent.click(screen.getByRole('button', { name: 'Pointer' }));
         fireEvent.click(screen.getByRole('button', { name: 'Dater' }));
 
         expect(onEdit).toHaveBeenCalledWith(task);
         expect(onDelete).toHaveBeenCalledWith(task);
-        expect(onTogglePartialPoint).toHaveBeenCalledWith(task, true);
+        // La tâche part déjà marquée effectuée : le clic la débascule.
+        expect(onTogglePartialPoint).toHaveBeenCalledWith(task, false);
         expect(onTogglePoint).toHaveBeenCalledWith(task, true);
         expect(onEditPointingDate).toHaveBeenCalledWith(task);
     });
@@ -207,7 +263,7 @@ describe('colonne d’actions de la carte', () => {
         );
 
         expect(screen.getByRole('button', { name: 'Supprimer' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Partiel' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Effectué' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Pointer' })).toBeDisabled();
     });
 });
@@ -239,7 +295,7 @@ describe('ligne de suivi', () => {
         // même ligne tant que la place le permet.
         expect(row.children).toHaveLength(2);
         expect(row.children[0]).toHaveTextContent('Créé par Nathan Bidet • Modifié par Alice Blanchet');
-        expect(row.children[1]).toHaveTextContent('Partiel par Alice Blanchet le 31/08/2026 à 14:46');
+        expect(row.children[1]).toHaveTextContent('Effectué par Alice Blanchet le 31/08/2026 à 14:46');
     });
 
     it('applique la même logique au pointage définitif', () => {
@@ -265,7 +321,7 @@ describe('ligne de suivi', () => {
 
         expect(row.children).toHaveLength(1);
         expect(row).toHaveTextContent('Créé par Nathan Bidet');
-        expect(row).not.toHaveTextContent(/Partiel par|Pointé par|Premier pointage/);
+        expect(row).not.toHaveTextContent(/Effectué par|Pointé par|Premier pointage/);
     });
 
     it('empile les traces à droite quand il y en a plusieurs', () => {
@@ -285,7 +341,7 @@ describe('ligne de suivi', () => {
         const right = trackingRow().children[1];
 
         expect(right.children).toHaveLength(3);
-        expect(right).toHaveTextContent('Partiel par Alice Blanchet');
+        expect(right).toHaveTextContent('Effectué par Alice Blanchet');
         expect(right).toHaveTextContent('Pointé par Nathan Bidet');
         expect(right).toHaveTextContent('Premier pointage le 04/09/2026');
     });
