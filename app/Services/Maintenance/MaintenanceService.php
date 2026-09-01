@@ -46,6 +46,12 @@ class MaintenanceService
 
         if ($viewer) {
             DateRestrictionScope::apply($query, $viewer, self::MODULE_KEY);
+
+            // Restriction posée dans la requête, donc avant les filtres, le
+            // regroupement et les compteurs : rien d'interdit n'est chargé.
+            if (! $this->seesEverything($abilities)) {
+                $query->visibleTo($viewer);
+            }
         }
 
         $this->applyFilters($query, $filters, $canSeeHiddenComments);
@@ -112,9 +118,17 @@ class MaintenanceService
      *
      * @return array<int, string>
      */
-    public function placeSuggestions(): array
+    public function placeSuggestions(?User $viewer = null): array
     {
-        return MaintenanceTask::query()
+        $query = MaintenanceTask::query();
+
+        // Les suggestions se nourrissent des tâches : elles ne doivent pas
+        // révéler une adresse issue d'une tâche hors périmètre.
+        if ($viewer !== null && ! $this->seesEverything($this->viewerAbilities($viewer))) {
+            $query->visibleTo($viewer);
+        }
+
+        return $query
             ->whereNotNull('address_free')
             ->orderByDesc('id')
             ->limit(3000)
@@ -136,18 +150,33 @@ class MaintenanceService
     private function viewerAbilities(?User $viewer): array
     {
         if ($viewer === null) {
-            return ['create' => false, 'request' => false, 'point' => false, 'admin' => false];
+            return [
+                'create' => false,
+                'request' => false,
+                'point' => false,
+                'view_all' => false,
+                'admin' => false,
+            ];
         }
 
         return [
             'create' => $this->accessManager->can($viewer, 'maintenance.create'),
             'request' => $this->accessManager->can($viewer, 'maintenance.request'),
             'point' => $this->accessManager->can($viewer, 'maintenance.point'),
+            'view_all' => $this->accessManager->can($viewer, 'maintenance.view.all'),
             // Le Gate accorde tout à l'administrateur : les drapeaux envoyés à
             // l'interface doivent dire la même chose que le serveur, sans quoi
             // un bouton manquerait là où l'action reste possible.
             'admin' => (bool) $viewer->hasRole('admin'),
         ];
+    }
+
+    /**
+     * @param  array<string, bool>  $abilities
+     */
+    private function seesEverything(array $abilities): bool
+    {
+        return $abilities['admin'] || $abilities['view_all'];
     }
 
     public function canSeeHiddenComments(?User $viewer): bool

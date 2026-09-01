@@ -113,6 +113,27 @@ class MaintenanceTask extends Model
         return $this->belongsTo(User::class, 'converted_by_user_id');
     }
 
+    /**
+     * Périmètre d'un utilisateur qui n'a pas « voir toutes les tâches ».
+     *
+     * Ce qui lui est affecté, ce qui découle de ses demandes, et ce qu'il a
+     * lui-même saisi. requested_by_user_id survivant à la conversion, la même
+     * condition couvre la demande en attente et la tâche qui en est issue,
+     * même réaffectée à quelqu'un d'autre.
+     *
+     * created_by_user_id s'y ajoute pour qu'un rédacteur ne perde pas de vue
+     * ce qu'il vient d'enregistrer ; sans cette colonne, une tâche créée puis
+     * affectée à un tiers disparaîtrait de l'écran de son auteur.
+     */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        return $query->where(function (Builder $scoped) use ($user): void {
+            $scoped->where('assignee_user_id', $user->id)
+                ->orWhere('requested_by_user_id', $user->id)
+                ->orWhere('created_by_user_id', $user->id);
+        });
+    }
+
     public function scopePendingRequests(Builder $query): Builder
     {
         return $query->where('origin', self::ORIGIN_REQUEST)->whereNull('converted_at');

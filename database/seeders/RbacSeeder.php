@@ -45,6 +45,7 @@ class RbacSeeder extends Seeder
             'ldt.export',
             'ldt.sms',
             'maintenance.view',
+            'maintenance.view.all',
             'maintenance.create',
             'maintenance.request',
             'maintenance.comment_hidden.view',

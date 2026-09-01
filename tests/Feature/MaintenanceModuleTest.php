@@ -103,7 +103,7 @@ it('refuse l’accès au module sans la permission maintenance.view', function (
 });
 
 it('affiche la page Maintenance avec la permission dédiée', function (): void {
-    $user = maintenanceUser(['maintenance.view']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($user)
         ->get(route('maintenance.index'))
@@ -118,7 +118,7 @@ it('affiche la page Maintenance avec la permission dédiée', function (): void 
 });
 
 it('garde les cinq permissions indépendantes les unes des autres', function (): void {
-    $user = maintenanceUser(['maintenance.view']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceTaskFor($user, ['comment_hidden' => false]);
 
     $this->actingAs($user)
@@ -154,7 +154,7 @@ it('garde les cinq permissions indépendantes les unes des autres', function ():
 */
 
 it('enregistre une création directe avec la permission de créer', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $depot = Depot::query()->create(['name' => 'Dépôt Nord', 'city' => 'Orléans']);
 
     $this->actingAs($user)
@@ -177,7 +177,7 @@ it('enregistre une création directe avec la permission de créer', function ():
 });
 
 it('enregistre une demande et trace le demandeur', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
@@ -191,7 +191,7 @@ it('enregistre une demande et trace le demandeur', function (): void {
 });
 
 it('empêche un demandeur de forger une création directe', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($user)
         ->postJson(route('maintenance.tasks.store'), maintenancePayload([
@@ -203,7 +203,7 @@ it('empêche un demandeur de forger une création directe', function (): void {
 });
 
 it('ignore les champs de traçabilité envoyés depuis le frontend', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $intruder = maintenanceUser([]);
 
     $this->actingAs($user)
@@ -234,7 +234,7 @@ it('ignore les champs de traçabilité envoyés depuis le frontend', function ()
 */
 
 it('exige la date principale et la description', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['date' => null, 'task' => null]))
@@ -242,7 +242,7 @@ it('exige la date principale et la description', function (): void {
 });
 
 it('refuse une date de fin de période antérieure à la date de début', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -255,7 +255,7 @@ it('refuse une date de fin de période antérieure à la date de début', functi
 });
 
 it('accepte une date de fin de période absente ou égale à la date de début', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['fin_date' => null]))
@@ -272,7 +272,7 @@ it('accepte une date de fin de période absente ou égale à la date de début',
 });
 
 it('accepte une tâche sans personne affectée', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
@@ -286,7 +286,7 @@ it('accepte une tâche sans personne affectée', function (): void {
 });
 
 it('refuse de renseigner à la fois un utilisateur et une personne libre', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $assignee = maintenanceUser([]);
 
     $this->actingAs($user)
@@ -298,7 +298,7 @@ it('refuse de renseigner à la fois un utilisateur et une personne libre', funct
 });
 
 it('refuse un dépôt inexistant', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['depot_id' => 999999]))
@@ -306,7 +306,7 @@ it('refuse un dépôt inexistant', function (): void {
 });
 
 it('valide le booléen de commentaire masqué', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['comment_hidden' => true]))
@@ -322,13 +322,13 @@ it('valide le booléen de commentaire masqué', function (): void {
 */
 
 it('ne transmet jamais un commentaire masqué sans la permission dédiée', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'comment' => 'Secret industriel',
         'comment_hidden' => true,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $response = $this->actingAs($viewer)
         ->get(route('maintenance.index'))
@@ -346,13 +346,13 @@ it('ne transmet jamais un commentaire masqué sans la permission dédiée', func
 });
 
 it('ne transmet jamais un commentaire masqué via la réponse JSON', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'comment' => 'Secret industriel',
         'comment_hidden' => true,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $response = $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data'))
@@ -368,13 +368,13 @@ it('ne transmet jamais un commentaire masqué via la réponse JSON', function ()
 });
 
 it('transmet le commentaire masqué à qui détient la permission', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'comment' => 'Secret industriel',
         'comment_hidden' => true,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view', 'maintenance.comment_hidden.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.comment_hidden.view']);
 
     $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data'))
@@ -384,13 +384,13 @@ it('transmet le commentaire masqué à qui détient la permission', function ():
 });
 
 it('transmet un commentaire non masqué à tout lecteur du module', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'comment' => 'Information ordinaire',
         'comment_hidden' => false,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data'))
@@ -400,21 +400,21 @@ it('transmet un commentaire non masqué à tout lecteur du module', function ():
 });
 
 it('exclut les commentaires masqués de la recherche sans la permission', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'task' => 'Tâche anodine',
         'comment' => 'Amiante détectée',
         'comment_hidden' => true,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data', ['search' => 'Amiante', 'pointed_filter' => 'all']))
         ->assertOk()
         ->assertJsonPath('meta.count_tasks', 0);
 
-    $privileged = maintenanceUser(['maintenance.view', 'maintenance.comment_hidden.view']);
+    $privileged = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.comment_hidden.view']);
 
     $this->actingAs($privileged)
         ->getJson(route('maintenance.tasks.data', ['search' => 'Amiante', 'pointed_filter' => 'all']))
@@ -429,7 +429,7 @@ it('exclut les commentaires masqués de la recherche sans la permission', functi
 */
 
 it('réserve le pointage définitif à la permission dédiée et horodate le premier pointage', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($author, ['comment_hidden' => false]);
 
     $this->actingAs($author)
@@ -438,7 +438,7 @@ it('réserve le pointage définitif à la permission dédiée et horodate le pre
 
     expect($task->refresh()->pointed)->toBeFalse();
 
-    $pointer = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $pointer = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->actingAs($pointer)
         ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
@@ -466,8 +466,8 @@ it('réserve le pointage définitif à la permission dédiée et horodate le pre
 });
 
 it('réserve le pointage partiel à la personne affectée', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($author, [
         'comment_hidden' => false,
         'assignee_user_id' => $assignee->id,
@@ -491,14 +491,14 @@ it('réserve le pointage partiel à la personne affectée', function (): void {
 */
 
 it('ferme modification et suppression à qui ne peut pas créer', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($creator, ['comment_hidden' => false, 'task' => 'Contenu protégé']);
 
     // Ni un lecteur, ni un pointeur, ni un simple demandeur n'y touchent.
     foreach ([
-        maintenanceUser(['maintenance.view']),
-        maintenanceUser(['maintenance.view', 'maintenance.point']),
-        maintenanceUser(['maintenance.view', 'maintenance.request']),
+        maintenanceUser(['maintenance.view', 'maintenance.view.all']),
+        maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']),
+        maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']),
     ] as $outsider) {
         $this->actingAs($outsider)
             ->putJson(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Tentative']))
@@ -514,11 +514,11 @@ it('ferme modification et suppression à qui ne peut pas créer', function (): v
 });
 
 it('rend toute tâche modifiable et supprimable à qui peut créer', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($author, ['comment_hidden' => false]);
 
     // Un autre détenteur du droit de créer : la tâche n'est pas la sienne.
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($manager)
         ->put(route('maintenance.tasks.update', $task), maintenancePayload(['task' => 'Description corrigée']))
@@ -536,10 +536,10 @@ it('rend toute tâche modifiable et supprimable à qui peut créer', function ()
 });
 
 it('limite un demandeur à ses propres tâches non pointées', function (): void {
-    $owner = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $owner = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $ownTask = maintenanceTaskFor($owner, ['comment_hidden' => false]);
 
-    $someoneElse = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $someoneElse = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $otherTask = maintenanceTaskFor($someoneElse, ['comment_hidden' => false]);
 
     $this->actingAs($owner)
@@ -568,7 +568,7 @@ it('limite un demandeur à ses propres tâches non pointées', function (): void
 */
 
 it('expose au menu la permission de voir le module', function (): void {
-    $withAccess = maintenanceUser(['maintenance.view']);
+    $withAccess = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($withAccess)
         ->get(route('maintenance.index'))
@@ -590,7 +590,7 @@ it('expose au menu la permission de voir le module', function (): void {
 });
 
 it('fournit au formulaire les utilisateurs de l’annuaire et les dépôts', function (): void {
-    $viewer = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $depot = Depot::query()->create([
         'name' => 'Dépôt Sud',
         'address_line1' => '3 route de Blois',
@@ -617,7 +617,7 @@ it('fournit au formulaire les utilisateurs de l’annuaire et les dépôts', fun
 });
 
 it('propose en autocomplétion les adresses libres déjà saisies', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     maintenanceTaskFor($user, [
         'comment_hidden' => false,
@@ -636,7 +636,7 @@ it('propose en autocomplétion les adresses libres déjà saisies', function ():
 });
 
 it('enregistre une période avec les deux dates et la date de fin souhaitée', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -661,7 +661,7 @@ it('enregistre une période avec les deux dates et la date de fin souhaitée', f
 });
 
 it('affecte un utilisateur de l’annuaire et le restitue dans le groupe', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $assignee = User::factory()->create([
         'first_name' => 'Camille',
         'last_name' => 'Roux',
@@ -685,7 +685,7 @@ it('affecte un utilisateur de l’annuaire et le restitue dans le groupe', funct
 });
 
 it('accepte une personne saisie librement', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -703,7 +703,7 @@ it('accepte une personne saisie librement', function (): void {
 });
 
 it('regroupe sous « Non affectée » les tâches sans personne', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
@@ -717,7 +717,7 @@ it('regroupe sous « Non affectée » les tâches sans personne', function (): v
 });
 
 it('construit un lieu cliquable à partir du dépôt et de l’adresse libre', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $depot = Depot::query()->create([
         'name' => 'Dépôt Est',
         'address_line1' => '9 avenue du Moulin',
@@ -751,8 +751,8 @@ it('construit un lieu cliquable à partir du dépôt et de l’adresse libre', f
 });
 
 it('n’ouvre modification et suppression qu’au demandeur, sur sa demande', function (): void {
-    $owner = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $other = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $owner = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $other = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($owner)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Ma demande']))
@@ -790,10 +790,10 @@ it('n’ouvre modification et suppression qu’au demandeur, sur sa demande', fu
 });
 
 it('ne donne aucun droit de modification à un simple lecteur', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, ['comment_hidden' => false]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $response = $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
@@ -804,7 +804,7 @@ it('ne donne aucun droit de modification à un simple lecteur', function (): voi
 });
 
 it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistre la tâche', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.request', 'maintenance.comment_hidden.view']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request', 'maintenance.comment_hidden.view']);
     $task = maintenanceTaskFor($author, [
         'comment' => 'Diagnostic confidentiel',
         'comment_hidden' => true,
@@ -814,7 +814,7 @@ it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistr
 
     // Un éditeur sans le droit de lecture : le champ commentaire lui arrive
     // vide. Le seul geste qui écrit encore sur une tâche est la conversion.
-    $editor = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $editor = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($editor)
         ->put(route('maintenance.tasks.update', $task), maintenancePayload([
@@ -834,7 +834,7 @@ it('conserve un commentaire masqué lorsqu’un éditeur non autorisé enregistr
 });
 
 it('laisse un éditeur autorisé modifier un commentaire masqué', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $task = maintenanceTaskFor($author, [
         'comment' => 'Ancien commentaire',
         'comment_hidden' => true,
@@ -843,7 +843,7 @@ it('laisse un éditeur autorisé modifier un commentaire masqué', function (): 
     $task->forceFill(['requested_by_user_id' => $author->id])->save();
 
     $editor = maintenanceUser([
-        'maintenance.view',
+        'maintenance.view', 'maintenance.view.all',
         'maintenance.create',
         'maintenance.comment_hidden.view',
     ]);
@@ -863,8 +863,8 @@ it('laisse un éditeur autorisé modifier un commentaire masqué', function (): 
 });
 
 it('filtre la liste par origine création ou demande', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['task' => 'Création directe']))
@@ -895,7 +895,7 @@ it('filtre la liste par origine création ou demande', function (): void {
 
 function maintenanceAssignedTask(User $assignee, ?User $author = null): MaintenanceTask
 {
-    $author ??= maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author ??= maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     return maintenanceTaskFor($author, [
         'comment_hidden' => false,
@@ -904,10 +904,10 @@ function maintenanceAssignedTask(User $assignee, ?User $author = null): Maintena
 }
 
 it('refuse le pointage partiel à un utilisateur qui n’est pas l’affecté', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
 
-    $intruder = maintenanceUser(['maintenance.view']);
+    $intruder = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($intruder)
         ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
@@ -917,10 +917,10 @@ it('refuse le pointage partiel à un utilisateur qui n’est pas l’affecté', 
 });
 
 it('refuse le pointage partiel au responsable, même avec le pointage définitif', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
 
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->actingAs($manager)
         ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
@@ -930,7 +930,7 @@ it('refuse le pointage partiel au responsable, même avec le pointage définitif
 });
 
 it('refuse le pointage partiel à un administrateur non affecté', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
 
     $admin = maintenanceUser([]);
@@ -945,13 +945,13 @@ it('refuse le pointage partiel à un administrateur non affecté', function (): 
 });
 
 it('interdit tout pointage partiel sur une personne saisie librement', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($author, [
         'comment_hidden' => false,
         'assignee_label_free' => 'SARL Legrand',
     ]);
 
-    foreach ([$author, maintenanceUser(['maintenance.view', 'maintenance.point'])] as $candidate) {
+    foreach ([$author, maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point'])] as $candidate) {
         $this->actingAs($candidate)
             ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => true])
             ->assertForbidden();
@@ -961,7 +961,7 @@ it('interdit tout pointage partiel sur une personne saisie librement', function 
 });
 
 it('interdit tout pointage partiel sur une tâche sans affectation', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($author, ['comment_hidden' => false]);
 
     $this->actingAs($author)
@@ -972,10 +972,10 @@ it('interdit tout pointage partiel sur une tâche sans affectation', function ()
 });
 
 it('montre au responsable l’état du partiel sans lui en donner le contrôle', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
 
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $before = $this->actingAs($manager)
         ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
@@ -999,10 +999,10 @@ it('montre au responsable l’état du partiel sans lui en donner le contrôle',
 });
 
 it('donne au porteur du pointage définitif un accès permanent à sa case', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
 
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->actingAs($manager)
         ->patch(route('maintenance.tasks.point', $task), ['pointed' => true])
@@ -1022,9 +1022,9 @@ it('donne au porteur du pointage définitif un accès permanent à sa case', fun
 });
 
 it('accepte un pointage définitif avant le partiel, sans les rendre exclusifs', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->travelTo('2026-09-04 09:00:00');
 
@@ -1049,9 +1049,9 @@ it('accepte un pointage définitif avant le partiel, sans les rendre exclusifs',
 });
 
 it('accepte un pointage partiel avant le définitif et garde la première date', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->travelTo('2026-09-04 08:00:00');
 
@@ -1080,9 +1080,9 @@ it('accepte un pointage partiel avant le définitif et garde la première date',
 });
 
 it('sépare les horodatages techniques de la date métier', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->travelTo('2026-09-04 10:30:00');
     $this->actingAs($assignee)
@@ -1104,7 +1104,7 @@ it('sépare les horodatages techniques de la date métier', function (): void {
 });
 
 it('réserve la modification de la date métier au pointage définitif', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
 
     $this->actingAs($assignee)
@@ -1115,9 +1115,9 @@ it('réserve la modification de la date métier au pointage définitif', functio
 });
 
 it('ne recalcule jamais une date métier fixée à la main', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->actingAs($manager)
         ->patch(route('maintenance.tasks.pointing-date', $task), ['first_pointed_on' => '2026-08-20'])
@@ -1145,9 +1145,9 @@ it('ne recalcule jamais une date métier fixée à la main', function (): void {
 });
 
 it('n’efface au décochage que les traces du pointage concerné', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->travelTo('2026-09-04 07:00:00');
     $this->actingAs($assignee)
@@ -1186,9 +1186,9 @@ it('n’efface au décochage que les traces du pointage concerné', function ():
 });
 
 it('rejette une requête de pointage forgée sans valeur booléenne', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $task = maintenanceAssignedTask($assignee);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->actingAs($assignee)
         ->patchJson(route('maintenance.tasks.partial-point', $task), ['partially_pointed' => 'peut-être'])
@@ -1210,8 +1210,8 @@ it('rejette une requête de pointage forgée sans valeur booléenne', function (
 });
 
 it('ignore les champs de pointage glissés dans une modification de tâche', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceAssignedTask($assignee, $author);
 
     $this->actingAs($author)
@@ -1234,8 +1234,8 @@ it('ignore les champs de pointage glissés dans une modification de tâche', fun
 });
 
 it('filtre les tâches par état de pointage', function (): void {
-    $assignee = maintenanceUser(['maintenance.view']);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point', 'maintenance.create']);
 
     $todo = maintenanceAssignedTask($assignee, $manager);
     $inProgress = maintenanceAssignedTask($assignee, $manager);
@@ -1280,11 +1280,11 @@ function maintenanceNotificationsOf(User $user): \Illuminate\Support\Collection
 }
 
 it('notifie les responsables du traitement lors d’une nouvelle demande', function (): void {
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $otherManager = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $bystander = maintenanceUser(['maintenance.view']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $otherManager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $bystander = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $requester->forceFill(['first_name' => 'Léa', 'last_name' => 'Martin'])->save();
 
     $this->actingAs($requester)
@@ -1308,8 +1308,8 @@ it('notifie les responsables du traitement lors d’une nouvelle demande', funct
 });
 
 it('ne notifie personne d’une création directe', function (): void {
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
@@ -1319,11 +1319,11 @@ it('ne notifie personne d’une création directe', function (): void {
 });
 
 it('exclut des destinataires un responsable désactivé', function (): void {
-    $active = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $inactive = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $active = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $inactive = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $inactive->forceFill(['is_active' => false])->save();
 
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
@@ -1334,8 +1334,8 @@ it('exclut des destinataires un responsable désactivé', function (): void {
 });
 
 it('notifie l’utilisateur affecté à la création', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1352,8 +1352,8 @@ it('notifie l’utilisateur affecté à la création', function (): void {
 });
 
 it('n’envoie aucune notification pour une affectation en texte libre ou vide', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $witness = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $witness = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1370,7 +1370,7 @@ it('n’envoie aucune notification pour une affectation en texte libre ou vide',
 });
 
 it('ne notifie pas un créateur qui s’affecte la tâche à lui-même', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1382,9 +1382,9 @@ it('ne notifie pas un créateur qui s’affecte la tâche à lui-même', functio
 });
 
 it('informe l’affecté désigné au moment de la transformation', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -1408,8 +1408,8 @@ it('informe l’affecté désigné au moment de la transformation', function ():
 });
 
 it('ne renotifie pas l’affecté quand aucun champ métier ne change', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -1442,9 +1442,9 @@ it('ne renotifie pas l’affecté quand aucun champ métier ne change', function
 });
 
 it('ne laisse jamais fuiter un commentaire masqué dans une notification', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $secret = 'Amiante confirmée batiment C';
 
@@ -1458,7 +1458,7 @@ it('ne laisse jamais fuiter un commentaire masqué dans une notification', funct
 
     $task = MaintenanceTask::query()->sole();
 
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
             'comment' => $secret,
@@ -1490,8 +1490,8 @@ it('ne laisse jamais fuiter un commentaire masqué dans une notification', funct
 });
 
 it('renvoie une notification de maintenance vers le module, pas vers les heures', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
@@ -1508,8 +1508,8 @@ it('renvoie une notification de maintenance vers le module, pas vers les heures'
 });
 
 it('affiche la tâche visée par une notification quel que soit son pointage', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
@@ -1537,9 +1537,9 @@ it('affiche la tâche visée par une notification quel que soit son pointage', f
 });
 
 it('journalise la demande, sa transformation et le changement d’affectation', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -1569,8 +1569,8 @@ it('journalise la demande, sa transformation et le changement d’affectation', 
 });
 
 it('journalise les pointages et la date métier', function (): void {
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($manager)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
@@ -1598,7 +1598,7 @@ it('journalise les pointages et la date métier', function (): void {
 });
 
 it('n’écrit jamais un commentaire masqué en clair dans les logs', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.comment_hidden.view']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.comment_hidden.view']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1628,7 +1628,7 @@ it('n’écrit jamais un commentaire masqué en clair dans les logs', function (
 });
 
 it('journalise un commentaire visible sans le masquer', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1651,7 +1651,7 @@ it('journalise un commentaire visible sans le masquer', function (): void {
 */
 
 it('affiche sans erreur une tâche affectée à un compte désactivé', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $assignee = User::factory()->create([
         'first_name' => 'Paul',
         'last_name' => 'Durand',
@@ -1687,7 +1687,7 @@ it('affiche sans erreur une tâche affectée à un compte désactivé', function
 });
 
 it('détache proprement une tâche dont l’utilisateur affecté est supprimé', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $assignee = User::factory()->create(['is_active' => true, 'sector_id' => $creator->sector_id]);
 
     $this->actingAs($creator)
@@ -1706,7 +1706,7 @@ it('détache proprement une tâche dont l’utilisateur affecté est supprimé',
 });
 
 it('rend cliquable une adresse libre lorsqu’aucun dépôt n’est lié', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1726,7 +1726,7 @@ it('rend cliquable une adresse libre lorsqu’aucun dépôt n’est lié', funct
 });
 
 it('n’expose aucun lieu quand ni dépôt ni adresse ne sont renseignés', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['address_free' => null]))
@@ -1740,7 +1740,7 @@ it('n’expose aucun lieu quand ni dépôt ni adresse ne sont renseignés', func
 });
 
 it('affiche une tâche sans commentaire sans clé fantôme', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['comment' => null]))
@@ -1757,7 +1757,7 @@ it('affiche une tâche sans commentaire sans clé fantôme', function (): void {
 });
 
 it('garde un nombre de requêtes stable quand la liste grandit', function (): void {
-    $viewer = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.point']);
 
     $seed = function (int $count) use ($viewer): void {
         for ($i = 0; $i < $count; $i++) {
@@ -1803,8 +1803,8 @@ it('garde un nombre de requêtes stable quand la liste grandit', function (): vo
 */
 
 it('conserve une tâche et son pointage quand le compte créateur est supprimé', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($author)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1838,8 +1838,8 @@ it('conserve une tâche et son pointage quand le compte créateur est supprimé'
 });
 
 it('résiste aux contournements HTTP sur toutes les routes du module', function (): void {
-    $owner = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $owner = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.point']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($owner)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1870,7 +1870,7 @@ it('résiste aux contournements HTTP sur toutes les routes du module', function 
     }
 
     // Un lecteur seul : il voit la page mais ne peut rien écrire.
-    $reader = maintenanceUser(['maintenance.view']);
+    $reader = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     foreach (array_slice($refusals, 2) as [$method, $url, $payload]) {
         $this->actingAs($reader)->{$method}($url, $payload)->assertForbidden();
@@ -1913,14 +1913,14 @@ it('vérifie les cinq permissions une à une sur leur route dédiée', function 
     }
 
     // Les deux dernières portent sur une tâche existante.
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $task = maintenanceTaskFor($author, [
         'comment' => 'Masqué',
         'comment_hidden' => true,
     ]);
 
-    $withoutHidden = maintenanceUser(['maintenance.view']);
-    $withHidden = maintenanceUser(['maintenance.view', 'maintenance.comment_hidden.view']);
+    $withoutHidden = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $withHidden = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.comment_hidden.view']);
 
     // Plusieurs tâches coexistent : on cible celle qui porte le commentaire.
     $findTask = function (User $viewer) use ($task): array {
@@ -1936,8 +1936,8 @@ it('vérifie les cinq permissions une à une sur leur route dédiée', function 
     expect($findTask($withoutHidden)['comment'])->toBeNull();
     expect($findTask($withHidden)['comment'])->toBe('Masqué');
 
-    $withoutPoint = maintenanceUser(['maintenance.view']);
-    $withPoint = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $withoutPoint = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $withPoint = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     expect($this->actingAs($withoutPoint)
         ->patchJson(route('maintenance.tasks.point', $task), ['pointed' => true])->status())->toBe(403);
@@ -1946,7 +1946,7 @@ it('vérifie les cinq permissions une à une sur leur route dédiée', function 
 });
 
 it('combine correctement demander et afficher les commentaires masqués', function (): void {
-    $user = maintenanceUser(['maintenance.view', 'maintenance.request', 'maintenance.comment_hidden.view']);
+    $user = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request', 'maintenance.comment_hidden.view']);
 
     $this->actingAs($user)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -1991,8 +1991,8 @@ function maintenanceInertiaPost(array $payload): \Illuminate\Testing\TestRespons
 }
 
 it('crée réellement la tâche pour chaque combinaison du formulaire', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
     $depot = Depot::query()->create([
         'name' => 'Dépôt Central',
         'address_line1' => '1 rue du Test',
@@ -2085,7 +2085,7 @@ it('crée réellement la tâche pour chaque combinaison du formulaire', function
 });
 
 it('renvoie des erreurs exploitables plutôt qu’un échec silencieux', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $this->actingAs($creator);
 
     // Le navigateur ne filtre plus rien : la requête part et le serveur répond.
@@ -2113,7 +2113,7 @@ it('renvoie des erreurs exploitables plutôt qu’un échec silencieux', functio
 });
 
 it('confirme le succès par le message flash utilisé partout dans l’application', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $this->actingAs($creator);
 
     maintenanceInertiaPost([
@@ -2133,7 +2133,7 @@ it('confirme le succès par le message flash utilisé partout dans l’applicati
 */
 
 it('rend une tâche à commentaire masqué indiscernable d’une tâche sans commentaire', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $withHiddenComment = maintenanceTaskFor($author, [
         'task' => 'Tâche identique',
@@ -2147,7 +2147,7 @@ it('rend une tâche à commentaire masqué indiscernable d’une tâche sans com
         'comment_hidden' => false,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $response = $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
@@ -2174,14 +2174,14 @@ it('rend une tâche à commentaire masqué indiscernable d’une tâche sans com
 });
 
 it('ne laisse rien deviner dans le HTML rendu à un lecteur non autorisé', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'task' => 'Revision annuelle',
         'comment' => 'Contenu strictement confidentiel',
         'comment_hidden' => true,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $html = $this->actingAs($viewer)
         ->get(route('maintenance.index', ['pointed_filter' => 'all']))
@@ -2195,13 +2195,13 @@ it('ne laisse rien deviner dans le HTML rendu à un lecteur non autorisé', func
 });
 
 it('conserve l’affichage normal pour un lecteur autorisé', function (): void {
-    $author = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $author = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     maintenanceTaskFor($author, [
         'comment' => 'Contenu strictement confidentiel',
         'comment_hidden' => true,
     ]);
 
-    $viewer = maintenanceUser(['maintenance.view', 'maintenance.comment_hidden.view']);
+    $viewer = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.comment_hidden.view']);
 
     $task = $this->actingAs($viewer)
         ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
@@ -2221,7 +2221,7 @@ it('conserve l’affichage normal pour un lecteur autorisé', function (): void 
 */
 
 it('expose la photo de profil de la personne affectée', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $withPhoto = User::factory()->create([
         'is_active' => true,
@@ -2260,8 +2260,8 @@ it('expose la photo de profil de la personne affectée', function (): void {
 });
 
 it('remonte les demandes en tête, avant les tâches créées directement', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     // Créée en premier et à une date antérieure : sans priorité, elle passerait devant.
     $this->actingAs($creator)
@@ -2291,9 +2291,9 @@ it('remonte les demandes en tête, avant les tâches créées directement', func
 });
 
 it('ne mélange jamais demande et création dans un même groupe', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     // Même date, même personne affectée : seul l'origine les sépare.
     $this->actingAs($creator)
@@ -2325,8 +2325,8 @@ it('ne mélange jamais demande et création dans un même groupe', function (): 
 });
 
 it('regroupe plusieurs demandes de même date et même personne', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($requester);
 
@@ -2347,8 +2347,8 @@ it('regroupe plusieurs demandes de même date et même personne', function (): v
 });
 
 it('conserve la priorité des demandes sous filtre actif', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload([
@@ -2400,7 +2400,7 @@ function maintenanceRequestPayload(array $overrides = []): array
 
 it('enregistre une demande avec ses trois seuls champs', function (): void {
     $depot = Depot::query()->create(['name' => 'Dépôt Nord', 'city' => 'Orléans']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $requester->forceFill(['depot_id' => $depot->id])->save();
 
     $this->actingAs($requester)
@@ -2426,7 +2426,7 @@ it('enregistre une demande avec ses trois seuls champs', function (): void {
 });
 
 it('accepte une demande d’un utilisateur sans dépôt rattaché', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     expect($requester->depot_id)->toBeNull();
 
@@ -2439,7 +2439,7 @@ it('accepte une demande d’un utilisateur sans dépôt rattaché', function ():
 
 it('expose au formulaire le dépôt de rattachement du demandeur', function (): void {
     $depot = Depot::query()->create(['name' => 'Dépôt Sud', 'city' => 'Blois']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $requester->forceFill(['depot_id' => $depot->id])->save();
 
     $this->actingAs($requester)
@@ -2451,7 +2451,7 @@ it('expose au formulaire le dépôt de rattachement du demandeur', function (): 
 });
 
 it('exige la date souhaitée et la description sur une demande', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
@@ -2464,13 +2464,13 @@ it('exige la date souhaitée et la description sur une demande', function (): vo
 });
 
 it('n’exige pas de date de début sur une demande, mais l’exige sur une création', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
         ->assertSessionHasNoErrors();
 
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['date' => null]))
@@ -2478,8 +2478,8 @@ it('n’exige pas de date de début sur une demande, mais l’exige sur une cré
 });
 
 it('regroupe toutes les demandes en attente en tête, sans date ni affectation', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($requester);
     foreach (['2026-09-15', '2026-09-05'] as $due) {
@@ -2508,7 +2508,7 @@ it('regroupe toutes les demandes en attente en tête, sans date ni affectation',
 });
 
 it('n’ouvre la transformation qu’à qui peut créer une tâche', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2531,7 +2531,7 @@ it('n’ouvre la transformation qu’à qui peut créer une tâche', function ()
 
     expect($task->refresh()->converted_at)->toBeNull();
 
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
     $seen = $this->actingAs($creator)
         ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
         ->json('groups.0.tasks.0');
@@ -2541,9 +2541,9 @@ it('n’ouvre la transformation qu’à qui peut créer une tâche', function ()
 
 it('transforme la demande en tâche sur la même ligne, sans doublon', function (): void {
     $depot = Depot::query()->create(['name' => 'Dépôt Est', 'city' => 'Montargis']);
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
@@ -2595,8 +2595,8 @@ it('transforme la demande en tâche sur la même ligne, sans doublon', function 
 });
 
 it('prévient le demandeur que sa demande est prise en charge, une seule fois', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2619,7 +2619,7 @@ it('prévient le demandeur que sa demande est prise en charge, une seule fois', 
     expect($reasons)->toBe(['converted']);
 
     // Le demandeur affecté à sa propre demande n'est pas prévenu deux fois.
-    $other = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $other = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
     $this->actingAs($other)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Seconde demande']))
         ->assertSessionHasNoErrors();
@@ -2641,8 +2641,8 @@ it('prévient le demandeur que sa demande est prise en charge, une seule fois', 
 });
 
 it('journalise la transformation d’une demande', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2670,7 +2670,7 @@ it('journalise la transformation d’une demande', function (): void {
 */
 
 it('laisse le demandeur amender et retirer sa propre demande', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2695,8 +2695,8 @@ it('laisse le demandeur amender et retirer sa propre demande', function (): void
 });
 
 it('laisse qui peut créer amender ou écarter une demande sans la traiter', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2721,8 +2721,8 @@ it('laisse qui peut créer amender ou écarter une demande sans la traiter', fun
 });
 
 it('ferme la demande à son demandeur dès qu’elle est transformée', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2756,9 +2756,9 @@ it('ferme la demande à son demandeur dès qu’elle est transformée', function
 });
 
 it('laisse intactes les actions de pointage, indépendamment du droit de créer', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
-    $assignee = maintenanceUser(['maintenance.view']);
-    $manager = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload(['assignee_user_id' => $assignee->id]))
@@ -2792,7 +2792,7 @@ it('laisse intactes les actions de pointage, indépendamment du droit de créer'
 });
 
 it('expose modification et suppression selon le droit de créer', function (): void {
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create', 'maintenance.point']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create', 'maintenance.point']);
 
     $this->actingAs($creator)
         ->post(route('maintenance.tasks.store'), maintenancePayload())
@@ -2808,7 +2808,7 @@ it('expose modification et suppression selon le droit de créer', function (): v
         ->and($seenByCreator['can_point'])->toBeTrue();
 
     // Sans le droit de créer, aucun des deux.
-    $pointer = maintenanceUser(['maintenance.view', 'maintenance.point']);
+    $pointer = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.point']);
 
     $seenByPointer = $this->actingAs($pointer)
         ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
@@ -2821,8 +2821,8 @@ it('expose modification et suppression selon le droit de créer', function (): v
 });
 
 it('ouvre modification, suppression et transformation à qui peut créer, sur une demande', function (): void {
-    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
-    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
 
     $this->actingAs($requester)
         ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
@@ -2836,4 +2836,266 @@ it('ouvre modification, suppression et transformation à qui peut créer, sur un
     expect($seen['can_update'])->toBeTrue()
         ->and($seen['can_delete'])->toBeTrue()
         ->and($seen['can_convert'])->toBeTrue();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Périmètre de visibilité — « voir toutes les tâches »
+|--------------------------------------------------------------------------
+*/
+
+/** Lecteur restreint : accès à la page, sans « voir toutes les tâches ». */
+function maintenanceRestrictedUser(array $extra = []): User
+{
+    return maintenanceUser(array_merge(['maintenance.view'], $extra));
+}
+
+it('limite un lecteur restreint à ce qui le concerne', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $alice = maintenanceRestrictedUser();
+    $said = maintenanceRestrictedUser();
+
+    // 1. Une tâche affectée à Alice, créée par quelqu'un d'autre.
+    $this->actingAs($manager)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $alice->id,
+            'task' => 'Affectée à Alice',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    // 2. Une tâche qui ne la concerne en rien.
+    $this->actingAs($manager)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $said->id,
+            'task' => 'Affectée à Saïd',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $visible = collect(
+        $this->actingAs($alice)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk()
+            ->json('groups')
+    )->flatMap(fn (array $group): array => $group['tasks'])->pluck('task');
+
+    expect($visible->all())->toBe(['Affectée à Alice']);
+});
+
+it('montre au demandeur sa demande, puis la tâche qui en découle', function (): void {
+    $alice = maintenanceRestrictedUser(['maintenance.request']);
+    $nathan = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $said = maintenanceRestrictedUser();
+    $spectator = maintenanceRestrictedUser();
+
+    $this->actingAs($alice)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Demande d’Alice']))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $seenBy = fn (User $user): array => collect(
+        $this->actingAs($user)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk()
+            ->json('groups')
+    )->flatMap(fn (array $group): array => $group['tasks'])->pluck('task')->all();
+
+    // La demande n'est visible que de son auteur.
+    expect($seenBy($alice))->toBe(['Demande d’Alice'])
+        ->and($seenBy($spectator))->toBe([])
+        ->and($seenBy($said))->toBe([]);
+
+    // Nathan la transforme et l'affecte à Saïd.
+    $this->actingAs($nathan)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'assignee_user_id' => $said->id,
+            'task' => 'Demande d’Alice',
+            'convert' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    // Alice la garde en vue, car elle en est à l'origine ; Saïd la voit comme
+    // affecté ; le spectateur ne voit toujours rien.
+    expect($seenBy($alice))->toBe(['Demande d’Alice'])
+        ->and($seenBy($said))->toBe(['Demande d’Alice'])
+        ->and($seenBy($spectator))->toBe([]);
+});
+
+it('donne à « voir toutes les tâches » la liste entière', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $alice = maintenanceRestrictedUser(['maintenance.request']);
+    $said = maintenanceRestrictedUser();
+
+    $this->actingAs($manager)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $said->id,
+            'task' => 'Tâche de Saïd',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($alice)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Demande d’Alice']))
+        ->assertSessionHasNoErrors();
+
+    // Un lecteur doté de la permission voit tout, demandes comprises.
+    $observer = maintenanceUser(['maintenance.view', 'maintenance.view.all']);
+
+    $seen = collect(
+        $this->actingAs($observer)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk()
+            ->json('groups')
+    )->flatMap(fn (array $group): array => $group['tasks'])->pluck('task')->sort()->values();
+
+    expect($seen->all())->toBe(['Demande d’Alice', 'Tâche de Saïd']);
+});
+
+it('laisse un administrateur tout voir sans permission explicite', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $said = maintenanceRestrictedUser();
+
+    $this->actingAs($manager)
+        ->post(route('maintenance.tasks.store'), maintenancePayload([
+            'assignee_user_id' => $said->id,
+            'task' => 'Tâche de Saïd',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $admin = maintenanceUser([]);
+    $admin->assignRole(Role::findOrCreate('admin', 'web'));
+    app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    $this->actingAs($admin)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 1);
+});
+
+it('calcule compteurs et groupes sur le seul périmètre visible', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $alice = maintenanceRestrictedUser();
+
+    $this->actingAs($manager);
+
+    foreach (['2026-09-01', '2026-09-02', '2026-09-03'] as $date) {
+        $this->post(route('maintenance.tasks.store'), maintenancePayload([
+            'date' => $date,
+            'fin_date' => null,
+            'task' => 'Tâche du '.$date,
+        ]))->assertSessionHasNoErrors();
+    }
+
+    $this->post(route('maintenance.tasks.store'), maintenancePayload([
+        'assignee_user_id' => $alice->id,
+        'task' => 'La seule d’Alice',
+    ]))->assertSessionHasNoErrors();
+
+    // Le gestionnaire voit les quatre, réparties en quatre groupes.
+    $this->actingAs($manager)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 4)
+        ->assertJsonPath('meta.count_groups', 4);
+
+    // Alice ne compte que la sienne : le total de l'entreprise ne lui échappe pas.
+    $this->actingAs($alice)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 1)
+        ->assertJsonPath('meta.count_groups', 1);
+});
+
+it('applique les filtres à l’intérieur du périmètre visible', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $alice = maintenanceRestrictedUser();
+
+    $this->actingAs($manager);
+
+    $this->post(route('maintenance.tasks.store'), maintenancePayload([
+        'assignee_user_id' => $alice->id,
+        'task' => 'Compresseur d’Alice',
+        'address_free' => 'Atelier central',
+    ]))->assertSessionHasNoErrors();
+
+    $this->post(route('maintenance.tasks.store'), maintenancePayload([
+        'task' => 'Compresseur des autres',
+        'address_free' => 'Atelier central',
+    ]))->assertSessionHasNoErrors();
+
+    // La recherche porte sur les deux, mais Alice n'en récupère qu'une.
+    $this->actingAs($alice)
+        ->getJson(route('maintenance.tasks.data', ['search' => 'Compresseur', 'pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 1)
+        ->assertJsonPath('groups.0.tasks.0.task', 'Compresseur d’Alice');
+
+    $this->actingAs($manager)
+        ->getJson(route('maintenance.tasks.data', ['search' => 'Compresseur', 'pointed_filter' => 'all']))
+        ->assertOk()
+        ->assertJsonPath('meta.count_tasks', 2);
+});
+
+it('borne les suggestions d’adresses au périmètre visible', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $alice = maintenanceRestrictedUser();
+
+    $this->actingAs($manager);
+
+    $this->post(route('maintenance.tasks.store'), maintenancePayload([
+        'assignee_user_id' => $alice->id,
+        'address_free' => 'Atelier visible',
+    ]))->assertSessionHasNoErrors();
+
+    $this->post(route('maintenance.tasks.store'), maintenancePayload([
+        'address_free' => 'Atelier confidentiel',
+    ]))->assertSessionHasNoErrors();
+
+    $this->actingAs($alice)
+        ->get(route('maintenance.index'))
+        ->assertOk()
+        ->assertInertia(function (Assert $page) {
+            $suggestions = $page->toArray()['props']['reference']['place_suggestions'];
+
+            expect($suggestions)->toContain('Atelier visible')
+                ->and($suggestions)->not->toContain('Atelier confidentiel');
+        });
+});
+
+it('garde un coût de requêtes stable malgré la restriction', function (): void {
+    $viewer = maintenanceRestrictedUser();
+
+    $seed = function (int $count) use ($viewer): void {
+        for ($i = 0; $i < $count; $i++) {
+            $task = new MaintenanceTask;
+            $task->fill([
+                'date' => '2026-09-0'.(($i % 9) + 1),
+                'task' => 'Tâche '.$i,
+                'assignee_user_id' => $viewer->id,
+            ]);
+            $task->created_by_user_id = $viewer->id;
+            $task->save();
+        }
+    };
+
+    $measure = function () use ($viewer): int {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->actingAs($viewer)
+            ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+            ->assertOk();
+        $count = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return $count;
+    };
+
+    $seed(3);
+    $small = $measure();
+
+    $seed(27);
+    $large = $measure();
+
+    expect($large)->toBeLessThanOrEqual($small + 5);
 });

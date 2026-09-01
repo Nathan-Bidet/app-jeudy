@@ -500,7 +500,7 @@ class MaintenanceController extends Controller
             'depots' => $depots,
             'depot_place_map' => $depotPlaceMap,
             'depot_name_suggestions' => array_values(array_keys($depotPlaceMap)),
-            'place_suggestions' => $this->service->placeSuggestions(),
+            'place_suggestions' => $this->service->placeSuggestions(request()->user()),
         ];
     }
 

@@ -59,6 +59,7 @@ class SectorController extends Controller
         'engrais.sms',
         'a_prevoir.partial_point',
         'maintenance.view',
+        'maintenance.view.all',
         'maintenance.create',
         'maintenance.request',
         'maintenance.comment_hidden.view',

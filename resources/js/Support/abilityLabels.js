@@ -24,6 +24,7 @@ const ABILITY_LABELS = {
     'ldt.export': 'Livre du Travail - Exporter',
     'ldt.sms': 'Livre du Travail - SMS',
     'maintenance.view': 'Maintenance / Entretien - Voir',
+    'maintenance.view.all': 'Maintenance / Entretien - Voir toutes les tâches',
     'maintenance.create': 'Maintenance / Entretien - Créer des tâches',
     'maintenance.request': 'Maintenance / Entretien - Demander des tâches',
     'maintenance.comment_hidden.view': 'Maintenance / Entretien - Afficher les commentaires masqués',
