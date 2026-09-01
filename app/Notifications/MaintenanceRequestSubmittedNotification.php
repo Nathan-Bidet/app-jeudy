@@ -27,6 +27,18 @@ class MaintenanceRequestSubmittedNotification extends Notification
         return ['database'];
     }
 
+    private function message(): string
+    {
+        $excerpt = MaintenanceTaskSummary::excerpt($this->task->task);
+        $date = MaintenanceTaskSummary::dateLabel($this->task);
+
+        // Sans date connue, le fragment disparaît : mieux vaut une phrase
+        // courte qu'un tiret à la place d'une information.
+        return $date === null
+            ? sprintf('Demande de %s : %s', $this->requesterLabel, $excerpt)
+            : sprintf('Demande de %s pour le %s : %s', $this->requesterLabel, $date, $excerpt);
+    }
+
     public function toArray(object $notifiable): array
     {
         return [
@@ -37,12 +49,7 @@ class MaintenanceRequestSubmittedNotification extends Notification
                 : null,
             'requester_label' => $this->requesterLabel,
             'title' => 'Nouvelle demande de maintenance',
-            'message' => sprintf(
-                'Demande de %s pour le %s : %s',
-                $this->requesterLabel,
-                $this->task->date?->format('d/m/Y') ?? '-',
-                MaintenanceTaskSummary::excerpt($this->task->task),
-            ),
+            'message' => $this->message(),
         ];
     }
 }

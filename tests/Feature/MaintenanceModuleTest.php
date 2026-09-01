@@ -3099,3 +3099,94 @@ it('garde un coût de requêtes stable malgré la restriction', function (): voi
 
     expect($large)->toBeLessThanOrEqual($small + 5);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Date affichée dans les notifications
+|--------------------------------------------------------------------------
+*/
+
+it('annonce la date souhaitée d’une demande, pas un tiret', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester->forceFill(['first_name' => 'Alice', 'last_name' => 'Blanchet'])->save();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
+            'due_date' => '2026-09-02',
+            'task' => 'ergthy',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $data = maintenanceNotificationsOf($manager)->sole();
+
+    expect($data['message'])->toBe('Demande de Alice Blanchet pour le 02/09/2026 : ergthy')
+        ->and($data['message'])->not->toContain('pour le -');
+});
+
+it('annonce la date de la tâche une fois la demande transformée', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['due_date' => '2026-09-02']))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($manager)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'due_date' => '2026-09-02',
+            'assignee_user_id' => $assignee->id,
+            'task' => 'Réparer la porte',
+            'convert' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    // Devenue tâche, c'est sa date de début qui la situe.
+    expect(maintenanceNotificationsOf($assignee)->sole()['message'])
+        ->toBe('Une tâche vous a été affectée pour le 08/09/2026 : Réparer la porte');
+});
+
+it('omet proprement le fragment de date quand aucune n’est connue', function (): void {
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $task = maintenanceTaskFor($creator, [
+        'comment_hidden' => false,
+        'task' => 'Sans aucune date',
+        'assignee_user_id' => $assignee->id,
+    ]);
+    // Cas limite : ni date de début, ni date souhaitée.
+    $task->forceFill(['date' => null, 'due_date' => null])->save();
+
+    $notification = new App\Notifications\MaintenanceTaskAssignedNotification(
+        $task->refresh(),
+        App\Notifications\MaintenanceTaskAssignedNotification::REASON_ASSIGNED,
+    );
+
+    expect($notification->message())->toBe('Une tâche vous a été affectée : Sans aucune date')
+        ->and($notification->message())->not->toContain('-');
+});
+
+it('sert la date corrigée au centre de notifications', function (): void {
+    $manager = maintenanceUser(['maintenance.view', 'maintenance.view.all', 'maintenance.create']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
+            'due_date' => '2026-09-02',
+            'task' => 'Porte d’atelier',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $response = $this->actingAs($manager)
+        ->getJson(route('notifications.latest'))
+        ->assertOk();
+
+    expect($response->json('notifications.0.message'))->toContain('02/09/2026')
+        ->and($response->getContent())->not->toContain('pour le -');
+});

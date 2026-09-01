@@ -57,14 +57,20 @@ class MaintenanceTaskAssignedNotification extends Notification
 
     public function message(): string
     {
-        $date = $this->task->date?->format('d/m/Y') ?? '-';
+        $date = MaintenanceTaskSummary::dateLabel($this->task);
         $excerpt = MaintenanceTaskSummary::excerpt($this->task->task);
 
+        // Chaque libellé a sa variante sans date : une demande peut n'en
+        // porter aucune, et un tiret n'apprendrait rien au destinataire.
         return match ($this->reason) {
             self::REASON_UNASSIGNED => sprintf('Cette tâche ne vous est plus affectée : %s', $excerpt),
-            self::REASON_UPDATED => sprintf('Votre tâche du %s a été mise à jour : %s', $date, $excerpt),
+            self::REASON_UPDATED => $date === null
+                ? sprintf('Votre tâche a été mise à jour : %s', $excerpt)
+                : sprintf('Votre tâche du %s a été mise à jour : %s', $date, $excerpt),
             self::REASON_CONVERTED => sprintf('Votre demande a été transformée en tâche : %s', $excerpt),
-            default => sprintf('Une tâche vous a été affectée pour le %s : %s', $date, $excerpt),
+            default => $date === null
+                ? sprintf('Une tâche vous a été affectée : %s', $excerpt)
+                : sprintf('Une tâche vous a été affectée pour le %s : %s', $date, $excerpt),
         };
     }
 }
