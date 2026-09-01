@@ -127,9 +127,25 @@ class MaintenanceController extends Controller
             unset($attributes['comment'], $attributes['comment_hidden']);
         }
 
-        DB::transaction(function () use ($task, $attributes, $actor): void {
+        // Transformer une demande en tâche, c'est convertir la même ligne :
+        // aucune seconde entrée n'est créée, le demandeur et l'origine sont
+        // conservés, seul converted_at fait sortir la tâche des demandes en
+        // attente.
+        $converting = $request->wantsConversion();
+
+        if ($converting) {
+            $this->authorize('convert', $task);
+        }
+
+        DB::transaction(function () use ($task, $attributes, $actor, $converting): void {
             $task->fill($attributes);
             $task->updated_by_user_id = $actor->id;
+
+            if ($converting) {
+                $task->converted_at = now();
+                $task->converted_by_user_id = $actor->id;
+            }
+
             $task->save();
         });
 
@@ -169,9 +185,33 @@ class MaintenanceController extends Controller
             ]);
         }
 
-        $this->notifier->taskUpdated($task, $before, $after, $actor->id);
+        $notified = $this->notifier->taskUpdated($task, $before, $after, $actor->id);
 
-        return back()->with('status', 'Tâche Maintenance mise à jour.');
+        if ($converting) {
+            $this->auditLogService->log([
+                'action' => 'convert_maintenance_request',
+                'module' => self::LOG_MODULE,
+                'description' => sprintf(
+                    'Demande Maintenance #%d transformée en tâche',
+                    (int) $task->id
+                ),
+                'payload' => [
+                    'task_id' => $task->id,
+                    'requested_by_user_id' => $task->requested_by_user_id,
+                    'before' => $before,
+                    'after' => $after,
+                ],
+            ]);
+
+            // Le demandeur est prévenu que sa demande est prise en charge, sauf
+            // s'il vient déjà d'être notifié comme affecté à la tâche.
+            $this->notifier->requestConverted($task, $actor->id, $notified);
+        }
+
+        return back()->with(
+            'status',
+            $converting ? 'Demande transformée en tâche.' : 'Tâche Maintenance mise à jour.'
+        );
     }
 
     public function destroy(Request $request, MaintenanceTask $task): RedirectResponse
@@ -449,6 +489,9 @@ class MaintenanceController extends Controller
         }, []);
 
         return [
+            // Dépôt de rattachement du demandeur : le serveur le connaît, le
+            // formulaire n'a pas à le deviner.
+            'current_user_depot_id' => request()->user()?->depot_id,
             'assignee_users' => $users,
             'depots' => $depots,
             'depot_place_map' => $depotPlaceMap,

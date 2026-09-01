@@ -101,6 +101,16 @@ class MaintenanceTaskPolicy
     }
 
     /**
+     * Transformer une demande en tâche réelle exige le droit de créer, pas
+     * seulement celui de demander : un demandeur ne valide pas sa propre
+     * demande. L'action n'a de sens que sur une demande encore en attente.
+     */
+    public function convert(User $user, MaintenanceTask $task): bool
+    {
+        return $task->isPendingRequest() && $this->create($user);
+    }
+
+    /**
      * Modification manuelle de la date métier du premier pointage : réservée
      * aux détenteurs du pointage définitif.
      */

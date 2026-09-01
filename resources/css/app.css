@@ -203,7 +203,7 @@ html.theme-dark textarea::placeholder {
     background-image: repeating-linear-gradient(
         45deg,
         #ffffff 0 14px,
-        #fbebc0 14px 28px
+        #fbebc073 14px 28px
     );
 }
 

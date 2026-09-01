@@ -2328,3 +2328,284 @@ it('conserve la priorité des demandes sous filtre actif', function (): void {
         ->and($groups[0]['is_request'])->toBeTrue()
         ->and($groups[1]['is_request'])->toBeFalse();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Workflow de demande simplifié et transformation en tâche
+|--------------------------------------------------------------------------
+*/
+
+function maintenanceRequestPayload(array $overrides = []): array
+{
+    return array_merge([
+        'due_date' => '2026-09-10',
+        'depot_id' => null,
+        'task' => 'Réparer la porte de l’atelier',
+        'origin' => MaintenanceTask::ORIGIN_REQUEST,
+    ], $overrides);
+}
+
+it('enregistre une demande avec ses trois seuls champs', function (): void {
+    $depot = Depot::query()->create(['name' => 'Dépôt Nord', 'city' => 'Orléans']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester->forceFill(['depot_id' => $depot->id])->save();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['depot_id' => $depot->id]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    expect($task->origin)->toBe(MaintenanceTask::ORIGIN_REQUEST)
+        ->and($task->requested_by_user_id)->toBe($requester->id)
+        ->and($task->due_date->toDateString())->toBe('2026-09-10')
+        ->and($task->depot_id)->toBe($depot->id)
+        ->and($task->task)->toBe('Réparer la porte de l’atelier')
+        ->and($task->isPendingRequest())->toBeTrue()
+        // Les champs non saisis restent vides, sans valeur inventée.
+        ->and($task->date)->toBeNull()
+        ->and($task->fin_date)->toBeNull()
+        ->and($task->assignee_user_id)->toBeNull()
+        ->and($task->assignee_label_free)->toBeNull()
+        ->and($task->address_free)->toBeNull()
+        ->and($task->comment)->toBeNull()
+        ->and($task->comment_hidden)->toBeFalse();
+});
+
+it('accepte une demande d’un utilisateur sans dépôt rattaché', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    expect($requester->depot_id)->toBeNull();
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    expect(MaintenanceTask::query()->sole()->depot_id)->toBeNull();
+});
+
+it('expose au formulaire le dépôt de rattachement du demandeur', function (): void {
+    $depot = Depot::query()->create(['name' => 'Dépôt Sud', 'city' => 'Blois']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $requester->forceFill(['depot_id' => $depot->id])->save();
+
+    $this->actingAs($requester)
+        ->get(route('maintenance.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('reference.current_user_depot_id', $depot->id)
+        );
+});
+
+it('exige la date souhaitée et la description sur une demande', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
+            'due_date' => null,
+            'task' => null,
+        ]))
+        ->assertSessionHasErrors(['due_date', 'task']);
+
+    expect(MaintenanceTask::query()->count())->toBe(0);
+});
+
+it('n’exige pas de date de début sur une demande, mais l’exige sur une création', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['date' => null]))
+        ->assertSessionHasErrors('date');
+});
+
+it('regroupe toutes les demandes en attente en tête, sans date ni affectation', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($requester);
+    foreach (['2026-09-15', '2026-09-05'] as $due) {
+        $this->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
+            'due_date' => $due,
+            'task' => 'Demande '.$due,
+        ]))->assertSessionHasNoErrors();
+    }
+
+    $this->actingAs($creator)
+        ->post(route('maintenance.tasks.store'), maintenancePayload(['task' => 'Tâche classique']))
+        ->assertSessionHasNoErrors();
+
+    $groups = $this->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups');
+
+    // Un seul groupe pour toutes les demandes, en tête.
+    expect($groups[0]['is_request'])->toBeTrue()
+        ->and($groups[0]['tasks'])->toHaveCount(2)
+        ->and($groups[0]['date'])->toBeNull()
+        // Triées par date souhaitée.
+        ->and($groups[0]['tasks'][0]['task'])->toBe('Demande 2026-09-05')
+        ->and($groups[0]['tasks'][1]['task'])->toBe('Demande 2026-09-15')
+        ->and($groups[1]['is_request'])->toBeFalse();
+});
+
+it('n’ouvre la transformation qu’à qui peut créer une tâche', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    // Le demandeur ne valide pas sa propre demande.
+    $own = $this->actingAs($requester)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->json('groups.0.tasks.0');
+    expect($own['can_convert'])->toBeFalse();
+
+    $this->actingAs($requester)
+        ->putJson(route('maintenance.tasks.update', $task), maintenancePayload([
+            'task' => 'Tentative de conversion',
+            'convert' => true,
+        ]))
+        ->assertForbidden();
+
+    expect($task->refresh()->converted_at)->toBeNull();
+
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $seen = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->json('groups.0.tasks.0');
+
+    expect($seen['can_convert'])->toBeTrue();
+});
+
+it('transforme la demande en tâche sur la même ligne, sans doublon', function (): void {
+    $depot = Depot::query()->create(['name' => 'Dépôt Est', 'city' => 'Montargis']);
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+    $assignee = maintenanceUser(['maintenance.view']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload([
+            'due_date' => '2026-09-10',
+            'depot_id' => $depot->id,
+            'task' => 'Réparer la porte',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'due_date' => '2026-09-10',
+            'depot_id' => $depot->id,
+            'task' => 'Réparer la porte',
+            'assignee_user_id' => $assignee->id,
+            'convert' => true,
+        ]))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    // Une seule ligne : la demande est devenue la tâche.
+    expect(MaintenanceTask::query()->count())->toBe(1);
+
+    $task->refresh();
+
+    expect($task->converted_at)->not->toBeNull()
+        ->and($task->converted_by_user_id)->toBe($creator->id)
+        ->and($task->isPendingRequest())->toBeFalse()
+        // Provenance conservée.
+        ->and($task->origin)->toBe(MaintenanceTask::ORIGIN_REQUEST)
+        ->and($task->requested_by_user_id)->toBe($requester->id)
+        ->and($task->date->toDateString())->toBe('2026-09-08')
+        ->and($task->assignee_user_id)->toBe($assignee->id);
+
+    // Elle a quitté la zone des demandes et rejoint les groupes ordinaires.
+    $groups = $this->actingAs($creator)
+        ->getJson(route('maintenance.tasks.data', ['pointed_filter' => 'all']))
+        ->assertOk()
+        ->json('groups');
+
+    expect($groups)->toHaveCount(1)
+        ->and($groups[0]['is_request'])->toBeFalse()
+        ->and($groups[0]['tasks'][0]['came_from_request'])->toBeTrue()
+        ->and($groups[0]['tasks'][0]['can_convert'])->toBeFalse();
+});
+
+it('prévient le demandeur que sa demande est prise en charge, une seule fois', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+    $requester->notifications()->delete();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'task' => 'Réparer la porte',
+            'convert' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    $reasons = maintenanceNotificationsOf($requester)->pluck('reason')->all();
+
+    expect($reasons)->toBe(['converted']);
+
+    // Le demandeur affecté à sa propre demande n'est pas prévenu deux fois.
+    $other = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $this->actingAs($other)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload(['task' => 'Seconde demande']))
+        ->assertSessionHasNoErrors();
+
+    $second = MaintenanceTask::query()->where('task', 'Seconde demande')->sole();
+    $other->notifications()->delete();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $second), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'task' => 'Seconde demande',
+            'assignee_user_id' => $other->id,
+            'convert' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(maintenanceNotificationsOf($other)->pluck('reason')->all())->toBe(['assigned']);
+});
+
+it('journalise la transformation d’une demande', function (): void {
+    $requester = maintenanceUser(['maintenance.view', 'maintenance.request']);
+    $creator = maintenanceUser(['maintenance.view', 'maintenance.create']);
+
+    $this->actingAs($requester)
+        ->post(route('maintenance.tasks.store'), maintenanceRequestPayload())
+        ->assertSessionHasNoErrors();
+
+    $task = MaintenanceTask::query()->sole();
+
+    $this->actingAs($creator)
+        ->put(route('maintenance.tasks.update', $task), maintenancePayload([
+            'date' => '2026-09-08',
+            'fin_date' => null,
+            'task' => 'Réparer la porte',
+            'convert' => true,
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(DB::table('audit_logs')->where('module', 'maintenance')->pluck('action')->all())
+        ->toContain('convert_maintenance_request');
+});

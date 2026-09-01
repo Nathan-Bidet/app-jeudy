@@ -375,3 +375,55 @@ describe('style des demandes', () => {
         expect(card().className).toContain('bg-[var(--app-surface-soft)]');
     });
 });
+
+describe('carte d’une demande en attente', () => {
+    function requestTask(overrides = {}) {
+        return baseTask({
+            is_request: true,
+            task: 'Réparer la porte de l’atelier',
+            due_label: '10/09/2026',
+            requested_by: 'Alice Blanchet',
+            ...overrides,
+        });
+    }
+
+    it('affiche sa propre date souhaitée dans un badge', () => {
+        render(<MaintenanceTaskCard task={requestTask()} />);
+
+        expect(screen.getByText('10/09/2026')).toBeInTheDocument();
+        // Pas de doublon avec l'ancien badge « Souhaité le ».
+        expect(screen.queryByText(/Souhaité le/)).not.toBeInTheDocument();
+    });
+
+    it('n’expose aucune action de tâche classique', () => {
+        render(
+            <MaintenanceTaskCard
+                task={requestTask({
+                    can_update: true,
+                    can_delete: true,
+                    can_point: true,
+                    can_partial_point: true,
+                    can_edit_pointing_date: true,
+                })}
+            />,
+        );
+
+        for (const name of ['Modifier', 'Supprimer', 'Pointer', 'Effectué', 'Dater']) {
+            expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+        }
+    });
+
+    it('propose « Créer la tâche » à qui peut créer, et à lui seul', () => {
+        const onConvert = vi.fn();
+        const task = requestTask({ can_convert: true });
+
+        const { rerender } = render(<MaintenanceTaskCard task={task} onConvert={onConvert} />);
+
+        const button = screen.getByRole('button', { name: 'Créer la tâche' });
+        fireEvent.click(button);
+        expect(onConvert).toHaveBeenCalledWith(task);
+
+        rerender(<MaintenanceTaskCard task={requestTask({ can_convert: false })} />);
+        expect(screen.queryByRole('button', { name: 'Créer la tâche' })).not.toBeInTheDocument();
+    });
+});

@@ -65,7 +65,7 @@ class MaintenanceService
             if (! isset($groups[$groupKey])) {
                 $groups[$groupKey] = [
                     'key' => $groupKey,
-                    'is_request' => $task->isRequest(),
+                    'is_request' => $task->isPendingRequest(),
                     'date' => $task->date?->toDateString(),
                     'date_label' => $task->date?->translatedFormat('l d/m/Y') ?? $task->date?->toDateString(),
                     'assignee' => $this->assigneeMeta($task),
@@ -75,6 +75,16 @@ class MaintenanceService
 
             $groups[$groupKey]['tasks'][] = $this->mapTask($task, $canSeeHiddenComments, $viewer, $abilities);
         }
+
+        // Les demandes n'ont pas de date de début : à l'intérieur de leur
+        // groupe, c'est la date souhaitée qui donne l'ordre.
+        foreach ($groups as &$group) {
+            if ($group['is_request']) {
+                usort($group['tasks'], static fn (array $a, array $b): int => [$a['due_date'] ?? '9999-12-31', $a['id']]
+                    <=> [$b['due_date'] ?? '9999-12-31', $b['id']]);
+            }
+        }
+        unset($group);
 
         $sortedGroups = array_values($groups);
 
@@ -170,7 +180,10 @@ class MaintenanceService
         $payload = [
             'id' => $task->id,
             'origin' => $task->origin,
-            'is_request' => $task->isRequest(),
+            'is_request' => $task->isPendingRequest(),
+            // Provenance conservée après conversion, pour la traçabilité.
+            'came_from_request' => $task->isRequest(),
+            'converted_at_label' => $task->converted_at?->format('d/m/Y'),
             'date' => $task->date?->toDateString(),
             'date_label' => $task->date?->format('d/m/Y'),
             'fin_date' => $task->fin_date?->toDateString(),
@@ -225,6 +238,8 @@ class MaintenanceService
             'can_partial_point' => $task->isPartialPointableBy($viewer),
             'can_point' => $abilities['point'],
             'can_edit_pointing_date' => $abilities['point'],
+            // Transformer une demande en tâche exige le droit de créer.
+            'can_convert' => $task->isPendingRequest() && $abilities['create'],
         ];
 
         return $payload;
@@ -251,8 +266,14 @@ class MaintenanceService
             $query->where('depot_id', (int) $filters['depot_id']);
         }
 
-        if (! empty($filters['origin'])) {
-            $query->where('origin', (string) $filters['origin']);
+        if (($filters['origin'] ?? null) === MaintenanceTask::ORIGIN_REQUEST) {
+            $query->pendingRequests();
+        } elseif (($filters['origin'] ?? null) === MaintenanceTask::ORIGIN_CREATION) {
+            // Une demande convertie compte désormais parmi les tâches.
+            $query->where(function (Builder $sub): void {
+                $sub->where('origin', MaintenanceTask::ORIGIN_CREATION)
+                    ->orWhereNotNull('converted_at');
+            });
         }
 
         $pointedFilter = $filters['pointed_filter'] ?? 'all';
@@ -311,7 +332,11 @@ class MaintenanceService
             default => 'none',
         };
 
-        return $date.'|'.$assignee.'|'.$task->origin;
+        // Seule une demande *en attente* forme un groupe à part : une fois
+        // convertie, la tâche rejoint les groupes ordinaires.
+        return $task->isPendingRequest()
+            ? 'pending-request'
+            : $date.'|'.$assignee.'|creation';
     }
 
     /**

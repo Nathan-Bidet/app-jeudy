@@ -1,5 +1,5 @@
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
-import { CalendarCheck, CalendarDays, CheckCircle2, Circle, EyeOff, Flag, Pencil, Trash2 } from 'lucide-react';
+import { CalendarCheck, CalendarDays, CheckCircle2, Circle, ClipboardCheck, EyeOff, Flag, Pencil, Trash2 } from 'lucide-react';
 
 const ACTION_TONES = {
     neutral: 'border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:border-[var(--brand-yellow-dark)]',
@@ -103,9 +103,13 @@ export default function MaintenanceTaskCard({
     onTogglePartialPoint,
     onTogglePoint,
     onEditPointingDate,
+    onConvert,
     deleting = false,
     saving = false,
 }) {
+    // Une demande en attente n'est pas encore une tâche : aucune action de
+    // tâche n'a de sens dessus, seule sa prise en charge en a une.
+    const isPendingRequest = Boolean(task.is_request);
     const partiallyPointed = Boolean(task.partially_pointed);
     const pointed = Boolean(task.pointed);
     // Le pointage a commencé dès qu'il y a quelque chose à dater : la personne
@@ -133,9 +137,10 @@ export default function MaintenanceTaskCard({
     ].filter(Boolean);
 
     // Première ligne : les actions les plus utilisées, réduites à leur icône.
-    const hasPrimaryRow = task.can_point || task.can_update || task.can_delete;
+    const hasPrimaryRow = ! isPendingRequest && (task.can_point || task.can_update || task.can_delete);
     // Dessous : les actions libellées, chacune sur sa ligne.
-    const hasStackedActions = task.can_partial_point || showPartialState || showPointingDate;
+    const hasStackedActions =
+        ! isPendingRequest && (task.can_partial_point || showPartialState || showPointingDate);
 
     return (
         <article
@@ -148,9 +153,18 @@ export default function MaintenanceTaskCard({
                 {/* Colonne gauche : tout ce qui décrit la tâche. */}
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-[var(--app-muted)]">
-                        <DateRange task={task} />
+                        {isPendingRequest ? (
+                            task.due_label ? (
+                                <span className="inline-flex items-center gap-1 rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--app-text)]">
+                                    <CalendarDays className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                    {task.due_label}
+                                </span>
+                            ) : null
+                        ) : (
+                            <DateRange task={task} />
+                        )}
 
-                        {task.due_label ? (
+                        {task.due_label && ! isPendingRequest ? (
                             <span
                                 className="inline-flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-0.5"
                                 title="Date de fin souhaitée"
@@ -230,7 +244,18 @@ export default function MaintenanceTaskCard({
 
                 {/* Colonne droite : toutes les actions, alignées verticalement.
                     Compactes et en ligne sur mobile, empilées dès sm. */}
-                {hasPrimaryRow || hasStackedActions ? (
+                {isPendingRequest ? (
+                    task.can_convert ? (
+                        <div className="flex shrink-0 flex-col gap-2 sm:w-32">
+                            <ActionButton
+                                icon={ClipboardCheck}
+                                label="Créer la tâche"
+                                title="Transformer cette demande en tâche"
+                                onClick={() => onConvert?.(task)}
+                            />
+                        </div>
+                    ) : null
+                ) : hasPrimaryRow || hasStackedActions ? (
                     <div className="flex shrink-0 flex-col gap-2 sm:w-32">
                         {hasPrimaryRow ? (
                             /* Les trois icônes sont sœurs dans un unique flex :

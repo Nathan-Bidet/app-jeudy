@@ -40,6 +40,8 @@ class MaintenanceTask extends Model
             'due_date' => 'date',
             'first_pointed_on' => 'date',
             'first_pointed_on_manual' => 'boolean',
+            'converted_at' => 'datetime',
+            'converted_by_user_id' => 'integer',
             'assignee_user_id' => 'integer',
             'depot_id' => 'integer',
             'comment_hidden' => 'boolean',
@@ -94,6 +96,26 @@ class MaintenanceTask extends Model
     public function isRequest(): bool
     {
         return $this->origin === self::ORIGIN_REQUEST;
+    }
+
+    /**
+     * Demande encore en attente de traitement. Une fois convertie, la ligne
+     * reste marquée « request » — c'est sa provenance — mais rejoint les tâches
+     * ordinaires.
+     */
+    public function isPendingRequest(): bool
+    {
+        return $this->isRequest() && $this->converted_at === null;
+    }
+
+    public function convertedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'converted_by_user_id');
+    }
+
+    public function scopePendingRequests(Builder $query): Builder
+    {
+        return $query->where('origin', self::ORIGIN_REQUEST)->whereNull('converted_at');
     }
 
     /**

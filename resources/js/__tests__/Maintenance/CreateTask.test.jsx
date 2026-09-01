@@ -341,16 +341,45 @@ describe('avatars et mise en avant des demandes', () => {
 
     it('hachure le bloc d’une demande, pas celui d’une tâche classique', () => {
         renderPage({}, [
-            group({ key: 'req', is_request: true }),
-            group({ key: 'std', is_request: false }),
+            group({
+                key: 'req',
+                is_request: true,
+                tasks: [{ id: 9, task: 'Demande en attente', is_request: true }],
+            }),
+            group({ key: 'std', tasks: [{ id: 10, task: 'Tâche classique' }] }),
         ]);
 
-        const [requestSection, standardSection] = screen
-            .getAllByText('lundi 31/08/2026')
-            .map((node) => node.closest('section'));
+        const requestSection = screen.getByText('Demande en attente').closest('section');
+        const standardSection = screen.getByText('Tâche classique').closest('section');
 
         expect(requestSection.className).toContain('maintenance-request-group');
         expect(standardSection.className).not.toContain('maintenance-request-group');
         expect(standardSection.className).toContain('bg-[var(--app-surface)]');
+    });
+
+    it('réduit l’en-tête d’un bloc de demandes au seul compteur', () => {
+        renderPage({}, [
+            group({
+                key: 'req',
+                is_request: true,
+                assignee: { type: 'none', id: null, name: 'Non affectée' },
+                tasks: [
+                    { id: 9, task: 'Demande A', is_request: true },
+                    { id: 10, task: 'Demande B', is_request: true },
+                ],
+            }),
+        ]);
+
+        expect(screen.getByText('2 tâches')).toBeInTheDocument();
+        // Ni date ni personne affectée dans l'en-tête d'une demande.
+        expect(screen.queryByText('lundi 31/08/2026')).not.toBeInTheDocument();
+        expect(screen.queryByText('Non affectée')).not.toBeInTheDocument();
+    });
+
+    it('garde date et personne affectée sur un bloc de tâches classiques', () => {
+        renderPage({}, [group({ tasks: [{ id: 11, task: 'Classique' }] })]);
+
+        expect(screen.getByText('lundi 31/08/2026')).toBeInTheDocument();
+        expect(screen.getByText('Alice Blanchet')).toBeInTheDocument();
     });
 });

@@ -22,6 +22,8 @@ class MaintenanceTaskAssignedNotification extends Notification
 
     public const REASON_UPDATED = 'updated';
 
+    public const REASON_CONVERTED = 'converted';
+
     public function __construct(
         private readonly MaintenanceTask $task,
         private readonly string $reason,
@@ -48,6 +50,7 @@ class MaintenanceTaskAssignedNotification extends Notification
         return match ($this->reason) {
             self::REASON_UNASSIGNED => 'Tâche de maintenance retirée',
             self::REASON_UPDATED => 'Tâche de maintenance modifiée',
+            self::REASON_CONVERTED => 'Demande de maintenance prise en charge',
             default => 'Nouvelle tâche de maintenance',
         };
     }
@@ -60,6 +63,7 @@ class MaintenanceTaskAssignedNotification extends Notification
         return match ($this->reason) {
             self::REASON_UNASSIGNED => sprintf('Cette tâche ne vous est plus affectée : %s', $excerpt),
             self::REASON_UPDATED => sprintf('Votre tâche du %s a été mise à jour : %s', $date, $excerpt),
+            self::REASON_CONVERTED => sprintf('Votre demande a été transformée en tâche : %s', $excerpt),
             default => sprintf('Une tâche vous a été affectée pour le %s : %s', $date, $excerpt),
         };
     }

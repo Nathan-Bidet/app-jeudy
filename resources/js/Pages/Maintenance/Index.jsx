@@ -154,6 +154,8 @@ export default function MaintenanceIndex({
     const [mobileFilterDraft, setMobileFilterDraft] = useState(() => buildFilterState(filters));
     const [modalOpen, setModalOpen] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
+    // Demande en cours de transformation : le modal complet s'ouvre pré-rempli.
+    const [convertingTask, setConvertingTask] = useState(null);
     const [taskToDelete, setTaskToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
     // Bascules de pointage appliquées avant la réponse serveur, puis effacées
@@ -336,19 +338,46 @@ export default function MaintenanceIndex({
 
     const openCreate = () => {
         setEditingTask(null);
+        setConvertingTask(null);
         form.clearErrors();
         // Après une soumission réussie, Inertia promeut les données envoyées au
         // rang de valeurs par défaut du formulaire. reset() restaurerait donc la
         // tâche qui vient d'être créée. On pose l'état vierge explicitement :
         // setData avec un objet complet remplace les données sans dépendre de
         // defaults, et setDefaults réaligne le point de référence.
-        form.setData({ ...EMPTY_FORM_STATE });
-        form.setDefaults({ ...EMPTY_FORM_STATE });
+        // Le dépôt de rattachement vient du serveur : il pré-remplit la
+        // demande sans la figer, le demandeur reste libre d'en choisir un autre.
+        const next = {
+            ...EMPTY_FORM_STATE,
+            depot_id: canCreate ? '' : String(reference?.current_user_depot_id || ''),
+        };
+
+        form.setData(next);
+        form.setDefaults(next);
+        setModalOpen(true);
+    };
+
+    /** Ouvre le modal complet, pré-rempli avec ce que la demande sait déjà. */
+    const openConversion = (task) => {
+        setEditingTask(task);
+        setConvertingTask(task);
+        form.clearErrors();
+
+        const next = {
+            ...EMPTY_FORM_STATE,
+            due_date: task.due_date || '',
+            depot_id: task.depot?.id ? String(task.depot.id) : '',
+            task: task.task || '',
+        };
+
+        form.setData(next);
+        form.setDefaults(next);
         setModalOpen(true);
     };
 
     const openEdit = (task) => {
         setEditingTask(task);
+        setConvertingTask(null);
         form.clearErrors();
         const next = {
             date: task.date || '',
@@ -374,6 +403,7 @@ export default function MaintenanceIndex({
     const closeModal = () => {
         setModalOpen(false);
         setEditingTask(null);
+        setConvertingTask(null);
         form.clearErrors();
     };
 
@@ -400,6 +430,12 @@ export default function MaintenanceIndex({
         };
 
         if (editingTask) {
+            // Transformer une demande, c'est mettre à jour sa ligne en la
+            // marquant convertie : aucune seconde tâche n'est créée.
+            if (convertingTask) {
+                form.transform((data) => ({ ...data, convert: true }));
+            }
+
             form.put(route('maintenance.tasks.update', editingTask.id), options);
 
             return;
@@ -550,22 +586,29 @@ export default function MaintenanceIndex({
                                     <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3 sm:mb-4">
                                         <div>
                                             {/* Deux badges, comme l'en-tête d'une
-                                                entrée du Livre du travail. */}
+                                                entrée du Livre du travail. Une
+                                                demande n'a ni date de début ni
+                                                personne affectée : seul le
+                                                compteur reste. */}
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <span className="inline-flex items-center gap-1 rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-[11px] font-black uppercase tracking-[0.12em]">
-                                                    <CalendarDays className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                                    {group.date_label || group.date}
-                                                </span>
+                                                {group.is_request ? null : (
+                                                    <span className="inline-flex items-center gap-1 rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-[11px] font-black uppercase tracking-[0.12em]">
+                                                        <CalendarDays className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                                        {group.date_label || group.date}
+                                                    </span>
+                                                )}
                                                 <span className="inline-flex items-center rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1 text-[10px] font-bold uppercase text-[var(--app-muted)]">
                                                     {taskCountLabel(group)}
                                                 </span>
                                             </div>
-                                            <h3 className="mt-1.5 flex min-w-0 items-center gap-2 text-base font-extrabold text-[var(--app-text)]">
-                                                <AssigneeAvatar assignee={group.assignee} />
-                                                <span className="min-w-0 break-words">
-                                                    {group.assignee?.name || 'Non affectée'}
-                                                </span>
-                                            </h3>
+                                            {group.is_request ? null : (
+                                                <h3 className="mt-1.5 flex min-w-0 items-center gap-2 text-base font-extrabold text-[var(--app-text)]">
+                                                    <AssigneeAvatar assignee={group.assignee} />
+                                                    <span className="min-w-0 break-words">
+                                                        {group.assignee?.name || 'Non affectée'}
+                                                    </span>
+                                                </h3>
+                                            )}
                                         </div>
                                     </div>
 
@@ -594,6 +637,7 @@ export default function MaintenanceIndex({
                                                 onTogglePartialPoint={togglePartialPoint}
                                                 onTogglePoint={togglePoint}
                                                 onEditPointingDate={openPointingDate}
+                                                onConvert={openConversion}
                                                 deleting={deleting && taskToDelete?.id === task.id}
                                                 saving={Boolean(savingTaskIds[task.id])}
                                             />
@@ -614,6 +658,7 @@ export default function MaintenanceIndex({
                 reference={reference}
                 mode={editingTask ? 'edit' : 'create'}
                 origin={submitOrigin}
+                converting={Boolean(convertingTask)}
                 currentAssignee={
                     editingTask?.assignee?.type === 'user' ? editingTask.assignee : null
                 }

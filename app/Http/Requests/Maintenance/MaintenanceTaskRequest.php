@@ -24,10 +24,15 @@ class MaintenanceTaskRequest extends FormRequest
      */
     public function rules(): array
     {
+        // Le formulaire de demande ne comporte que trois champs : la date
+        // souhaitée y est obligatoire, la date de début ne l'est pas — elle
+        // sera fixée par la personne qui transformera la demande en tâche.
+        $isSimplifiedRequest = $this->isSimplifiedRequest();
+
         return [
-            'date' => ['required', 'date'],
+            'date' => [Rule::requiredIf(! $isSimplifiedRequest), 'nullable', 'date'],
             'fin_date' => ['nullable', 'date', 'after_or_equal:date'],
-            'due_date' => ['nullable', 'date'],
+            'due_date' => [Rule::requiredIf($isSimplifiedRequest), 'nullable', 'date'],
 
             'assignee_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'assignee_label_free' => ['nullable', 'string', 'max:255'],
@@ -42,6 +47,10 @@ class MaintenanceTaskRequest extends FormRequest
             // Origine souhaitée. Le droit de l'utiliser est contrôlé par la
             // Policy ; toute autre valeur est rejetée ici.
             'origin' => ['nullable', Rule::in([MaintenanceTask::ORIGIN_CREATION, MaintenanceTask::ORIGIN_REQUEST])],
+
+            // Transformation d'une demande en tâche. Le droit est vérifié par
+            // MaintenanceTaskPolicy::convert dans le contrôleur.
+            'convert' => ['nullable', 'boolean'],
         ];
     }
 
@@ -52,6 +61,7 @@ class MaintenanceTaskRequest extends FormRequest
     {
         return [
             'date.required' => 'La date est obligatoire.',
+            'due_date.required' => 'La date souhaitée est obligatoire.',
             'fin_date.after_or_equal' => 'La date de fin de période ne peut pas être antérieure à la date de début.',
             'task.required' => 'La description de la tâche est obligatoire.',
             'assignee_user_id.exists' => 'Utilisateur affecté invalide.',
@@ -95,7 +105,7 @@ class MaintenanceTaskRequest extends FormRequest
         $validated = $this->validated();
 
         return [
-            'date' => $validated['date'],
+            'date' => $validated['date'] ?? null,
             'fin_date' => $validated['fin_date'] ?? null,
             'due_date' => $validated['due_date'] ?? null,
             'assignee_user_id' => $validated['assignee_user_id'] ?? null,
@@ -106,6 +116,21 @@ class MaintenanceTaskRequest extends FormRequest
             'comment' => $validated['comment'] ?? null,
             'comment_hidden' => (bool) ($validated['comment_hidden'] ?? false),
         ];
+    }
+
+    /**
+     * Soumission du formulaire de demande simplifié : une demande explicite,
+     * qui n'est pas en train d'être transformée en tâche.
+     */
+    public function isSimplifiedRequest(): bool
+    {
+        return $this->input('origin') === MaintenanceTask::ORIGIN_REQUEST
+            && ! $this->boolean('convert');
+    }
+
+    public function wantsConversion(): bool
+    {
+        return (bool) ($this->validated()['convert'] ?? false);
     }
 
     public function requestedOrigin(): ?string

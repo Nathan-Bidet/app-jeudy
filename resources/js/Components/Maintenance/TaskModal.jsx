@@ -22,8 +22,14 @@ export default function MaintenanceTaskModal({
     mode = 'create',
     origin = 'creation',
     currentAssignee = null,
+    converting = false,
     onSubmit,
 }) {
+    // Le formulaire de demande se limite à trois champs : date souhaitée,
+    // dépôt et description. Tout le reste appartient à la tâche réelle, que
+    // renseignera la personne qui prendra la demande en charge.
+    const isSimplifiedRequest = origin === 'request' && mode === 'create' && ! converting;
+
     const taskRef = useRef(null);
     const scrollRef = useRef(null);
 
@@ -103,17 +109,21 @@ export default function MaintenanceTaskModal({
         return undefined;
     }, [show]);
 
-    const title = isEditing
-        ? 'Modifier la tâche'
-        : isRequest
-            ? 'Demander une tâche'
-            : 'Nouvelle tâche';
+    const title = converting
+        ? 'Créer la tâche depuis la demande'
+        : isEditing
+            ? 'Modifier la tâche'
+            : isRequest
+                ? 'Demander une tâche'
+                : 'Nouvelle tâche';
 
-    const submitLabel = isEditing
-        ? 'Enregistrer'
-        : isRequest
-            ? 'Envoyer la demande'
-            : 'Créer la tâche';
+    const submitLabel = converting
+        ? 'Créer la tâche'
+        : isEditing
+            ? 'Enregistrer'
+            : isRequest
+                ? 'Envoyer la demande'
+                : 'Créer la tâche';
 
     const handleSubmit = (event) => {
         event.preventDefault();
@@ -157,6 +167,18 @@ export default function MaintenanceTaskModal({
                         </p>
                     ) : null}
 
+                    {isSimplifiedRequest ? (
+                        <div>
+                            <FieldLabel required>Date souhaitée</FieldLabel>
+                            <input
+                                type="date"
+                                value={form.data.due_date || ''}
+                                onChange={(event) => form.setData('due_date', event.target.value)}
+                                className="mt-1 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm"
+                            />
+                            <InputError className="mt-1" message={form.errors.due_date} />
+                        </div>
+                    ) : (
                     <div className="grid gap-3 sm:grid-cols-3">
                         <div>
                             <FieldLabel required>Date</FieldLabel>
@@ -193,7 +215,9 @@ export default function MaintenanceTaskModal({
                             <InputError className="mt-1" message={form.errors.due_date} />
                         </div>
                     </div>
+                    )}
 
+                    {isSimplifiedRequest ? null : (
                     <div>
                         <FieldLabel>Personne affectée</FieldLabel>
                         <div className="mt-1">
@@ -224,8 +248,9 @@ export default function MaintenanceTaskModal({
                             message={form.errors.assignee_user_id || form.errors.assignee_label_free}
                         />
                     </div>
+                    )}
 
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className={isSimplifiedRequest ? '' : 'grid gap-3 sm:grid-cols-2'}>
                         <div>
                             <FieldLabel>Dépôt</FieldLabel>
                             <div className="mt-1">
@@ -240,6 +265,7 @@ export default function MaintenanceTaskModal({
                             <InputError className="mt-1" message={form.errors.depot_id} />
                         </div>
 
+                        {isSimplifiedRequest ? null : (
                         <PlaceAutocompleteTextarea
                             label="Adresse / lieu libre"
                             value={form.data.address_free || ''}
@@ -249,6 +275,7 @@ export default function MaintenanceTaskModal({
                             suggestions={reference?.place_suggestions || []}
                             defaultSuggestions={reference?.depot_name_suggestions || []}
                         />
+                        )}
                     </div>
 
                     <div>
@@ -264,6 +291,7 @@ export default function MaintenanceTaskModal({
                         <InputError className="mt-1" message={form.errors.task} />
                     </div>
 
+                    {isSimplifiedRequest ? null : (
                     <div>
                         <FieldLabel>Commentaire</FieldLabel>
                         <textarea
@@ -291,6 +319,7 @@ export default function MaintenanceTaskModal({
                             </p>
                         ) : null}
                     </div>
+                    )}
                 </div>
 
                 <div className="flex flex-col-reverse gap-2 border-t border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4 sm:flex-row sm:justify-end">

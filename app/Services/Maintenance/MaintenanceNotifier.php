@@ -91,43 +91,76 @@ class MaintenanceNotifier
      * @param  array<string, mixed>  $before
      * @param  array<string, mixed>  $after
      */
-    public function taskUpdated(MaintenanceTask $task, array $before, array $after, ?int $actorId = null): void
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array<int, int> identifiants réellement notifiés
+     */
+    public function taskUpdated(MaintenanceTask $task, array $before, array $after, ?int $actorId = null): array
     {
         $previousAssignee = $this->toId($before['assignee_user_id'] ?? null);
         $currentAssignee = $this->toId($after['assignee_user_id'] ?? null);
+        $notified = [];
 
         if ($previousAssignee !== $currentAssignee) {
-            if ($previousAssignee !== null) {
-                $this->notifyAssignee(
-                    $previousAssignee,
-                    $task,
-                    MaintenanceTaskAssignedNotification::REASON_UNASSIGNED,
-                    $actorId,
-                );
+            if ($previousAssignee !== null && $this->notifyAssignee(
+                $previousAssignee,
+                $task,
+                MaintenanceTaskAssignedNotification::REASON_UNASSIGNED,
+                $actorId,
+            )) {
+                $notified[] = $previousAssignee;
             }
 
-            if ($currentAssignee !== null) {
-                $this->notifyAssignee(
-                    $currentAssignee,
-                    $task,
-                    MaintenanceTaskAssignedNotification::REASON_ASSIGNED,
-                    $actorId,
-                );
+            if ($currentAssignee !== null && $this->notifyAssignee(
+                $currentAssignee,
+                $task,
+                MaintenanceTaskAssignedNotification::REASON_ASSIGNED,
+                $actorId,
+            )) {
+                $notified[] = $currentAssignee;
             }
 
-            return;
+            return $notified;
         }
 
         // Même personne affectée : on ne la dérange que si un champ métier a
         // réellement changé.
         if ($currentAssignee === null || ! $this->businessFieldsChanged($before, $after)) {
+            return $notified;
+        }
+
+        if ($this->notifyAssignee(
+            $currentAssignee,
+            $task,
+            MaintenanceTaskAssignedNotification::REASON_UPDATED,
+            $actorId,
+        )) {
+            $notified[] = $currentAssignee;
+        }
+
+        return $notified;
+    }
+
+    /**
+     * Demande prise en charge : le demandeur en est informé, sauf s'il vient
+     * déjà de recevoir une notification pour cette même action — on ne le
+     * prévient pas deux fois.
+     *
+     * @param  array<int, int>  $alreadyNotified
+     */
+    public function requestConverted(MaintenanceTask $task, ?int $actorId = null, array $alreadyNotified = []): void
+    {
+        $requesterId = $this->toId($task->requested_by_user_id);
+
+        if ($requesterId === null || in_array($requesterId, $alreadyNotified, true)) {
             return;
         }
 
         $this->notifyAssignee(
-            $currentAssignee,
+            $requesterId,
             $task,
-            MaintenanceTaskAssignedNotification::REASON_UPDATED,
+            MaintenanceTaskAssignedNotification::REASON_CONVERTED,
             $actorId,
         );
     }
@@ -147,21 +180,21 @@ class MaintenanceNotifier
         return false;
     }
 
-    private function notifyAssignee(?int $userId, MaintenanceTask $task, string $reason, ?int $actorId): void
+    private function notifyAssignee(?int $userId, MaintenanceTask $task, string $reason, ?int $actorId): bool
     {
         if ($userId === null) {
-            return;
+            return false;
         }
 
         // On ne se notifie pas de sa propre action.
         if ($actorId !== null && (int) $actorId === $userId) {
-            return;
+            return false;
         }
 
         $user = User::query()->where('is_active', true)->find($userId);
 
         if (! $user) {
-            return;
+            return false;
         }
 
         $notification = new MaintenanceTaskAssignedNotification($task, $reason);
@@ -172,6 +205,8 @@ class MaintenanceNotifier
             'title' => $notification->title(),
             'body' => $notification->message(),
         ], $task);
+
+        return true;
     }
 
     /**
