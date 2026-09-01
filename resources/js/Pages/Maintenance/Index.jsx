@@ -3,7 +3,7 @@ import MaintenanceTaskCard from '@/Components/Maintenance/TaskCard';
 import MaintenanceTaskModal from '@/Components/Maintenance/TaskModal';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, router, useForm } from '@inertiajs/react';
-import { CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, User, UserRound } from 'lucide-react';
+import { ArrowUp, CalendarCheck, CalendarDays, Filter, ListChecks, Plus, Search, User, UserRound, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_FILTER_STATE = {
@@ -175,6 +175,16 @@ export default function MaintenanceIndex({
 
     const searchDebounceRef = useRef(null);
     const searchReadyRef = useRef(false);
+
+    // Barre d'actions flottante, calquée sur celle d'À Prévoir.
+    const [showFloatingActions, setShowFloatingActions] = useState(false);
+    const [floatingBarHeight, setFloatingBarHeight] = useState(0);
+    const floatingBarRef = useRef(null);
+    const [floatingSearchOpen, setFloatingSearchOpen] = useState(false);
+    const floatingSearchWrapperRef = useRef(null);
+    const floatingSearchInputRef = useRef(null);
+    const [floatingFiltersOpen, setFloatingFiltersOpen] = useState(false);
+    const floatingFiltersWrapperRef = useRef(null);
     const taskRefs = useRef(new Map());
     const [highlightedTaskId, setHighlightedTaskId] = useState(null);
 
@@ -305,6 +315,82 @@ export default function MaintenanceIndex({
         );
     };
 
+    useEffect(() => {
+        const onScroll = () => setShowFloatingActions(window.scrollY > 0);
+
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+
+        return () => window.removeEventListener('scroll', onScroll);
+    }, []);
+
+    // Réserve en bas de page la place occupée par la barre, sur mobile.
+    useEffect(() => {
+        const el = floatingBarRef.current;
+        if (!el) return undefined;
+
+        setFloatingBarHeight(el.getBoundingClientRect().height);
+
+        // ResizeObserver n'existe pas partout : la réserve d'espace est un
+        // confort, elle ne doit pas faire tomber la page là où il manque.
+        if (typeof ResizeObserver === 'undefined') {
+            return undefined;
+        }
+
+        const observer = new ResizeObserver(([entry]) => setFloatingBarHeight(entry.contentRect.height));
+        observer.observe(el);
+
+        return () => observer.disconnect();
+    }, [showFloatingActions, floatingSearchOpen, floatingFiltersOpen]);
+
+    useEffect(() => {
+        if (!floatingSearchOpen) return undefined;
+
+        floatingSearchInputRef.current?.focus();
+
+        const handlePointerDown = (event) => {
+            if (floatingSearchWrapperRef.current?.contains(event.target)) return;
+            setFloatingSearchOpen(false);
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') setFloatingSearchOpen(false);
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('touchstart', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('touchstart', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [floatingSearchOpen]);
+
+    useEffect(() => {
+        if (!floatingFiltersOpen) return undefined;
+
+        const handlePointerDown = (event) => {
+            if (floatingFiltersWrapperRef.current?.contains(event.target)) return;
+            setFloatingFiltersOpen(false);
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') setFloatingFiltersOpen(false);
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('touchstart', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('touchstart', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [floatingFiltersOpen]);
+
     const submitFilters = (nextFilters = localFilters) => {
         router.get(
             route('maintenance.index'),
@@ -345,6 +431,11 @@ export default function MaintenanceIndex({
      * Listes déroulantes : appliquées aussitôt, il n'y a rien à attendre.
      * La recherche et les dates, elles, passent par le délai ci-dessus.
      */
+    /** Chemin unique de la recherche : l'en-tête et la barre flottante y écrivent. */
+    const onSearchChange = (value) => {
+        setLocalFilters((prev) => ({ ...prev, search: String(value ?? '') }));
+    };
+
     const applyImmediately = (patch) => {
         setLocalFilters((prev) => {
             const next = { ...prev, ...patch };
@@ -503,7 +594,7 @@ export default function MaintenanceIndex({
                     <input
                         type="text"
                         value={localFilters.search}
-                        onChange={(event) => setLocalFilters((prev) => ({ ...prev, search: event.target.value }))}
+                        onChange={(event) => onSearchChange(event.target.value)}
                         placeholder="Tâche, personne, lieu…"
                         className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] py-2 pl-9 pr-3 text-sm"
                     />
@@ -542,7 +633,7 @@ export default function MaintenanceIndex({
                         <input
                             type="text"
                             value={localFilters.search}
-                            onChange={(event) => setLocalFilters((prev) => ({ ...prev, search: event.target.value }))}
+                            onChange={(event) => onSearchChange(event.target.value)}
                             placeholder="Tâche, personne, lieu, dépôt…"
                             className="h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] py-2 pl-9 pr-3 text-sm"
                         />
@@ -670,6 +761,128 @@ export default function MaintenanceIndex({
                     </>
                 )}
             </div>
+
+            {/* Réserve la place occupée par la barre flottante sur mobile. */}
+            {floatingBarHeight > 0 ? (
+                <div className="lg:hidden" style={{ height: `${floatingBarHeight + 24}px` }} aria-hidden="true" />
+            ) : null}
+
+            {/* Barre d'actions flottante, reprise d'À Prévoir : mêmes classes,
+                même déclenchement au scroll, même recherche extensible. Les
+                champs du panneau sont exactement ceux de l'en-tête, liés au
+                même état : aucune copie du filtrage. */}
+            {showFloatingActions || floatingSearchOpen || floatingFiltersOpen ? (
+                <div
+                    ref={floatingBarRef}
+                    className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.1rem)] right-3 z-20 flex items-end gap-2 md:bottom-4 md:right-4"
+                >
+                    {canCreate ? (
+                        <button
+                            type="button"
+                            onClick={openCreate}
+                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] text-[var(--color-black)] shadow-lg shadow-black/10"
+                        >
+                            <Plus className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            <span>Ajouter</span>
+                        </button>
+                    ) : null}
+
+                    <div ref={floatingSearchWrapperRef} className="flex items-center justify-end">
+                        <div
+                            className={`overflow-hidden transition-all duration-200 ease-out ${
+                                floatingSearchOpen
+                                    ? 'w-[min(22rem,calc(100vw-5.5rem))] opacity-100'
+                                    : 'w-0 opacity-0'
+                            }`}
+                        >
+                            <div className="relative overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-lg shadow-black/10 transition focus-within:border-[var(--brand-yellow-dark)]">
+                                <Search
+                                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]"
+                                    strokeWidth={2.1}
+                                />
+                                <input
+                                    ref={floatingSearchInputRef}
+                                    type="text"
+                                    value={localFilters.search}
+                                    onChange={(event) => onSearchChange(event.target.value)}
+                                    placeholder="Rechercher..."
+                                    className="h-9 w-full bg-transparent py-2 pl-9 pr-9 text-sm font-medium outline-none placeholder:text-[var(--app-muted)]"
+                                />
+                                {localFilters.search ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onSearchChange('')}
+                                        aria-label="Effacer la recherche"
+                                        className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--app-muted)] transition hover:bg-[var(--app-surface-soft)] hover:text-[var(--app-text)]"
+                                    >
+                                        <X className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {floatingSearchOpen ? null : (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setFloatingFiltersOpen(false);
+                                    setFloatingSearchOpen(true);
+                                }}
+                                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] shadow-lg shadow-black/10 transition hover:border-[var(--brand-yellow-dark)]"
+                            >
+                                <Search className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                <span>Recherche</span>
+                            </button>
+                        )}
+                    </div>
+
+                    <div ref={floatingFiltersWrapperRef} className="relative">
+                        {floatingFiltersOpen ? (
+                            <div className="absolute bottom-full right-0 mb-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-3 shadow-lg shadow-black/10">
+                                <div className="grid gap-3">
+                                    <FilterFields
+                                        filters={localFilters}
+                                        setFilters={setLocalFilters}
+                                        onSelectChange={applyImmediately}
+                                        stacked
+                                    />
+
+                                    <button
+                                        type="button"
+                                        onClick={resetFilters}
+                                        className="h-10 rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em]"
+                                    >
+                                        Effacer les filtres
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setFloatingSearchOpen(false);
+                                setFloatingFiltersOpen((open) => !open);
+                            }}
+                            aria-expanded={floatingFiltersOpen}
+                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-2.5 text-[11px] font-black uppercase tracking-[0.1em] shadow-lg shadow-black/10 transition hover:border-[var(--brand-yellow-dark)]"
+                        >
+                            <Filter className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            <span>Filtres</span>
+                        </button>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                        title="Remonter en haut"
+                        aria-label="Remonter en haut"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] shadow-lg shadow-black/10"
+                    >
+                        <ArrowUp className="h-4.5 w-4.5" strokeWidth={2.4} />
+                    </button>
+                </div>
+            ) : null}
 
             <MaintenanceTaskModal
                 show={modalOpen}

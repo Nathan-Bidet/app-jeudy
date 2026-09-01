@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 /**
@@ -84,7 +84,7 @@ describe('filtres automatiques', () => {
         expect(screen.getAllByRole('button', { name: 'Effacer' }).length).toBeGreaterThan(0);
 
         // Le modal mobile, à brouillon, en conserve un — comme À Prévoir.
-        fireEvent.click(screen.getByRole('button', { name: /filtres/i }));
+        fireEvent.click(screen.getByRole('button', { name: 'Filtres' }));
 
         expect(screen.getByRole('button', { name: 'Appliquer' })).toBeInTheDocument();
     });
@@ -226,5 +226,158 @@ describe('filtres automatiques', () => {
             preserveScroll: true,
             replace: true,
         });
+    });
+});
+
+describe('barre d’actions flottante', () => {
+    /** Simule un défilement : la barre ne s'affiche qu'une fois la page descendue. */
+    function scrollDown() {
+        window.scrollY = 400;
+        fireEvent.scroll(window);
+    }
+
+    function floatingBar() {
+        return screen.getByLabelText('Remonter en haut').closest('div');
+    }
+
+    afterEach(() => {
+        window.scrollY = 0;
+    });
+
+    it('reste masquée tant que la page n’a pas défilé', () => {
+        renderPage();
+
+        expect(screen.queryByLabelText('Remonter en haut')).not.toBeInTheDocument();
+
+        scrollDown();
+
+        expect(screen.getByLabelText('Remonter en haut')).toBeInTheDocument();
+    });
+
+    it('ramène en haut de page en douceur', () => {
+        const scrollTo = vi.fn();
+        window.scrollTo = scrollTo;
+
+        renderPage();
+        scrollDown();
+
+        fireEvent.click(screen.getByLabelText('Remonter en haut'));
+
+        expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+    });
+
+    it('n’expose « Ajouter » qu’à qui peut créer directement', () => {
+        const { unmount } = render(
+            <MaintenanceIndex
+                groups={[]}
+                meta={{}}
+                filters={{}}
+                reference={{ assignee_users: [], depots: [] }}
+                permissions={{ can_create: true }}
+            />,
+        );
+        scrollDown();
+
+        expect(within(floatingBar()).getByRole('button', { name: /ajouter/i })).toBeInTheDocument();
+
+        unmount();
+
+        render(
+            <MaintenanceIndex
+                groups={[]}
+                meta={{}}
+                filters={{}}
+                reference={{ assignee_users: [], depots: [] }}
+                permissions={{ can_create: false, can_request: true }}
+            />,
+        );
+        scrollDown();
+
+        expect(within(floatingBar()).queryByRole('button', { name: /ajouter/i })).not.toBeInTheDocument();
+    });
+
+    it('partage l’état de recherche avec le champ de l’en-tête', () => {
+        renderPage();
+        scrollDown();
+
+        fireEvent.click(within(floatingBar()).getByRole('button', { name: 'Recherche' }));
+
+        const floatingInput = screen.getByPlaceholderText('Rechercher...');
+        fireEvent.change(floatingInput, { target: { value: 'montet' } });
+
+        // L'en-tête reflète aussitôt la saisie : un seul état, pas deux.
+        expect(searchInput()).toHaveValue('montet');
+
+        vi.advanceTimersByTime(300);
+
+        expect(routerMock.get).toHaveBeenCalledTimes(1);
+        expect(lastVisit()[1].search).toBe('montet');
+    });
+
+    it('reprend la recherche déjà active à l’ouverture', () => {
+        renderPage({ search: 'montet' });
+        scrollDown();
+
+        fireEvent.click(within(floatingBar()).getByRole('button', { name: 'Recherche' }));
+
+        expect(screen.getByPlaceholderText('Rechercher...')).toHaveValue('montet');
+    });
+
+    it('filtre depuis le panneau flottant et synchronise l’en-tête', () => {
+        renderPage();
+        scrollDown();
+
+        fireEvent.click(within(floatingBar()).getByRole('button', { name: 'Filtres' }));
+
+        // Le panneau reprend les mêmes champs : origine y est présente deux fois.
+        const origins = screen.getAllByDisplayValue('Toutes origines');
+        expect(origins).toHaveLength(2);
+
+        fireEvent.change(origins[origins.length - 1], { target: { value: 'request' } });
+
+        expect(routerMock.get).toHaveBeenCalledTimes(1);
+        expect(lastVisit()[1].origin).toBe('request');
+        // Les deux champs affichent la même valeur.
+        expect(screen.getAllByDisplayValue('Demandes')).toHaveLength(2);
+    });
+
+    it('efface tous les filtres depuis le panneau flottant', () => {
+        renderPage({ search: 'montet', origin: 'request' });
+        scrollDown();
+
+        fireEvent.click(within(floatingBar()).getByRole('button', { name: 'Filtres' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Effacer les filtres' }));
+
+        const [, params] = lastVisit();
+
+        expect(params.search).toBeUndefined();
+        expect(params.origin).toBeUndefined();
+        expect(searchInput()).toHaveValue('');
+    });
+
+    it('n’ouvre jamais recherche et filtres en même temps', () => {
+        renderPage();
+        scrollDown();
+
+        fireEvent.click(within(floatingBar()).getByRole('button', { name: 'Filtres' }));
+        expect(screen.getByRole('button', { name: 'Effacer les filtres' })).toBeInTheDocument();
+
+        fireEvent.click(within(floatingBar()).getByRole('button', { name: 'Recherche' }));
+
+        expect(screen.queryByRole('button', { name: 'Effacer les filtres' })).not.toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Rechercher...')).toBeInTheDocument();
+    });
+
+    it('referme le panneau de filtres par un second clic', () => {
+        renderPage();
+        scrollDown();
+
+        const button = within(floatingBar()).getByRole('button', { name: 'Filtres' });
+
+        fireEvent.click(button);
+        expect(screen.getByRole('button', { name: 'Effacer les filtres' })).toBeInTheDocument();
+
+        fireEvent.click(button);
+        expect(screen.queryByRole('button', { name: 'Effacer les filtres' })).not.toBeInTheDocument();
     });
 });
