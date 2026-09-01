@@ -74,7 +74,14 @@ function buildFilterState(raw = {}) {
     };
 }
 
-function FilterFields({ filters, setFilters, stacked = false }) {
+/**
+ * @param setFilters       met à jour l'état (dates : soumission différée)
+ * @param onSelectChange   applique aussitôt (listes déroulantes)
+ */
+function FilterFields({ filters, setFilters, onSelectChange = null, stacked = false }) {
+    const changeSelect = (patch) =>
+        onSelectChange ? onSelectChange(patch) : setFilters((prev) => ({ ...prev, ...patch }));
+
     return (
         <>
             <label className={`relative block ${stacked ? '' : 'lg:w-[165px]'}`}>
@@ -112,7 +119,7 @@ function FilterFields({ filters, setFilters, stacked = false }) {
                 <User className={`pointer-events-none absolute left-3 h-4 w-4 text-[var(--app-muted)] ${stacked ? 'top-[calc(50%+8px)] -translate-y-1/2' : 'top-1/2 -translate-y-1/2'}`} />
                 <select
                     value={filters.origin}
-                    onChange={(event) => setFilters((prev) => ({ ...prev, origin: event.target.value }))}
+                    onChange={(event) => changeSelect({ origin: event.target.value })}
                     className={`${stacked ? 'mt-1' : ''} h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm`}
                 >
                     <option value="">Toutes origines</option>
@@ -128,7 +135,7 @@ function FilterFields({ filters, setFilters, stacked = false }) {
                 <ListChecks className={`pointer-events-none absolute left-3 h-4 w-4 text-[var(--app-muted)] ${stacked ? 'top-[calc(50%+8px)] -translate-y-1/2' : 'top-1/2 -translate-y-1/2'}`} />
                 <select
                     value={filters.pointed_filter}
-                    onChange={(event) => setFilters((prev) => ({ ...prev, pointed_filter: event.target.value }))}
+                    onChange={(event) => changeSelect({ pointed_filter: event.target.value })}
                     className={`${stacked ? 'mt-1' : ''} h-10 w-full rounded-xl border-2 border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 pl-9 text-sm`}
                 >
                     <option value="all">Toutes</option>
@@ -329,7 +336,23 @@ export default function MaintenanceIndex({
                 window.clearTimeout(searchDebounceRef.current);
             }
         };
-    }, [localFilters.search]);
+        // Recherche et dates passent par le même délai : taper une date à la
+        // main produit des valeurs vides intermédiaires, qui sans cela
+        // déclencheraient plusieurs allers-retours.
+    }, [localFilters.search, localFilters.date_from, localFilters.date_to]);
+
+    /**
+     * Listes déroulantes : appliquées aussitôt, il n'y a rien à attendre.
+     * La recherche et les dates, elles, passent par le délai ci-dessus.
+     */
+    const applyImmediately = (patch) => {
+        setLocalFilters((prev) => {
+            const next = { ...prev, ...patch };
+            submitFilters(next);
+
+            return next;
+        });
+    };
 
     const resetFilters = () => {
         setLocalFilters({ ...EMPTY_FILTER_STATE });
@@ -525,15 +548,11 @@ export default function MaintenanceIndex({
                         />
                     </label>
 
-                    <FilterFields filters={localFilters} setFilters={setLocalFilters} />
-
-                    <button
-                        type="button"
-                        onClick={() => submitFilters(localFilters)}
-                        className="h-10 shrink-0 rounded-xl border-2 border-[var(--app-border)] bg-[var(--brand-yellow-dark)] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--color-black)]"
-                    >
-                        Appliquer
-                    </button>
+                    <FilterFields
+                        filters={localFilters}
+                        setFilters={setLocalFilters}
+                        onSelectChange={applyImmediately}
+                    />
 
                     <button
                         type="button"
