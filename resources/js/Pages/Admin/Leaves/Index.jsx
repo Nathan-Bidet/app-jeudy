@@ -1,21 +1,28 @@
+import DeleteValidationGroupModal from '@/Components/Admin/DeleteValidationGroupModal';
+import ValidationGroupModal from '@/Components/Admin/ValidationGroupModal';
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Head, router, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 
+const EMPTY_VALIDATION_GROUP = {
+    name: '',
+    validator_1_id: '',
+    validator_2_id: '',
+    member_user_ids: [],
+};
+
 export default function AdminLeavesIndex({
     users = [],
-    validatorsByUser = {},
+    validationGroups = [],
+    validationGroupByUser = {},
     hrUserIds = [],
     allowedCreatorTargetsByCreator = {},
     hasAllowedCreatorPairConfig = false,
     leaveTypes = [],
 }) {
-    const validatorsForm = useForm({
-        validators: users.map((user) => ({
-            target_user_id: Number(user.id),
-            validator_user_id: validatorsByUser[user.id] ?? '',
-        })),
-    });
+    const validationGroupForm = useForm({ ...EMPTY_VALIDATION_GROUP });
+    const [validationGroupModal, setValidationGroupModal] = useState(null);
+    const [validationGroupToDelete, setValidationGroupToDelete] = useState(null);
     const rhForm = useForm({
         hr_user_ids: hrUserIds.map((id) => Number(id)),
     });
@@ -78,22 +85,70 @@ export default function AdminLeavesIndex({
         return `${baseLabel} (${sectorLabels.join(', ')})`;
     };
 
-    const updateValidator = (targetUserId, validatorUserId) => {
-        validatorsForm.setData(
-            'validators',
-            validatorsForm.data.validators.map((row) => (
-                row.target_user_id === targetUserId
-                    ? { ...row, validator_user_id: validatorUserId === '' ? '' : Number(validatorUserId) }
-                    : row
-            )),
-        );
+    // Le secteur reste affiché à côté du nom : c'est ce qui permettait de
+    // distinguer deux homonymes dans l'ancien écran des valideurs.
+    const validationGroupUsers = users.map((user) => ({
+        id: Number(user.id),
+        label: formatUserWithSectors(user),
+    }));
+
+    const openValidationGroupCreate = () => {
+        validationGroupForm.clearErrors();
+        validationGroupForm.setData({ ...EMPTY_VALIDATION_GROUP });
+        setValidationGroupModal({ mode: 'create', group: null });
     };
 
-    const submitValidators = (event) => {
+    const openValidationGroupEdit = (group) => {
+        validationGroupForm.clearErrors();
+        validationGroupForm.setData({
+            name: group.name ?? '',
+            validator_1_id: group.validator_1_id ?? '',
+            validator_2_id: group.validator_2_id ?? '',
+            member_user_ids: (group.member_user_ids ?? []).map((id) => Number(id)),
+        });
+        setValidationGroupModal({ mode: 'edit', group });
+    };
+
+    const closeValidationGroupModal = () => {
+        setValidationGroupModal(null);
+        validationGroupForm.clearErrors();
+    };
+
+    const submitValidationGroup = (event) => {
         event.preventDefault();
 
-        validatorsForm.put(route('admin.leaves.user-validators.update'), {
+        if (!validationGroupModal) {
+            return;
+        }
+
+        const options = {
             preserveScroll: true,
+            onSuccess: () => {
+                closeValidationGroupModal();
+                validationGroupForm.setData({ ...EMPTY_VALIDATION_GROUP });
+            },
+        };
+
+        if (validationGroupModal.mode === 'edit') {
+            validationGroupForm.put(
+                route('admin.leaves.validation-groups.update', validationGroupModal.group.id),
+                options,
+            );
+
+            return;
+        }
+
+        validationGroupForm.post(route('admin.leaves.validation-groups.store'), options);
+    };
+
+    const confirmValidationGroupDelete = () => {
+        if (!validationGroupToDelete) {
+            return;
+        }
+
+        router.delete(route('admin.leaves.validation-groups.destroy', validationGroupToDelete.id), {
+            preserveScroll: true,
+            onFinish: () => setValidationGroupToDelete(null),
         });
     };
 
@@ -240,44 +295,73 @@ export default function AdminLeavesIndex({
                 </header>
 
                 <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4">
-                    <h2 className="text-base font-semibold text-[var(--app-text)]">Valideurs par utilisateur</h2>
-                    <form className="mt-3 space-y-3" onSubmit={submitValidators}>
-                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                            {validatorsForm.data.validators.map((row) => {
-                                const targetUser = users.find((item) => Number(item.id) === Number(row.target_user_id));
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                            <h2 className="text-base font-semibold text-[var(--app-text)]">Groupes de validation</h2>
+                            <p className="mt-1 text-sm text-[var(--app-muted)]">
+                                Chaque groupe réunit des utilisateurs derrière deux valideurs. Un utilisateur n'appartient qu'à un seul groupe.
+                            </p>
+                        </div>
 
-                                return (
-                                    <div key={row.target_user_id} className="grid gap-2 rounded-xl border border-[var(--app-border)] p-3 md:grid-cols-2">
-                                        <p className="text-sm font-medium text-[var(--app-text)]">
-                                            {targetUser ? formatUserWithSectors(targetUser) : `Utilisateur #${row.target_user_id}`}
-                                        </p>
-                                        <select
-                                            value={row.validator_user_id}
-                                            onChange={(event) => updateValidator(row.target_user_id, event.target.value)}
-                                            className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
-                                        >
-                                            <option value="">Aucun valideur</option>
-                                            {users.map((user) => (
-                                                <option key={user.id} value={user.id}>
-                                                    {formatUserWithSectors(user)}
-                                                </option>
-                                            ))}
-                                        </select>
+                        <button
+                            type="button"
+                            onClick={openValidationGroupCreate}
+                            className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-4 py-2 text-sm font-semibold text-[var(--app-text)]"
+                        >
+                            + Créer un groupe
+                        </button>
+                    </div>
+
+                    {validationGroups.length === 0 ? (
+                        <p className="mt-3 rounded-xl border border-dashed border-[var(--app-border)] px-3 py-6 text-center text-sm text-[var(--app-muted)]">
+                            Aucun groupe de validation pour le moment.
+                        </p>
+                    ) : (
+                        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                            {validationGroups.map((group) => (
+                                <div key={group.id} className="flex flex-col gap-3 rounded-xl border border-[var(--app-border)] p-3">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <p className="text-sm font-semibold text-[var(--app-text)]">{group.name}</p>
+                                        <span className="shrink-0 rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs font-semibold text-[var(--app-muted)]">
+                                            {group.member_count} utilisateur{group.member_count > 1 ? 's' : ''}
+                                        </span>
                                     </div>
-                                );
-                            })}
-                        </div>
 
-                        <div className="pt-1">
-                            <button
-                                type="submit"
-                                disabled={validatorsForm.processing}
-                                className="rounded-lg border border-[var(--app-border)] px-4 py-2 text-sm font-semibold text-[var(--app-text)] disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                Enregistrer les valideurs
-                            </button>
+                                    <dl className="grid gap-1 text-sm">
+                                        <div className="flex flex-wrap items-baseline gap-1">
+                                            <dt className="text-[var(--app-muted)]">Valideur 1 :</dt>
+                                            <dd className="text-[var(--app-text)]">
+                                                {group.validator_1_label ?? 'Non défini'}
+                                            </dd>
+                                        </div>
+                                        <div className="flex flex-wrap items-baseline gap-1">
+                                            <dt className="text-[var(--app-muted)]">Valideur 2 :</dt>
+                                            <dd className="text-[var(--app-text)]">
+                                                {group.validator_2_label ?? 'Non défini'}
+                                            </dd>
+                                        </div>
+                                    </dl>
+
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => openValidationGroupEdit(group)}
+                                            className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-semibold text-[var(--app-text)]"
+                                        >
+                                            Modifier
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setValidationGroupToDelete(group)}
+                                            className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-semibold text-red-600"
+                                        >
+                                            Supprimer
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-                    </form>
+                    )}
                 </section>
 
                 <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4">
@@ -615,6 +699,24 @@ export default function AdminLeavesIndex({
                     </div>
                 </section>
             </div>
+
+            <ValidationGroupModal
+                show={Boolean(validationGroupModal)}
+                mode={validationGroupModal?.mode ?? 'create'}
+                form={validationGroupForm}
+                users={validationGroupUsers}
+                groupByUser={validationGroupByUser}
+                editingGroupId={validationGroupModal?.group?.id ?? null}
+                onClose={closeValidationGroupModal}
+                onSubmit={submitValidationGroup}
+            />
+
+            <DeleteValidationGroupModal
+                group={validationGroupToDelete}
+                processing={false}
+                onClose={() => setValidationGroupToDelete(null)}
+                onConfirm={confirmValidationGroupDelete}
+            />
         </AdminLayout>
     );
 }

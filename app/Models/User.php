@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasOneThrough;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
@@ -135,5 +137,46 @@ class User extends Authenticatable
     public function pushSubscriptions(): HasMany
     {
         return $this->hasMany(PushSubscription::class);
+    }
+
+    /**
+     * Appartenance de l'utilisateur à un groupe de validation. Au plus une
+     * ligne : l'unicité est garantie par la base.
+     */
+    public function validationGroupMembership(): HasOne
+    {
+        return $this->hasOne(ValidationGroupUser::class);
+    }
+
+    /**
+     * Groupe de validation auquel appartient l'utilisateur, ou null.
+     */
+    public function validationGroup(): HasOneThrough
+    {
+        return $this->hasOneThrough(
+            ValidationGroup::class,
+            ValidationGroupUser::class,
+            'user_id',
+            'id',
+            'id',
+            'validation_group_id',
+        );
+    }
+
+    /**
+     * Groupes dont l'utilisateur est Valideur 1. Être valideur n'a rien à voir
+     * avec l'appartenance : un même valideur peut couvrir plusieurs groupes.
+     */
+    public function validationGroupsAsValidator1(): HasMany
+    {
+        return $this->hasMany(ValidationGroup::class, 'validator_1_id');
+    }
+
+    /**
+     * Groupes dont l'utilisateur est Valideur 2.
+     */
+    public function validationGroupsAsValidator2(): HasMany
+    {
+        return $this->hasMany(ValidationGroup::class, 'validator_2_id');
     }
 }

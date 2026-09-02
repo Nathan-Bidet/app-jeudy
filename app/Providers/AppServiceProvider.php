@@ -14,6 +14,7 @@ use App\Models\Depot;
 use App\Models\FormattingRule;
 use App\Models\MaintenanceTask;
 use App\Models\Transporter;
+use App\Models\ValidationGroup;
 use App\Policies\DirectoryPolicy;
 use App\Policies\DepotPolicy;
 use App\Policies\FormattingRulePolicy;
@@ -21,6 +22,7 @@ use App\Policies\GaragePolicy;
 use App\Policies\MaintenanceTaskPolicy;
 use App\Policies\TransporterPolicy;
 use App\Policies\VehiclePolicy;
+use App\Policies\ValidationGroupPolicy;
 use App\Policies\VehicleTypePolicy;
 use App\Services\AuditLogService;
 use Illuminate\Auth\Events\Failed;
@@ -149,6 +151,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Transporter::class, TransporterPolicy::class);
         Gate::policy(FormattingRule::class, FormattingRulePolicy::class);
         Gate::policy(MaintenanceTask::class, MaintenanceTaskPolicy::class);
+        Gate::policy(ValidationGroup::class, ValidationGroupPolicy::class);
 
         Gate::before(function ($user, string $ability) {
             if (method_exists($user, 'hasRole') && $user->hasRole('admin')) {

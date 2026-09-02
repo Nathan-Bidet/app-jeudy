@@ -7,10 +7,10 @@ use App\Models\LeaveAllowedCreator;
 use App\Models\LeaveAllowedCreatorPair;
 use App\Models\LeaveHrUser;
 use App\Models\LeaveSectorValidator;
-use App\Models\LeaveUserValidator;
 use App\Models\LeaveType;
 use App\Models\LeaveTypeUserVisibility;
 use App\Models\User;
+use App\Models\ValidationGroup;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -48,10 +48,42 @@ class LeaveSettingsController extends Controller
             ->values()
             ->all();
 
-        $validatorsByUser = LeaveUserValidator::query()
-            ->pluck('validator_user_id', 'target_user_id')
-            ->map(fn ($validatorId) => (int) $validatorId)
+        $validationGroups = ValidationGroup::query()
+            ->with([
+                'validator1:id,name,first_name,last_name,email',
+                'validator2:id,name,first_name,last_name,email',
+                'memberships:id,validation_group_id,user_id',
+            ])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (ValidationGroup $group): array => [
+                'id' => (int) $group->id,
+                'name' => $group->name,
+                'validator_1_id' => $group->validator_1_id !== null ? (int) $group->validator_1_id : null,
+                'validator_2_id' => $group->validator_2_id !== null ? (int) $group->validator_2_id : null,
+                'validator_1_label' => $group->validator1 ? $this->userLabel($group->validator1) : null,
+                'validator_2_label' => $group->validator2 ? $this->userLabel($group->validator2) : null,
+                'member_user_ids' => $group->memberships
+                    ->pluck('user_id')
+                    ->map(fn ($id): int => (int) $id)
+                    ->values()
+                    ->all(),
+                'member_count' => $group->memberships->count(),
+            ])
+            ->values()
             ->all();
+
+        // Appartenances à plat : le formulaire s'en sert pour griser les
+        // utilisateurs déjà pris et nommer le groupe qui les retient.
+        $validationGroupByUser = [];
+        foreach ($validationGroups as $group) {
+            foreach ($group['member_user_ids'] as $memberId) {
+                $validationGroupByUser[$memberId] = [
+                    'group_id' => $group['id'],
+                    'group_name' => $group['name'],
+                ];
+            }
+        }
 
         $hrUserIds = LeaveHrUser::query()
             ->pluck('user_id')
@@ -95,43 +127,13 @@ class LeaveSettingsController extends Controller
 
         return Inertia::render('Admin/Leaves/Index', [
             'users' => $users,
-            'validatorsByUser' => $validatorsByUser,
+            'validationGroups' => $validationGroups,
+            'validationGroupByUser' => (object) $validationGroupByUser,
             'hrUserIds' => $hrUserIds,
             'allowedCreatorTargetsByCreator' => $allowedCreatorTargetsByCreator,
             'hasAllowedCreatorPairConfig' => $hasAllowedCreatorPairConfig,
             'leaveTypes' => $leaveTypes,
         ]);
-    }
-
-    public function updateUserValidators(Request $request): RedirectResponse
-    {
-        abort_unless((bool) $request->user()?->hasRole('admin'), 403);
-
-        $validated = $request->validate([
-            'validators' => ['required', 'array'],
-            'validators.*.target_user_id' => ['required', 'integer', 'exists:users,id'],
-            'validators.*.validator_user_id' => ['nullable', 'integer', 'exists:users,id'],
-        ]);
-
-        foreach ($validated['validators'] as $row) {
-            $targetUserId = (int) $row['target_user_id'];
-            $validatorUserId = $row['validator_user_id'] ?? null;
-
-            if ($validatorUserId === null || $validatorUserId === '') {
-                LeaveUserValidator::query()
-                    ->where('target_user_id', $targetUserId)
-                    ->delete();
-
-                continue;
-            }
-
-            LeaveUserValidator::query()->updateOrCreate(
-                ['target_user_id' => $targetUserId],
-                ['validator_user_id' => (int) $validatorUserId],
-            );
-        }
-
-        return back()->with('success', 'Valideurs par utilisateur enregistrés.');
     }
 
     public function updateValidators(Request $request): RedirectResponse
@@ -391,5 +393,20 @@ class LeaveSettingsController extends Controller
         }
 
         return back()->with('success', 'Type de congé mis à jour.');
+    }
+
+    /**
+     * Libellé d'affichage d'un utilisateur : prénom + nom, à défaut le nom de
+     * compte, à défaut l'e-mail. Même règle que la liste `users` ci-dessus.
+     */
+    private function userLabel(User $user): string
+    {
+        $fullName = trim(
+            collect([$user->first_name, $user->last_name])
+                ->filter()
+                ->implode(' ')
+        );
+
+        return $fullName !== '' ? $fullName : ($user->name ?: $user->email);
     }
 }

@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\EntitiesController;
 use App\Http\Controllers\Admin\EntityFileController;
 use App\Http\Controllers\Admin\LeaveSettingsController;
 use App\Http\Controllers\Admin\LogsController;
+use App\Http\Controllers\Admin\ValidationGroupController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'verified', 'twofactor'])->prefix('admin')->name('admin.')->group(function () {
@@ -81,9 +82,19 @@ Route::middleware(['auth', 'verified', 'twofactor'])->prefix('admin')->name('adm
 
     Route::get('/leaves', [LeaveSettingsController::class, 'index'])
         ->name('leaves.index');
-    Route::put('/leaves/user-validators', [LeaveSettingsController::class, 'updateUserValidators'])
+
+    // Groupes de validation — partagés par les modules Congés et Heures.
+    // L'accès est refermé côté serveur par ValidationGroupPolicy, jamais par
+    // le seul masquage des boutons côté React.
+    Route::post('/leaves/validation-groups', [ValidationGroupController::class, 'store'])
         ->middleware('throttle:admin-sensitive')
-        ->name('leaves.user-validators.update');
+        ->name('leaves.validation-groups.store');
+    Route::put('/leaves/validation-groups/{validationGroup}', [ValidationGroupController::class, 'update'])
+        ->middleware('throttle:admin-sensitive')
+        ->name('leaves.validation-groups.update');
+    Route::delete('/leaves/validation-groups/{validationGroup}', [ValidationGroupController::class, 'destroy'])
+        ->middleware('throttle:admin-sensitive')
+        ->name('leaves.validation-groups.destroy');
     Route::put('/leaves/validators', [LeaveSettingsController::class, 'updateValidators'])
         ->middleware('throttle:admin-sensitive')
         ->name('leaves.validators.update');

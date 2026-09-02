@@ -16,6 +16,7 @@ use App\Notifications\LeaveRequestRefusedNotification;
 use App\Notifications\LeaveRequestSubmittedNotification;
 use App\Jobs\SendWebPushNotificationJob;
 use App\Services\AuditLogService;
+use App\Services\Validation\ValidationGroupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,6 +30,7 @@ class LeaveRequestController extends Controller
 {
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly ValidationGroupService $validationGroups,
     ) {
     }
 
@@ -288,9 +290,20 @@ class LeaveRequestController extends Controller
 
         $targetUser = User::query()->findOrFail($targetUserId);
 
-        $validatorUserId = LeaveUserValidator::query()
-            ->where('target_user_id', (int) $targetUser->id)
-            ->value('validator_user_id');
+        // Ordre de résolution du valideur, du plus précis au plus général :
+        //
+        //   1. le groupe de validation du demandeur (Valideur 1, à défaut 2) ;
+        //   2. l'ancien réglage « valideur par utilisateur », conservé tant que
+        //      tous les utilisateurs n'ont pas rejoint un groupe ;
+        //   3. le valideur du secteur ;
+        //   4. un administrateur, pour qu'aucune demande ne reste orpheline.
+        $validatorUserId = $this->validationGroups->resolvePrimaryValidator($targetUser)?->id;
+
+        if (! $validatorUserId) {
+            $validatorUserId = LeaveUserValidator::query()
+                ->where('target_user_id', (int) $targetUser->id)
+                ->value('validator_user_id');
+        }
 
         if (! $validatorUserId && $targetUser->sector_id) {
             $validatorUserId = LeaveSectorValidator::query()
