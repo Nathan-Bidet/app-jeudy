@@ -12,6 +12,7 @@ export default function LeavesIndex({
     myLeaveRequests = [],
     leaveRequestsToValidate = [],
     canValidateRequests = false,
+    pendingValidationCount = 0,
     canDeleteLeaveRequests = false,
     highlightId = null,
 }) {
@@ -41,15 +42,29 @@ export default function LeavesIndex({
         return `${day}-${month}-${year}`;
     };
 
-    const formatLeaveStatus = (status) => {
+    /**
+     * Le serveur calcule déjà le libellé d'étape (« 1/2 », « 2/2 », ou sans
+     * numéro quand le circuit n'a qu'un niveau) : on l'utilise tel quel, et on
+     * ne recalcule ici que les cas qu'il ne couvre pas.
+     */
+    const formatLeaveStatus = (request) => {
+        const status = typeof request === 'string' ? request : request?.status;
         const normalized = String(status || '').toLowerCase();
+
+        if (normalized === 'pending_user_confirmation') {
+            return 'En attente de votre confirmation';
+        }
+
+        if (typeof request === 'object' && request?.status_label) {
+            return request.status_label;
+        }
 
         if (normalized === 'pending') {
             return 'En attente';
         }
 
-        if (normalized === 'pending_user_confirmation') {
-            return 'En attente de votre confirmation';
+        if (normalized === 'pending_validator_2') {
+            return 'En attente de validation 2/2';
         }
 
         if (normalized === 'approved') {
@@ -61,6 +76,53 @@ export default function LeavesIndex({
         }
 
         return status;
+    };
+
+    const formatDecisionDate = (isoDate) => {
+        if (!isoDate) {
+            return null;
+        }
+
+        const parsed = new Date(isoDate);
+
+        return Number.isNaN(parsed.getTime())
+            ? null
+            : parsed.toLocaleDateString('fr-FR');
+    };
+
+    /**
+     * Rappel du circuit sur une carte : qui a déjà validé, qui doit encore le
+     * faire. C'est ce qui permet au Valideur 2 de constater que le premier a
+     * donné son accord avant de se prononcer.
+     */
+    const renderValidationTrail = (request) => {
+        if (!request?.validator_1_label && !request?.validator_2_label) {
+            return null;
+        }
+
+        const firstDecidedAt = formatDecisionDate(request.validator_1_decided_at);
+        const secondDecidedAt = formatDecisionDate(request.validator_2_decided_at);
+
+        return (
+            <div className="mt-2 space-y-0.5 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
+                {request.validator_1_label ? (
+                    <p>
+                        <span className="font-semibold">Validation 1 :</span>{' '}
+                        {firstDecidedAt
+                            ? `validé par ${request.validator_1_label} le ${firstDecidedAt}`
+                            : `en attente de ${request.validator_1_label}`}
+                    </p>
+                ) : null}
+                {request.validator_2_label ? (
+                    <p>
+                        <span className="font-semibold">Validation 2 :</span>{' '}
+                        {secondDecidedAt
+                            ? `validé par ${request.validator_2_label} le ${secondDecidedAt}`
+                            : `en attente de ${request.validator_2_label}`}
+                    </p>
+                ) : null}
+            </div>
+        );
     };
 
     const getValidatorFirstName = (request) => {
@@ -200,7 +262,9 @@ export default function LeavesIndex({
         router.delete(route('leaves.destroy', id));
     };
 
-    const defaultValidationStatuses = ['pending', 'pending_user_confirmation'];
+    // Ce qui reste à traiter, tous niveaux confondus : le second niveau
+    // rejoint la liste des demandes encore ouvertes.
+    const defaultValidationStatuses = ['pending', 'pending_validator_2', 'pending_user_confirmation'];
     const sortedMyLeaveRequests = useMemo(() => {
         const requestTimestamp = (request) => {
             const createdAt = Date.parse(request?.created_at || '');
@@ -300,7 +364,7 @@ export default function LeavesIndex({
                                         <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
                                     </p>
                                     <p className="text-sm text-[var(--app-text)]">
-                                        <span className="font-semibold">Statut :</span> {formatLeaveStatus(request.status)}
+                                        <span className="font-semibold">Statut :</span> {formatLeaveStatus(request)}
                                     </p>
                                     {request.message ? (
                                         <p className="text-sm text-[var(--app-text)]">
@@ -369,7 +433,17 @@ export default function LeavesIndex({
                 {canValidateRequests ? (
                     <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-5 sm:px-6 sm:py-6">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <h2 className="text-lg font-bold text-[var(--app-text)]">Demandes à valider</h2>
+                            <h2 className="flex items-center gap-2 text-lg font-bold text-[var(--app-text)]">
+                                Demandes à valider
+                                {pendingValidationCount > 0 ? (
+                                    <span
+                                        title="Demandes en attente de VOTRE validation"
+                                        className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-0.5 text-xs font-semibold"
+                                    >
+                                        {pendingValidationCount}
+                                    </span>
+                                ) : null}
+                            </h2>
                             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                                 <select
                                     aria-label="Filtrer les demandes par utilisateur"
@@ -411,8 +485,9 @@ export default function LeavesIndex({
                                             <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
                                         </p>
                                         <p className="text-sm text-[var(--app-text)]">
-                                            <span className="font-semibold">Statut :</span> {formatLeaveStatus(request.status)}
+                                            <span className="font-semibold">Statut :</span> {formatLeaveStatus(request)}
                                         </p>
+                                        {renderValidationTrail(request)}
                                         {request.message ? (
                                             <p className="text-sm text-[var(--app-text)]">
                                                 <span className="font-semibold">Message :</span> {request.message}
@@ -430,28 +505,36 @@ export default function LeavesIndex({
                                                 ) : null}
                                             </div>
                                         ) : null}
+                                        {renderValidationTrail(request)}
+
                                         <div className="mt-3 flex flex-wrap gap-2">
-                                            <button
-                                                type="button"
-                                                className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
-                                                onClick={() => postApprove(request.id)}
-                                            >
-                                                Approuver
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
-                                                onClick={() => postRefuse(request.id)}
-                                            >
-                                                Refuser
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
-                                                onClick={() => toggleModificationForm(request)}
-                                            >
-                                                Modifier la période
-                                            </button>
+                                            {request.awaiting_my_decision ? (
+                                                <button
+                                                    type="button"
+                                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
+                                                    onClick={() => postApprove(request.id)}
+                                                >
+                                                    {request.validation_level === 2 ? 'Valider (2/2)' : 'Approuver'}
+                                                </button>
+                                            ) : null}
+                                            {request.awaiting_my_decision ? (
+                                                <button
+                                                    type="button"
+                                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
+                                                    onClick={() => postRefuse(request.id)}
+                                                >
+                                                    Refuser
+                                                </button>
+                                            ) : null}
+                                            {request.awaiting_my_decision ? (
+                                                <button
+                                                    type="button"
+                                                    className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
+                                                    onClick={() => toggleModificationForm(request)}
+                                                >
+                                                    Modifier la période
+                                                </button>
+                                            ) : null}
                                             {canDeleteLeaveRequests ? (
                                                 <button
                                                     type="button"

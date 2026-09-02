@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureTwoFactorIsVerified;
+use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Models\ValidationGroup;
 use App\Models\ValidationGroupUser;
@@ -120,13 +121,39 @@ it('supprime un groupe et libère ses membres', function (): void {
     expect(ValidationGroupUser::query()->where('user_id', $member->id)->count())->toBe(1);
 });
 
-it('supprimer un groupe ne touche pas aux demandes de congé déjà validées', function (): void {
-    // L'historique fige son valideur sur la demande elle-même : rien ne
-    // référence le groupe, sa suppression ne peut donc pas le corrompre.
-    $columns = DB::getSchemaBuilder()->getColumnListing('leave_requests');
+it('supprimer un groupe ne casse pas l\'historique des demandes de congé', function (): void {
+    // Une demande référence son groupe, mais uniquement pour l'audit : la clé
+    // est nullOnDelete et le NOM du groupe est figé sur la demande. Supprimer
+    // le groupe ne peut donc ni effacer une demande, ni la rendre illisible,
+    // ni lui retirer ses valideurs — eux aussi figés.
+    $member = validationMember();
+    $group = app(ValidationGroupService::class)->create(validationGroupPayload([
+        'name' => 'Atelier',
+        'member_user_ids' => [$member->id],
+    ]));
 
-    expect($columns)->toContain('validator_user_id')
-        ->and($columns)->not->toContain('validation_group_id');
+    $leave = LeaveRequest::query()->create([
+        'requester_user_id' => $member->id,
+        'target_user_id' => $member->id,
+        'start_at' => '2026-11-02 00:00:00',
+        'end_at' => '2026-11-03 18:00:00',
+        'status' => 'approved',
+        'validation_group_id' => $group->id,
+        'validation_group_name' => $group->name,
+        'validator_1_id' => $group->validator_1_id,
+        'validator_1_label' => 'Floriane Blanchet',
+        'validator_1_decided_at' => now(),
+    ]);
+
+    app(ValidationGroupService::class)->delete($group);
+    $leave->refresh();
+
+    expect($leave->exists)->toBeTrue()
+        ->and($leave->status)->toBe('approved')
+        ->and($leave->validation_group_id)->toBeNull()
+        ->and($leave->validation_group_name)->toBe('Atelier')
+        ->and($leave->validator_1_label)->toBe('Floriane Blanchet')
+        ->and($leave->validator_1_decided_at)->not->toBeNull();
 });
 
 /*

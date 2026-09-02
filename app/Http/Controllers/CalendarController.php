@@ -151,9 +151,18 @@ class CalendarController extends Controller
                 ->orderBy('id')
                 ->get()
                 ->filter(function (LeaveRequest $leave) use ($userId): bool {
+                    // Une demande en cours ne se montre qu'au demandeur et à
+                    // ceux qui la valident. Depuis la double validation, cela
+                    // inclut le Valideur 2 : il doit voir arriver la période
+                    // avant d'avoir à se prononcer.
+                    $concernsViewer = (int) $leave->requester_user_id === $userId
+                        || (int) $leave->validator_user_id === $userId
+                        || (int) $leave->validator_1_id === $userId
+                        || (int) $leave->validator_2_id === $userId;
+
                     return match ($leave->status) {
-                        LeaveRequest::STATUS_PENDING => (int) $leave->requester_user_id === $userId
-                            || (int) $leave->validator_user_id === $userId,
+                        LeaveRequest::STATUS_PENDING,
+                        LeaveRequest::STATUS_PENDING_VALIDATOR_2 => $concernsViewer,
                         LeaveRequest::STATUS_APPROVED => true,
                         LeaveRequest::STATUS_REFUSED => false,
                         default => false,
@@ -379,12 +388,7 @@ class CalendarController extends Controller
                 'target:id,first_name,last_name,name',
                 'leaveType:id,name',
             ])
-            ->whereIn('status', [
-                LeaveRequest::STATUS_PENDING,
-                LeaveRequest::STATUS_APPROVED,
-                LeaveRequest::STATUS_REFUSED,
-                LeaveRequest::STATUS_PENDING_USER_CONFIRMATION,
-            ])
+            ->whereIn('status', LeaveRequest::STATUSES)
             ->where(function ($query) use ($monthStart, $monthEnd): void {
                 $query
                     ->whereBetween('start_at', [$monthStart->toDateTimeString(), $monthEnd->toDateTimeString()])
@@ -485,7 +489,8 @@ class CalendarController extends Controller
         return match ((string) $status) {
             LeaveRequest::STATUS_APPROVED => 'Approuvé',
             LeaveRequest::STATUS_REFUSED => 'Refusé',
-            LeaveRequest::STATUS_PENDING,
+            LeaveRequest::STATUS_PENDING => 'En attente (validation 1/2)',
+            LeaveRequest::STATUS_PENDING_VALIDATOR_2 => 'En attente (validation 2/2)',
             LeaveRequest::STATUS_PENDING_USER_CONFIRMATION => 'En attente',
             default => 'En attente',
         };

@@ -6,19 +6,21 @@ use App\Models\LeaveRequest;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 
-class LeaveRequestRefusedNotification extends Notification
+/**
+ * Adressée au Valideur 2 quand le Valideur 1 vient de donner son accord.
+ *
+ * Elle reprend la forme des notifications de congé existantes (canal
+ * `database`, charge utile `type` + `message`) pour que le centre de
+ * notifications l'affiche sans traitement particulier.
+ */
+class LeaveRequestFirstLevelApprovedNotification extends Notification
 {
     use Queueable;
 
-    /**
-     * $refusedByLabel et $level disent au demandeur qui a refusé et à quelle
-     * étape, sans quoi un refus de second niveau serait indiscernable d'un
-     * refus immédiat.
-     */
     public function __construct(
         private readonly LeaveRequest $leaveRequest,
-        private readonly ?string $refusedByLabel = null,
-        private readonly ?int $level = null,
+        private readonly string $targetLabel,
+        private readonly string $firstValidatorLabel,
     ) {
     }
 
@@ -33,19 +35,21 @@ class LeaveRequestRefusedNotification extends Notification
         $endAt = $this->leaveRequest->end_at?->toDateString();
 
         return [
-            'type' => 'leave_request_refused',
+            'type' => 'leave_request_first_level_approved',
             'leave_request_id' => (int) $this->leaveRequest->id,
+            'target_user_id' => (int) $this->leaveRequest->target_user_id,
+            'target_label' => $this->targetLabel,
+            'first_validator_label' => $this->firstValidatorLabel,
             'period' => [
                 'start_at' => $startAt,
                 'end_at' => $endAt,
             ],
-            'refused_by_label' => $this->refusedByLabel,
-            'validation_level' => $this->level,
             'message' => sprintf(
-                'Votre demande du %s au %s a été refusée%s.',
+                'La demande de congé de %s du %s au %s a été validée au premier niveau par %s et nécessite votre validation.',
+                $this->targetLabel,
                 $this->formatDateFr($startAt),
                 $this->formatDateFr($endAt),
-                $this->refusedByLabel !== null ? ' par '.$this->refusedByLabel : '',
+                $this->firstValidatorLabel,
             ),
         ];
     }

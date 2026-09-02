@@ -2,23 +2,42 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasTwoStepValidation;
+use App\Support\Validation\ValidationStage;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LeaveRequest extends Model
 {
-    use HasFactory;
+    use HasFactory, HasTwoStepValidation;
 
-    public const STATUS_PENDING = 'pending';
-    public const STATUS_APPROVED = 'approved';
-    public const STATUS_REFUSED = 'refused';
+    /**
+     * `STATUS_PENDING` vaut toujours `pending` et désigne désormais l'attente
+     * du Valideur 1 : l'ancien état unique est devenu la première étape, ce qui
+     * évite de réécrire l'historique et de casser le calendrier, les exports et
+     * le front qui lisent cette valeur.
+     */
+    public const STATUS_PENDING = ValidationStage::PENDING_VALIDATOR_1;
+    public const STATUS_PENDING_VALIDATOR_2 = ValidationStage::PENDING_VALIDATOR_2;
+    public const STATUS_APPROVED = ValidationStage::APPROVED;
+    public const STATUS_REFUSED = ValidationStage::REFUSED;
     public const STATUS_PENDING_USER_CONFIRMATION = 'pending_user_confirmation';
 
     public const STATUSES = [
         self::STATUS_PENDING,
+        self::STATUS_PENDING_VALIDATOR_2,
         self::STATUS_APPROVED,
         self::STATUS_REFUSED,
+        self::STATUS_PENDING_USER_CONFIRMATION,
+    ];
+
+    /**
+     * États dans lesquels une demande occupe encore un valideur.
+     */
+    public const OPEN_STATUSES = [
+        self::STATUS_PENDING,
+        self::STATUS_PENDING_VALIDATOR_2,
         self::STATUS_PENDING_USER_CONFIRMATION,
     ];
 
@@ -46,6 +65,17 @@ class LeaveRequest extends Model
         'proposed_custom_end_time',
         'proposed_message',
         'proposed_by_user_id',
+        'proposed_at_level',
+        'validation_group_id',
+        'validation_group_name',
+        'validator_1_id',
+        'validator_1_label',
+        'validator_1_decided_at',
+        'validator_1_decided_by_id',
+        'validator_2_id',
+        'validator_2_label',
+        'validator_2_decided_at',
+        'validator_2_decided_by_id',
     ];
 
     protected $casts = [
@@ -55,6 +85,8 @@ class LeaveRequest extends Model
         'decided_at' => 'datetime',
         'proposed_start_at' => 'datetime',
         'proposed_end_at' => 'datetime',
+        'validator_1_decided_at' => 'datetime',
+        'validator_2_decided_at' => 'datetime',
     ];
 
     public function requester(): BelongsTo

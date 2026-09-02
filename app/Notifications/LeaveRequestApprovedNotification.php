@@ -32,8 +32,10 @@ class LeaveRequestApprovedNotification extends Notification
                 'start_at' => $startAt,
                 'end_at' => $endAt,
             ],
+            // « définitivement » : cette notification ne part plus qu'au bout
+            // du circuit, une fois le dernier niveau franchi.
             'message' => sprintf(
-                'Votre demande du %s au %s a été approuvée.',
+                'Votre demande du %s au %s a été définitivement acceptée.',
                 $this->formatDateFr($startAt),
                 $this->formatDateFr($endAt),
             ),

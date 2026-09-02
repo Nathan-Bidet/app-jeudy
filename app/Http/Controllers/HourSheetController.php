@@ -5,12 +5,17 @@ namespace App\Http\Controllers;
 use App\Models\HourSheet;
 use App\Models\LeaveRequest;
 use App\Models\User;
+use App\Notifications\HourSheetDecisionNotification;
 use App\Services\AuditLogService;
 use App\Services\Hours\ApprovedLeaveDayService;
+use App\Services\Validation\TwoStepValidationService;
 use App\Support\Access\AccessManager;
+use App\Support\Validation\ValidationStage;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -24,7 +29,69 @@ class HourSheetController extends Controller
     public function __construct(
         private readonly ApprovedLeaveDayService $approvedLeaveDayService,
         private readonly AuditLogService $auditLogService,
+        private readonly TwoStepValidationService $twoStepValidation,
     ) {
+    }
+
+    /**
+     * Trace une journée saisie par un utilisateur sans groupe de validation.
+     *
+     * La saisie n'est pas bloquée : empêcher quelqu'un de déclarer ses heures
+     * parce que l'administration n'a pas encore créé son groupe serait pire que
+     * le problème. La journée part vers un administrateur, et l'anomalie est
+     * journalisée pour être corrigée.
+     */
+    private function warnWhenNoValidationGroup(HourSheet $hourSheet, User $user): void
+    {
+        if ($hourSheet->validation_group_id !== null) {
+            return;
+        }
+
+        $this->auditLogService->log([
+            'action' => 'hour_sheet_without_validation_group',
+            'module' => 'heures',
+            'description' => sprintf(
+                '%s n\'appartient à aucun groupe de validation : ses heures du %s suivent un circuit à un seul niveau',
+                $this->userLabel($user),
+                $hourSheet->work_date?->toDateString() ?? '',
+            ),
+            'payload' => [
+                'hour_sheet_id' => (int) $hourSheet->id,
+                'user_id' => (int) $user->id,
+                'fallback_validator_id' => $hourSheet->validator_1_id ? (int) $hourSheet->validator_1_id : null,
+            ],
+        ]);
+    }
+
+    private function userLabel(?User $user): string
+    {
+        if (! $user) {
+            return 'Utilisateur';
+        }
+
+        $fullName = trim((string) (($user->first_name ?? '').' '.($user->last_name ?? '')));
+
+        return $fullName !== '' ? $fullName : (string) ($user->name ?: $user->email ?: 'Utilisateur');
+    }
+
+    /**
+     * Valideur de repli quand le salarié n'a pas de groupe.
+     *
+     * Les Heures n'ont aucun réglage historique équivalent à celui des congés :
+     * le dernier maillon de la cascade est donc le seul disponible, un
+     * administrateur. Sans lui, la journée resterait sans destinataire.
+     */
+    private function fallbackHoursValidator(): ?User
+    {
+        // `whereHas` plutôt que la portée `role()` de Spatie : celle-ci lève
+        // une exception quand le rôle n'existe pas, et l'enregistrement d'une
+        // journée ne doit jamais échouer pour cette raison.
+        return User::query()
+            ->where('is_active', true)
+            ->whereHas('roles', fn ($query) => $query->where('name', 'admin'))
+            ->orderByRaw('COALESCE(last_name, name) asc')
+            ->orderByRaw('COALESCE(first_name, name) asc')
+            ->first();
     }
 
     public function index(Request $request): Response
@@ -52,12 +119,27 @@ class HourSheetController extends Controller
                 'has_lunch' => (bool) $hourSheet->has_lunch,
                 'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
                 'has_long_night' => (bool) $hourSheet->has_long_night,
+
+                // `status` à null : journée saisie avant la mise en place de la
+                // validation. Elle n'est ni validée ni en attente, et le front
+                // l'affiche comme telle plutôt que d'inventer un état.
+                'status' => $hourSheet->status,
+                'status_label' => $hourSheet->isLegacyEntry()
+                    ? 'Saisie antérieure à la validation'
+                    : $hourSheet->validationStatusLabel(),
+                'validator_1_label' => $hourSheet->validator_1_label,
+                'validator_2_label' => $hourSheet->validator_2_label,
+                'validator_1_decided_at' => $hourSheet->validator_1_decided_at?->toIso8601String(),
+                'validator_2_decided_at' => $hourSheet->validator_2_decided_at?->toIso8601String(),
+                'refusal_reason' => $hourSheet->refusal_reason,
             ])
             ->values()
             ->all();
 
         $canCreate = app(AccessManager::class)->can($request->user(), 'heures.create');
         $canExport = app(AccessManager::class)->can($request->user(), 'heures.export');
+
+        [$hourSheetsToValidate, $pendingValidationCount] = $this->validationQueueFor($user);
         $approvedLeaveDays = $this->approvedLeaveDayService->approvedLeaveMapForUser(
             $userId,
             $effectiveStartDate,
@@ -70,7 +152,64 @@ class HourSheetController extends Controller
             'canExport' => $canExport,
             'approvedLeaveDays' => $approvedLeaveDays,
             'minVisibleDate' => $effectiveStartDate,
+            'hourSheetsToValidate' => $hourSheetsToValidate,
+            'pendingValidationCount' => $pendingValidationCount,
+            'canValidateHours' => $hourSheetsToValidate !== [] || $pendingValidationCount > 0,
         ]);
+    }
+
+    /**
+     * File de validation de l'utilisateur : les journées qui attendent SA
+     * décision, au niveau qui est le sien.
+     *
+     * Une journée validée au premier niveau quitte la file du Valideur 1 et
+     * entre dans celle du Valideur 2 — elle n'est jamais comptée deux fois.
+     * Les journées antérieures au circuit (status null) n'y figurent pas.
+     *
+     * @return array{0: array<int, array<string, mixed>>, 1: int}
+     */
+    private function validationQueueFor(User $user): array
+    {
+        $isAdmin = (bool) $user->hasRole('admin');
+
+        $query = HourSheet::query()->with('user:id,name,first_name,last_name,email');
+
+        if ($isAdmin) {
+            $query->whereIn('status', ValidationStage::OPEN);
+        } else {
+            $query->awaitingDecisionBy($user);
+        }
+
+        $sheets = $query
+            ->orderBy('work_date')
+            ->orderBy('user_id')
+            ->limit(200)
+            ->get();
+
+        $rows = $sheets
+            ->map(fn (HourSheet $hourSheet): array => [
+                'id' => (int) $hourSheet->id,
+                'work_date' => $hourSheet->work_date?->toDateString(),
+                'user_label' => $this->userLabel($hourSheet->user),
+                'total_minutes' => (int) $hourSheet->total_minutes,
+                'description' => $hourSheet->description,
+                'is_not_worked' => (bool) $hourSheet->is_not_worked,
+                'status' => $hourSheet->status,
+                'status_label' => $hourSheet->validationStatusLabel(),
+                'validation_level' => $hourSheet->currentValidationLevel(),
+                'validator_1_label' => $hourSheet->validator_1_label,
+                'validator_2_label' => $hourSheet->validator_2_label,
+                'validator_1_decided_at' => $hourSheet->validator_1_decided_at?->toIso8601String(),
+                'validation_group_name' => $hourSheet->validation_group_name,
+            ])
+            ->values()
+            ->all();
+
+        $count = $isAdmin
+            ? HourSheet::query()->whereIn('status', ValidationStage::OPEN)->count()
+            : HourSheet::query()->awaitingDecisionBy($user)->count();
+
+        return [$rows, $count];
     }
 
     public function store(Request $request): RedirectResponse
@@ -151,26 +290,70 @@ class HourSheetController extends Controller
             $totalMinutes = $morningMinutes + $afternoonMinutes;
         }
 
-        $savedHourSheet = HourSheet::query()->updateOrCreate(
-            [
-                'user_id' => $targetUserId,
-                'work_date' => $validated['work_date'],
-            ],
-            [
-                'morning_start' => $morningStart,
-                'morning_end' => $morningEnd,
-                'afternoon_start' => $afternoonStart,
-                'afternoon_end' => $afternoonEnd,
-                'total_minutes' => $totalMinutes,
-                'description' => $description !== '' ? $description : null,
-                'is_not_worked' => $isNotWorked,
-                'is_continuous_day' => $isContinuousDay,
-                'has_breakfast_before_5' => $isNotWorked ? false : (bool) ($validated['has_breakfast_before_5'] ?? false),
-                'has_lunch' => $isNotWorked ? false : (bool) ($validated['has_lunch'] ?? false),
-                'has_dinner_after_21' => $isNotWorked ? false : (bool) ($validated['has_dinner_after_21'] ?? false),
-                'has_long_night' => $isNotWorked ? false : (bool) ($validated['has_long_night'] ?? false),
-            ]
-        );
+        $savedHourSheet = DB::transaction(function () use (
+            $targetUserId,
+            $validated,
+            $morningStart,
+            $morningEnd,
+            $afternoonStart,
+            $afternoonEnd,
+            $totalMinutes,
+            $description,
+            $isNotWorked,
+            $isContinuousDay,
+            $request
+        ): HourSheet {
+            // Recherche explicite plutôt qu'`updateOrCreate` : la colonne
+            // `work_date` est castée en date, si bien que la clause `where`
+            // d'`updateOrCreate` compare une valeur brute ('2026-10-05') à une
+            // valeur stockée formatée ('2026-10-05 00:00:00'). MySQL fait la
+            // conversion, pas SQLite — la journée était alors réinsérée au lieu
+            // d'être mise à jour. `whereDate` se comporte pareil partout, et le
+            // verrou évite qu'un double enregistrement simultané n'insère deux
+            // fois la même journée.
+            $hourSheet = HourSheet::query()
+                ->where('user_id', $targetUserId)
+                ->whereDate('work_date', $validated['work_date'])
+                ->lockForUpdate()
+                ->first()
+                ?? new HourSheet([
+                    'user_id' => $targetUserId,
+                    'work_date' => $validated['work_date'],
+                ]);
+
+            $hourSheet->fill(
+                [
+                    'morning_start' => $morningStart,
+                    'morning_end' => $morningEnd,
+                    'afternoon_start' => $afternoonStart,
+                    'afternoon_end' => $afternoonEnd,
+                    'total_minutes' => $totalMinutes,
+                    'description' => $description !== '' ? $description : null,
+                    'is_not_worked' => $isNotWorked,
+                    'is_continuous_day' => $isContinuousDay,
+                    'has_breakfast_before_5' => $isNotWorked ? false : (bool) ($validated['has_breakfast_before_5'] ?? false),
+                    'has_lunch' => $isNotWorked ? false : (bool) ($validated['has_lunch'] ?? false),
+                    'has_dinner_after_21' => $isNotWorked ? false : (bool) ($validated['has_dinner_after_21'] ?? false),
+                    'has_long_night' => $isNotWorked ? false : (bool) ($validated['has_long_night'] ?? false),
+                ]
+            );
+
+            // Enregistrer une journée la soumet à validation. Rouvrir une
+            // journée déjà validée la renvoie au premier niveau : la validation
+            // portait sur le contenu précédent, pas sur celui-ci. Le motif de
+            // refus éventuel est effacé, il ne concerne plus cette saisie.
+            $this->twoStepValidation->assign(
+                $hourSheet,
+                $request->user(),
+                fn (): ?User => $this->fallbackHoursValidator(),
+            );
+            $hourSheet->refusal_reason = null;
+            $hourSheet->save();
+
+            return $hourSheet;
+        });
+
+        $this->warnWhenNoValidationGroup($savedHourSheet, $request->user());
 
         $action = $isNotWorked
             ? 'mark_not_worked_day'
@@ -194,6 +377,144 @@ class HourSheetController extends Controller
         ]);
 
         return redirect()->route('hours.index')->with('success', 'Journée enregistrée avec succès.');
+    }
+
+    /**
+     * Validation d'une journée d'heures à l'étape courante.
+     *
+     * Le contrôle du droit et de l'ordre est intégralement délégué au moteur
+     * partagé : un Valideur 2 qui appellerait cette route avant le Valideur 1
+     * reçoit un 403, quel que soit ce que montre son écran.
+     */
+    public function approve(Request $request, HourSheet $hourSheet): RedirectResponse|JsonResponse
+    {
+        abort_unless($this->twoStepValidation->canDecide($hourSheet, $request->user()), 403);
+
+        $before = $this->hourSheetAuditSnapshot($hourSheet);
+        $transition = $this->twoStepValidation->approve($hourSheet, $request->user());
+
+        if (! $transition->wasApplied) {
+            return $this->staleValidationResponse($request);
+        }
+
+        if ($transition->isFinal) {
+            $this->notifyHourSheetOwner($hourSheet, true, $request->user());
+        }
+
+        $this->auditLogService->log([
+            'action' => $transition->isFinal ? 'approve_hour_sheet' : 'approve_hour_sheet_level_1',
+            'module' => 'heures',
+            'description' => sprintf(
+                '%s a validé les heures du %s de %s (niveau %d)',
+                $this->userLabel($request->user()),
+                $hourSheet->work_date?->toDateString() ?? '',
+                $this->userLabel($hourSheet->user),
+                $transition->level ?? 1,
+            ),
+            'payload' => [
+                'hour_sheet_id' => (int) $hourSheet->id,
+                'validation_level' => $transition->level,
+                'validation_trail' => $hourSheet->validationTrail(),
+                'before' => $before,
+                'after' => $this->hourSheetAuditSnapshot($hourSheet),
+            ],
+        ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true, 'status' => $hourSheet->status]);
+        }
+
+        return back()->with('success', $transition->isFinal
+            ? 'Journée définitivement validée.'
+            : sprintf(
+                'Validation enregistrée. La journée passe à %s pour la seconde validation.',
+                $hourSheet->validator_2_label ?? 'le second valideur',
+            ));
+    }
+
+    /**
+     * Refus d'une journée d'heures : le circuit s'arrête, quel que soit le
+     * niveau atteint.
+     */
+    public function refuse(Request $request, HourSheet $hourSheet): RedirectResponse|JsonResponse
+    {
+        abort_unless($this->twoStepValidation->canDecide($hourSheet, $request->user()), 403);
+
+        $validated = $request->validate([
+            'refusal_reason' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $before = $this->hourSheetAuditSnapshot($hourSheet);
+        $transition = $this->twoStepValidation->refuse($hourSheet, $request->user());
+
+        if (! $transition->wasApplied) {
+            return $this->staleValidationResponse($request);
+        }
+
+        $reason = trim((string) ($validated['refusal_reason'] ?? ''));
+        $hourSheet->refusal_reason = $reason !== '' ? $reason : null;
+        $hourSheet->save();
+
+        $this->notifyHourSheetOwner($hourSheet, false, $request->user());
+
+        $this->auditLogService->log([
+            'action' => 'refuse_hour_sheet',
+            'module' => 'heures',
+            'description' => sprintf(
+                '%s a refusé les heures du %s de %s (niveau %d)',
+                $this->userLabel($request->user()),
+                $hourSheet->work_date?->toDateString() ?? '',
+                $this->userLabel($hourSheet->user),
+                $transition->level ?? 1,
+            ),
+            'payload' => [
+                'hour_sheet_id' => (int) $hourSheet->id,
+                'validation_level' => $transition->level,
+                'refusal_reason' => $hourSheet->refusal_reason,
+                'validation_trail' => $hourSheet->validationTrail(),
+                'before' => $before,
+                'after' => $this->hourSheetAuditSnapshot($hourSheet),
+            ],
+        ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true, 'status' => $hourSheet->status]);
+        }
+
+        return back()->with('success', 'Journée refusée.');
+    }
+
+    /**
+     * Le salarié n'est prévenu qu'à l'issue du circuit — validation définitive
+     * ou refus. Le passage du niveau 1 au niveau 2 ne le concerne pas, et une
+     * notification par journée et par étape saturerait son centre de
+     * notifications.
+     */
+    private function notifyHourSheetOwner(HourSheet $hourSheet, bool $isApproved, ?User $actor): void
+    {
+        $owner = $hourSheet->user;
+
+        if (! $owner) {
+            return;
+        }
+
+        $owner->notify(new HourSheetDecisionNotification(
+            $hourSheet,
+            $isApproved,
+            $this->userLabel($actor),
+            $hourSheet->refusal_reason,
+        ));
+    }
+
+    private function staleValidationResponse(Request $request): RedirectResponse|JsonResponse
+    {
+        $message = 'Cette journée a déjà été traitée entre-temps. La page a été actualisée.';
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => false, 'message' => $message], 409);
+        }
+
+        return back()->with('error', $message);
     }
 
     public function export(Request $request): BinaryFileResponse

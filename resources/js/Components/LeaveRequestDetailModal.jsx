@@ -73,19 +73,51 @@ function Row({ label, value }) {
     );
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, statusLabel }) {
     const map = {
         pending: { label: 'En attente', cls: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
+        pending_validator_2: { label: 'En attente de validation 2/2', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
         approved: { label: 'Accepté', cls: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' },
         refused: { label: 'Refusé', cls: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
         pending_user_confirmation: { label: 'Modification proposée', cls: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' },
     };
-    const { label, cls } = map[status] || { label: status, cls: 'bg-gray-100 text-gray-700' };
+    const fallback = { label: status, cls: 'bg-gray-100 text-gray-700' };
+    const { cls } = map[status] || fallback;
+    // Le libellé du serveur porte l'étape (« 1/2 », « 2/2 », ou sans numéro
+    // quand le circuit n'a qu'un niveau) : il prime sur la table locale, sauf
+    // pour la contre-proposition qui n'est pas une étape de validation.
+    const label = status === 'pending_user_confirmation'
+        ? map[status].label
+        : (statusLabel || (map[status] || fallback).label);
     return (
         <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
             {label}
         </span>
     );
+}
+
+/**
+ * « Validé par X le 12/03/2026 » quand la décision est prise, « En attente de X »
+ * sinon. Les libellés viennent de l'instantané figé sur la demande : ils restent
+ * exacts même si l'administration a changé les valideurs du groupe depuis.
+ */
+function validationLevelLabel(level, fallbackLabel) {
+    const name = level?.label || fallbackLabel;
+
+    if (!name) {
+        return '—';
+    }
+
+    if (!level?.decided_at) {
+        return `En attente de ${name}`;
+    }
+
+    const decidedAt = new Date(level.decided_at);
+    const formatted = Number.isNaN(decidedAt.getTime())
+        ? null
+        : decidedAt.toLocaleDateString('fr-FR');
+
+    return formatted ? `Validé par ${name} le ${formatted}` : `Validé par ${name}`;
 }
 
 function ActionError({ message }) {
@@ -209,7 +241,7 @@ export default function LeaveRequestDetailModal({ leaveRequestId, onClose }) {
                     {data && !loading && (
                         <>
                             <div className="mb-4 flex items-center gap-3">
-                                <StatusBadge status={data.status} />
+                                <StatusBadge status={data.status} statusLabel={data.status_label} />
                             </div>
 
                             <dl className="space-y-3">
@@ -217,7 +249,16 @@ export default function LeaveRequestDetailModal({ leaveRequestId, onClose }) {
                                 {!data.requester_is_target && (
                                     <Row label="Bénéficiaire" value={data.target_label} />
                                 )}
-                                <Row label="Validateur" value={data.validator_label} />
+                                <Row
+                                    label="Validation 1"
+                                    value={validationLevelLabel(data?.validation?.validator_1, data.validator_label)}
+                                />
+                                {data?.validation?.has_second_level && (
+                                    <Row
+                                        label="Validation 2"
+                                        value={validationLevelLabel(data?.validation?.validator_2, null)}
+                                    />
+                                )}
                                 <Row label="Type de congé" value={data.leave_type_label} />
                                 <Row label="Période demandée" value={periodLabel(data)} />
                                 {data.message && <Row label="Message" value={data.message} />}

@@ -1,3 +1,4 @@
+import HoursValidationQueue from '@/Components/Hours/HoursValidationQueue';
 import AppLayout from '@/Layouts/AppLayout';
 import TitleCaps from '@/Layouts/AppShell/TitleCaps';
 import Modal from '@/Components/Modal';
@@ -248,6 +249,8 @@ export default function HoursIndex({
     minVisibleDate = '2026-04-26',
     canCreate = false,
     canExport = false,
+    hourSheetsToValidate = [],
+    pendingValidationCount = 0,
 }) {
     const { flash = {}, errors = {} } = usePage().props;
     const flashError = flash?.error || null;
@@ -734,6 +737,11 @@ export default function HoursIndex({
                     </div>
                 )}
 
+                <HoursValidationQueue
+                    rows={hourSheetsToValidate}
+                    pendingCount={pendingValidationCount}
+                />
+
                 {canCreate ? (
                     visibleWeekDays.length === 0 ? (
                         <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 text-sm text-[var(--app-text-soft)]">
@@ -1186,6 +1194,13 @@ export default function HoursIndex({
                                         })() : (
                                             <div>
                                                 <p className="font-semibold">Date : {formatHistoryDate(sheet.work_date)}</p>
+                                                {/* État de validation de la journée. `status` à null signale une
+                                                    saisie antérieure à la mise en place du circuit : elle n'est ni
+                                                    validée ni en attente, et le libellé le dit tel quel. */}
+                                                <p>Validation : {sheet.status_label || '—'}</p>
+                                                {sheet.status === 'refused' && sheet.refusal_reason ? (
+                                                    <p className="text-red-700">Motif du refus : {sheet.refusal_reason}</p>
+                                                ) : null}
                                                 {sheet.is_not_worked ? (
                                                     <>
                                                         <p>Statut : Non travaillé</p>

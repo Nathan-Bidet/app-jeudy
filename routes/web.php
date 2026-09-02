@@ -158,6 +158,22 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->middleware('sector.access:heures.create')
         ->middleware('throttle:hours-actions')
         ->name('hours.store');
+
+    // Validation des heures.
+    //
+    // Volontairement sans `sector.access` : le droit de valider ne vient pas
+    // d'une permission du module Heures mais du fait d'être le valideur figé
+    // sur la journée, au niveau attendu — ce que le contrôleur vérifie via
+    // TwoStepValidationService, contrôle strictement plus fermé qu'une
+    // permission. Exiger en plus `heures.view` créerait le piège inverse : un
+    // valideur légitimement désigné par son groupe, mais sans accès au module,
+    // verrait les journées s'accumuler sans pouvoir les traiter.
+    Route::post('/activities/hours/{hourSheet}/approve', [HourSheetController::class, 'approve'])
+        ->middleware('throttle:hours-actions')
+        ->name('hours.approve');
+    Route::post('/activities/hours/{hourSheet}/refuse', [HourSheetController::class, 'refuse'])
+        ->middleware('throttle:hours-actions')
+        ->name('hours.refuse');
     Route::post('/activities/leaves', [LeaveRequestController::class, 'store'])
         ->middleware('throttle:leave-actions')
         ->name('leaves.store');
