@@ -23,6 +23,7 @@ export default function AdminLeavesIndex({
     const validationGroupForm = useForm({ ...EMPTY_VALIDATION_GROUP });
     const [validationGroupModal, setValidationGroupModal] = useState(null);
     const [validationGroupToDelete, setValidationGroupToDelete] = useState(null);
+    const [isDeletingValidationGroup, setIsDeletingValidationGroup] = useState(false);
     const rhForm = useForm({
         hr_user_ids: hrUserIds.map((id) => Number(id)),
     });
@@ -142,13 +143,18 @@ export default function AdminLeavesIndex({
     };
 
     const confirmValidationGroupDelete = () => {
-        if (!validationGroupToDelete) {
+        if (!validationGroupToDelete || isDeletingValidationGroup) {
             return;
         }
 
+        setIsDeletingValidationGroup(true);
+
         router.delete(route('admin.leaves.validation-groups.destroy', validationGroupToDelete.id), {
             preserveScroll: true,
-            onFinish: () => setValidationGroupToDelete(null),
+            onFinish: () => {
+                setIsDeletingValidationGroup(false);
+                setValidationGroupToDelete(null);
+            },
         });
     };
 
@@ -713,7 +719,7 @@ export default function AdminLeavesIndex({
 
             <DeleteValidationGroupModal
                 group={validationGroupToDelete}
-                processing={false}
+                processing={isDeletingValidationGroup}
                 onClose={() => setValidationGroupToDelete(null)}
                 onConfirm={confirmValidationGroupDelete}
             />
