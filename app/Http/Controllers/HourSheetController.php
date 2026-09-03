@@ -540,13 +540,29 @@ class HourSheetController extends Controller
     }
 
     /**
-     * Le salarié n'est prévenu qu'à l'issue du circuit — validation définitive
-     * ou refus. Le passage du niveau 1 au niveau 2 ne le concerne pas, et une
-     * notification par journée et par étape saturerait son centre de
-     * notifications.
+     * Le salarié n'est prévenu QUE d'un refus.
+     *
+     * Une journée validée est le cas normal — une par personne et par jour
+     * ouvré : la notifier reviendrait à annoncer que tout s'est passé comme
+     * prévu, plusieurs fois par semaine et par salarié. Le statut reste lisible
+     * sur la page Heures, qui porte déjà le badge de chaque journée. Seul le
+     * refus appelle une action, et lui seul est notifié.
+     *
+     * C'est bien l'ISSUE du circuit qui décide, pas le bouton qui vient d'être
+     * pressé : un refus du Valideur 1 rattrapé par un accord du Valideur 2 est
+     * une validation, et ne notifie donc rien.
+     *
+     * Le passage du premier accord au second ne concerne pas non plus le
+     * salarié : l'appelant ne notifie qu'une fois le circuit clos.
+     *
+     * Les Congés ne sont pas concernés : ils gardent leurs deux notifications.
      */
     private function notifyHourSheetOwner(HourSheet $hourSheet, bool $isApproved, ?User $actor): void
     {
+        if ($isApproved) {
+            return;
+        }
+
         $owner = $hourSheet->user;
 
         if (! $owner) {

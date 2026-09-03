@@ -8,7 +8,14 @@ use Illuminate\Notifications\Notification;
 
 /**
  * Notification adressée au salarié à l'issue du circuit de validation d'une
- * journée d'heures : acceptation définitive, ou refus.
+ * journée d'heures.
+ *
+ * SEUL LE REFUS EST NOTIFIÉ. La branche « validé » de cette classe n'est plus
+ * atteinte par l'application : HourSheetController::notifyHourSheetOwner()
+ * n'émet rien lorsque l'issue est un accord, une journée validée étant le cas
+ * normal. La branche est conservée telle quelle pour que rétablir la
+ * notification tienne en une ligne, et parce que la charge utile décrit une
+ * décision, pas seulement un refus.
  *
  * Une seule classe pour les deux issues, contrairement aux congés qui en ont
  * une par cas. Les congés se comptent en dizaines par an et par personne ; les
