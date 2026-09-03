@@ -83,6 +83,13 @@ Route::middleware(['auth', 'verified', 'twofactor'])->prefix('admin')->name('adm
     Route::get('/leaves', [LeaveSettingsController::class, 'index'])
         ->name('leaves.index');
 
+    // Date d'effet du système de validation, commune aux Congés et aux Heures.
+    // Même protection que le reste de la page : rôle admin, vérifié dans le
+    // contrôleur, et throttle sur les écritures sensibles.
+    Route::put('/leaves/validation-effective-date', [LeaveSettingsController::class, 'updateValidationEffectiveDate'])
+        ->middleware('throttle:admin-sensitive')
+        ->name('leaves.validation-effective-date.update');
+
     // Groupes de validation — partagés par les modules Congés et Heures.
     // L'accès est refermé côté serveur par ValidationGroupPolicy, jamais par
     // le seul masquage des boutons côté React.

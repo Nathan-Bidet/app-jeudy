@@ -375,7 +375,9 @@ function buildModuleNav({ isAdmin, permissions = {} }) {
         },
         canAdminLeaves && {
             key: 'admin-leaves',
-            label: 'Congés',
+            // Cette page pilote la validation des deux modules, pas seulement
+            // celle des congés.
+            label: 'Congés / Heures',
             href: safeHref('admin.leaves.index'),
             icon: CalendarX2,
             active: safeCurrent('admin.leaves.*'),

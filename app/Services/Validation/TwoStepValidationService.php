@@ -46,11 +46,23 @@ class TwoStepValidationService
      * Sans second valideur, un seul accord suffit — le comportement d'avant
      * l'introduction de la double validation, et non un blocage silencieux.
      *
+     * $group distingue trois cas, d'où le sentinelle `false` :
+     *   - `false` (défaut) : le groupe de l'utilisateur est résolu ici ;
+     *   - un groupe : déjà résolu par l'appelant — les traitements de masse le
+     *     font une fois par utilisateur au lieu d'une fois par enregistrement ;
+     *   - `null` : explicitement AUCUN groupe. C'est le cas des éléments
+     *     antérieurs à la date d'effet, qui doivent suivre la cascade
+     *     historique sans jamais consulter les groupes.
+     *
      * @param  (callable(): ?User)|null  $fallbackValidatorResolver
      */
-    public function assign(Model $subject, User $targetUser, ?callable $fallbackValidatorResolver = null): void
-    {
-        $group = $this->validationGroups->groupFor($targetUser);
+    public function assign(
+        Model $subject,
+        User $targetUser,
+        ?callable $fallbackValidatorResolver = null,
+        ValidationGroup|false|null $group = false,
+    ): void {
+        $group = $group === false ? $this->validationGroups->groupFor($targetUser) : $group;
 
         $validator1 = $this->usableValidator($group?->validator1);
         $validator2 = $this->usableValidator($group?->validator2);

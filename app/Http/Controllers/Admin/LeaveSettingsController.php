@@ -11,6 +11,7 @@ use App\Models\LeaveType;
 use App\Models\LeaveTypeUserVisibility;
 use App\Models\User;
 use App\Models\ValidationGroup;
+use App\Services\Validation\ValidationRolloutService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,8 @@ use Inertia\Response;
 
 class LeaveSettingsController extends Controller
 {
+    public function __construct(private readonly ValidationRolloutService $validationRollout) {}
+
     public function index(Request $request): Response
     {
         abort_unless((bool) $request->user()?->hasRole('admin'), 403);
@@ -126,6 +129,15 @@ class LeaveSettingsController extends Controller
             ->all();
 
         return Inertia::render('Admin/Leaves/Index', [
+            // Réglage transverse aux deux modules. Absent = le nouveau système
+            // s'applique à tout, ce qui est l'état actuel de l'application.
+            'validationEffectiveDate' => $this->validationRollout->effectiveDate()?->toDateString(),
+
+            // Journées qui entrent dans le périmètre mais qu'aucun groupe ne
+            // permet de router : l'administrateur doit pouvoir comprendre
+            // pourquoi elles ne remontent pas aux valideurs.
+            'validationRolloutAnomalies' => $this->validationRollout->pendingAnomalies(),
+
             'users' => $users,
             'validationGroups' => $validationGroups,
             'validationGroupByUser' => (object) $validationGroupByUser,
@@ -134,6 +146,49 @@ class LeaveSettingsController extends Controller
             'hasAllowedCreatorPairConfig' => $hasAllowedCreatorPairConfig,
             'leaveTypes' => $leaveTypes,
         ]);
+    }
+
+    /**
+     * Enregistre la date d'effet, puis rattache immédiatement les journées
+     * d'heures déjà saisies qui entrent dans le périmètre.
+     *
+     * Le rattrapage est lancé à chaque enregistrement, y compris quand la date
+     * ne change pas : il est idempotent, et c'est le moyen le plus simple de
+     * reprendre des journées qu'une configuration de groupe incomplète avait
+     * laissées de côté au passage précédent.
+     */
+    public function updateValidationEffectiveDate(Request $request): RedirectResponse
+    {
+        abort_unless((bool) $request->user()?->hasRole('admin'), 403);
+
+        $validated = $request->validate([
+            'validation_effective_date' => ['nullable', 'date_format:Y-m-d'],
+        ], [
+            'validation_effective_date.date_format' => 'La date d\'effet doit être une date valide.',
+        ]);
+
+        $this->validationRollout->setEffectiveDate(
+            $validated['validation_effective_date'] ?? null,
+            $request->user(),
+        );
+
+        $result = $this->validationRollout->backfillHourSheets();
+
+        $message = $result['attached'] > 0
+            ? sprintf(
+                'Date d\'effet enregistrée. %d journée(s) d\'heures déjà saisie(s) ont été ajoutées aux listes des valideurs.',
+                $result['attached'],
+            )
+            : 'Date d\'effet enregistrée.';
+
+        if ($result['skipped'] > 0) {
+            $message .= sprintf(
+                ' %d journée(s) n\'ont pas pu être rattachées : voir les anomalies ci-dessous.',
+                $result['skipped'],
+            );
+        }
+
+        return back()->with('success', $message);
     }
 
     public function updateValidators(Request $request): RedirectResponse

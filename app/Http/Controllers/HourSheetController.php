@@ -9,6 +9,7 @@ use App\Notifications\HourSheetDecisionNotification;
 use App\Services\AuditLogService;
 use App\Services\Hours\ApprovedLeaveDayService;
 use App\Services\Validation\TwoStepValidationService;
+use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
 use App\Support\Validation\ValidationStage;
@@ -31,6 +32,7 @@ class HourSheetController extends Controller
         private readonly ApprovedLeaveDayService $approvedLeaveDayService,
         private readonly AuditLogService $auditLogService,
         private readonly TwoStepValidationService $twoStepValidation,
+        private readonly ValidationRolloutService $validationRollout,
     ) {
     }
 
@@ -354,22 +356,29 @@ class HourSheetController extends Controller
                 ]
             );
 
-            // Enregistrer une journée la soumet à validation. Rouvrir une
-            // journée déjà validée la renvoie au premier niveau : la validation
-            // portait sur le contenu précédent, pas sur celui-ci. Le motif de
-            // refus éventuel est effacé, il ne concerne plus cette saisie.
-            $this->twoStepValidation->assign(
-                $hourSheet,
-                $request->user(),
-                fn (): ?User => $this->fallbackHoursValidator(),
-            );
+            // Enregistrer une journée la soumet à validation — à condition
+            // qu'elle relève du nouveau système. Une journée antérieure à la
+            // date d'effet garde le comportement d'avant : aucun circuit, donc
+            // un statut nul. Rouvrir une journée déjà validée la renvoie au
+            // début : la validation portait sur le contenu précédent, pas sur
+            // celui-ci, et le motif de refus ne concerne plus cette saisie.
+            if ($this->validationRollout->appliesToWorkDate($validated['work_date'])) {
+                $this->twoStepValidation->assign(
+                    $hourSheet,
+                    $request->user(),
+                    fn (): ?User => $this->fallbackHoursValidator(),
+                );
+            }
+
             $hourSheet->refusal_reason = null;
             $hourSheet->save();
 
             return $hourSheet;
         });
 
-        $this->warnWhenNoValidationGroup($savedHourSheet, $request->user());
+        if ($savedHourSheet->status !== null) {
+            $this->warnWhenNoValidationGroup($savedHourSheet, $request->user());
+        }
 
         $action = $isNotWorked
             ? 'mark_not_worked_day'

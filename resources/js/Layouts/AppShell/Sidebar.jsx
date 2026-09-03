@@ -47,7 +47,7 @@ export default function Sidebar({ mobileOpen, onClose }) {
             ? [{ href: route('admin.annonces.index'), label: 'Droits Annonces', active: route().current('admin.annonces.*') }]
             : []),
         ...(isAdmin
-            ? [{ href: route('admin.leaves.index'), label: 'Congés', active: route().current('admin.leaves.*') }]
+            ? [{ href: route('admin.leaves.index'), label: 'Congés / Heures', active: route().current('admin.leaves.*') }]
             : []),
         ...(isAdmin
             ? [{ href: route('admin.aprevoir-import.index'), label: 'Import À prévoir', active: route().current('admin.aprevoir-import.*') }]

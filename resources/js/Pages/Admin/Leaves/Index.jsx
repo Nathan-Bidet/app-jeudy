@@ -12,6 +12,8 @@ const EMPTY_VALIDATION_GROUP = {
 };
 
 export default function AdminLeavesIndex({
+    validationEffectiveDate = null,
+    validationRolloutAnomalies = [],
     users = [],
     validationGroups = [],
     validationGroupByUser = {},
@@ -20,6 +22,9 @@ export default function AdminLeavesIndex({
     hasAllowedCreatorPairConfig = false,
     leaveTypes = [],
 }) {
+    const effectiveDateForm = useForm({
+        validation_effective_date: validationEffectiveDate ?? '',
+    });
     const validationGroupForm = useForm({ ...EMPTY_VALIDATION_GROUP });
     const [validationGroupModal, setValidationGroupModal] = useState(null);
     const [validationGroupToDelete, setValidationGroupToDelete] = useState(null);
@@ -92,6 +97,14 @@ export default function AdminLeavesIndex({
         id: Number(user.id),
         label: formatUserWithSectors(user),
     }));
+
+    const submitEffectiveDate = (event) => {
+        event.preventDefault();
+
+        effectiveDateForm.put(route('admin.leaves.validation-effective-date.update'), {
+            preserveScroll: true,
+        });
+    };
 
     const openValidationGroupCreate = () => {
         validationGroupForm.clearErrors();
@@ -289,16 +302,84 @@ export default function AdminLeavesIndex({
     };
 
     return (
-        <AdminLayout title="Admin - Congés">
-            <Head title="Admin - Congés" />
+        <AdminLayout title="Admin - Congés / Heures">
+            <Head title="Admin - Congés / Heures" />
 
             <div className="space-y-4">
                 <header className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
-                    <h1 className="text-xl font-black tracking-tight text-[var(--app-text)] sm:text-2xl">Administration Congés</h1>
+                    <h1 className="text-xl font-black tracking-tight text-[var(--app-text)] sm:text-2xl">Administration Congés / Heures</h1>
                     <p className="mt-1 text-sm text-[var(--app-muted)]">
-                        Page préparatoire des réglages du module Congés.
+                        Réglages de validation communs aux modules Congés et Heures.
                     </p>
                 </header>
+
+                <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4">
+                    <h2 className="text-base font-semibold text-[var(--app-text)]">Configuration générale</h2>
+                    <p className="mt-1 text-sm text-[var(--app-muted)]">
+                        À partir de cette date, les congés et les heures passent par les groupes de validation.
+                        Avant elle, ils conservent le fonctionnement précédent. Laisser le champ vide applique
+                        le nouveau système à tout.
+                    </p>
+
+                    <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={submitEffectiveDate}>
+                        <div>
+                            <label
+                                className="block text-sm font-medium text-[var(--app-text)]"
+                                htmlFor="validation-effective-date"
+                            >
+                                Date d'effet du système de validation
+                            </label>
+                            <input
+                                id="validation-effective-date"
+                                type="date"
+                                value={effectiveDateForm.data.validation_effective_date}
+                                onChange={(event) => effectiveDateForm.setData('validation_effective_date', event.target.value)}
+                                className="mt-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
+                            />
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={effectiveDateForm.processing}
+                            className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-4 py-2 text-sm font-semibold text-[var(--app-text)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            Enregistrer
+                        </button>
+                    </form>
+
+                    {effectiveDateForm.errors.validation_effective_date ? (
+                        <p className="mt-1 text-sm text-red-600">{effectiveDateForm.errors.validation_effective_date}</p>
+                    ) : null}
+
+                    <p className="mt-2 text-xs text-[var(--app-muted)]">
+                        Les heures déjà saisies à partir de cette date sont automatiquement ajoutées aux listes
+                        des valideurs à l'enregistrement. Les journées et demandes déjà tranchées ne sont jamais
+                        remises en cause.
+                    </p>
+
+                    {/* Remontée des journées que le rattrapage ne peut pas router :
+                        sans elle, l'administrateur n'aurait aucun moyen de savoir
+                        pourquoi certaines heures n'arrivent pas chez les valideurs. */}
+                    {validationRolloutAnomalies.length > 0 ? (
+                        <div className="mt-3 rounded-xl border border-[#ef4444] bg-[color-mix(in_srgb,#dc2626_7%,var(--app-surface))] p-3">
+                            <p className="text-sm font-semibold text-[var(--app-text)]">
+                                Heures non rattachées ({validationRolloutAnomalies.reduce((total, anomaly) => total + anomaly.work_dates.length, 0)})
+                            </p>
+                            <p className="mt-1 text-xs text-[var(--app-muted)]">
+                                Ces journées entrent dans le périmètre mais ne peuvent pas être envoyées en validation.
+                                Elles le seront automatiquement une fois la configuration corrigée.
+                            </p>
+                            <ul className="mt-2 space-y-1 text-xs text-[var(--app-text)]">
+                                {validationRolloutAnomalies.map((anomaly) => (
+                                    <li key={anomaly.user_id}>
+                                        <span className="font-semibold">{anomaly.user_label}</span> — {anomaly.reason}{' '}
+                                        ({anomaly.work_dates.length} journée{anomaly.work_dates.length > 1 ? 's' : ''})
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    ) : null}
+                </section>
 
                 <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">

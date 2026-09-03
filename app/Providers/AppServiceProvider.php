@@ -44,6 +44,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Singleton : le cache de requête des réglages n'a de sens que si tous
+        // les appelants partagent la même instance.
+        $this->app->singleton(\App\Services\Settings\AppSettings::class);
+
         //
     }
 

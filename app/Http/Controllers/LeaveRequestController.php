@@ -17,6 +17,7 @@ use App\Notifications\LeaveRequestSubmittedNotification;
 use App\Jobs\SendWebPushNotificationJob;
 use App\Services\AuditLogService;
 use App\Services\Validation\TwoStepValidationService;
+use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
 use App\Services\Validation\ValidationGroupService;
 use App\Support\Validation\ValidationStage;
@@ -35,6 +36,7 @@ class LeaveRequestController extends Controller
         private readonly AuditLogService $auditLogService,
         private readonly ValidationGroupService $validationGroups,
         private readonly TwoStepValidationService $twoStepValidation,
+        private readonly ValidationRolloutService $validationRollout,
     ) {
     }
 
@@ -459,10 +461,18 @@ class LeaveRequestController extends Controller
             // Les valideurs sont figés sur la demande à cet instant. Le groupe
             // du demandeur peut ensuite changer, être renommé ou supprimé :
             // cette demande-ci gardera son circuit et son historique.
+            //
+            // C'est la DATE DE DÉBUT du congé qui décide du régime. Avant la
+            // date d'effet, le groupe est ignoré et la demande suit la cascade
+            // historique — un seul valideur, un seul accord — exactement comme
+            // avant la mise en service de la double validation.
+            $usesNewSystem = $this->validationRollout->appliesToLeaveStart($period['start_at']);
+
             $this->twoStepValidation->assign(
                 $leaveRequest,
                 $targetUser,
                 fn (): ?User => $this->legacyLeaveValidatorFor($targetUser),
+                $usesNewSystem ? false : null,
             );
 
             // `validator_user_id` désigne le premier valideur : le calendrier
@@ -472,7 +482,9 @@ class LeaveRequestController extends Controller
             $leaveRequest->validator_user_id = $leaveRequest->validator_1_id;
             $leaveRequest->save();
 
-            $this->warnWhenNoValidationGroup($leaveRequest, $targetUser);
+            if ($usesNewSystem) {
+                $this->warnWhenNoValidationGroup($leaveRequest, $targetUser);
+            }
 
             // Les DEUX valideurs sont prévenus immédiatement : aucun des deux
             // n'attend l'autre pour pouvoir se prononcer.
