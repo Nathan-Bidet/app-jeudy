@@ -813,7 +813,7 @@ export default function HoursIndex({
                                     dayState,
                                     coverage,
                                     totalMinutes: totalWorkedMinutes,
-                                    dayIndex: day.dayIndex,
+                                    workDate: sheet.work_date,
                                 })} />
                             </div>
                         </div>
@@ -1180,7 +1180,7 @@ export default function HoursIndex({
                                                     dayState,
                                                     coverage,
                                                     totalMinutes: totalWorkedMinutes,
-                                                    workDate: sheet.work_date,
+                                                    dayIndex: day.dayIndex,
                                                 })} />
                                             </div>
                                         </div>
