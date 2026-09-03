@@ -254,7 +254,12 @@ class HandleInertiaRequests extends Middleware
             'requester_label' => $notification->data['requester_label'] ?? null,
             'leave_request_id' => $leaveRequestId,
             'announcement_id' => $announcementId,
-            'url' => $this->notificationUrl($type, $leaveRequestId, $announcementId),
+            'url' => $this->notificationUrl(
+                $type,
+                $leaveRequestId,
+                $announcementId,
+                isset($notification->data['target']) ? (string) $notification->data['target'] : null,
+            ),
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
@@ -272,7 +277,7 @@ class HandleInertiaRequests extends Middleware
         return $name !== '' ? $name : (string) ($user->email ?? '');
     }
 
-    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null): ?string
+    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null, ?string $target = null): ?string
     {
         $leaveTypes = [
             'leave_request_submitted',
@@ -293,6 +298,18 @@ class HandleInertiaRequests extends Middleware
 
         if ($type === 'hours_missing_entry_reminder' && Route::has('hours.index')) {
             return route('hours.index');
+        }
+
+        // Le rattrapage ne concerne que les heures ; le rappel hebdomadaire
+        // peut porter sur les deux modules et transporte donc sa destination.
+        if ($type === 'hours_attached_to_validation' && Route::has('hours.index')) {
+            return route('hours.index');
+        }
+
+        if ($type === 'pending_validations_reminder') {
+            $route = $target === 'hours' ? 'hours.index' : 'leaves.index';
+
+            return Route::has($route) ? route($route) : null;
         }
 
         if ($type === 'announcement' && Route::has('annonces.index')) {

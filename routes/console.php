@@ -20,6 +20,17 @@ Schedule::command('hours:send-missing-reminders')
     ->dailyAt(config('hours.reminder_time', '18:30'))
     ->timezone(config('app.timezone', 'Europe/Paris'));
 
+// Rappel hebdomadaire aux valideurs : tous les jeudis à 14h00, heure de
+// l'application. `weeklyOn(4, ...)` désigne le jeudi (0 = dimanche).
+// withoutOverlapping empêche deux exécutions concurrentes, onOneServer garantit
+// un seul envoi si l'application tourne un jour sur plusieurs instances ; la
+// commande reste par ailleurs idempotente sur la journée.
+Schedule::command('validation:send-pending-reminders')
+    ->weeklyOn(4, '14:00')
+    ->timezone(config('app.timezone', 'Europe/Paris'))
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('cotations:refresh')
     ->everyMinute()
     ->withoutOverlapping()

@@ -72,7 +72,10 @@ class NotificationController extends Controller
         $type = $notification?->data['type'] ?? null;
         $maintenanceTaskId = $notification?->data['maintenance_task_id'] ?? null;
         $destination = match ($type) {
-            'hours_missing_entry_reminder' => route('hours.index'),
+            'hours_missing_entry_reminder', 'hours_attached_to_validation' => route('hours.index'),
+            'pending_validations_reminder' => ($notification?->data['target'] ?? null) === 'hours'
+                ? route('hours.index')
+                : route('leaves.index'),
             'maintenance_request_submitted', 'maintenance_task_assigned' => $maintenanceTaskId
                 ? route('maintenance.index', ['focus_task_id' => (int) $maintenanceTaskId])
                 : route('maintenance.index'),
@@ -238,7 +241,13 @@ class NotificationController extends Controller
             'leave_request_id' => $leaveRequestId,
             'announcement_id' => $announcementId,
             'maintenance_task_id' => $maintenanceTaskId,
-            'url' => $this->notificationUrl($type, $leaveRequestId, $announcementId, $maintenanceTaskId),
+            'url' => $this->notificationUrl(
+                $type,
+                $leaveRequestId,
+                $announcementId,
+                $maintenanceTaskId,
+                isset($notification->data['target']) ? (string) $notification->data['target'] : null,
+            ),
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
@@ -256,7 +265,7 @@ class NotificationController extends Controller
         return $name !== '' ? $name : (string) ($user->email ?? '');
     }
 
-    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null, mixed $maintenanceTaskId = null): ?string
+    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null, mixed $maintenanceTaskId = null, ?string $target = null): ?string
     {
         $maintenanceTypes = ['maintenance_request_submitted', 'maintenance_task_assigned'];
 
@@ -285,6 +294,18 @@ class NotificationController extends Controller
 
         if ($type === 'hours_missing_entry_reminder' && Route::has('hours.index')) {
             return route('hours.index');
+        }
+
+        // Le rattrapage ne concerne que les heures ; le rappel hebdomadaire
+        // peut porter sur les deux modules et transporte donc sa destination.
+        if ($type === 'hours_attached_to_validation' && Route::has('hours.index')) {
+            return route('hours.index');
+        }
+
+        if ($type === 'pending_validations_reminder') {
+            $route = $target === 'hours' ? 'hours.index' : 'leaves.index';
+
+            return Route::has($route) ? route($route) : null;
         }
 
         if ($type === 'announcement' && Route::has('annonces.index')) {
