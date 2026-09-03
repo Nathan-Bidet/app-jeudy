@@ -127,10 +127,10 @@ class HourSheetController extends Controller
                 'status_label' => $hourSheet->isLegacyEntry()
                     ? 'Saisie antérieure à la validation'
                     : $hourSheet->validationStatusLabel(),
-                'validator_1_label' => $hourSheet->validator_1_label,
-                'validator_2_label' => $hourSheet->validator_2_label,
-                'validator_1_decided_at' => $hourSheet->validator_1_decided_at?->toIso8601String(),
-                'validator_2_decided_at' => $hourSheet->validator_2_decided_at?->toIso8601String(),
+                // État des deux valideurs, sans jamais les nommer.
+                'validation_summary' => $hourSheet->isLegacyEntry()
+                    ? []
+                    : $hourSheet->validationSummary(),
                 'refusal_reason' => $hourSheet->refusal_reason,
             ])
             ->values()
@@ -159,12 +159,12 @@ class HourSheetController extends Controller
     }
 
     /**
-     * File de validation de l'utilisateur : les journées qui attendent SA
-     * décision, au niveau qui est le sien.
+     * File de validation de l'utilisateur : les journées sur lesquelles il
+     * peut encore se prononcer.
      *
-     * Une journée validée au premier niveau quitte la file du Valideur 1 et
-     * entre dans celle du Valideur 2 — elle n'est jamais comptée deux fois.
-     * Les journées antérieures au circuit (status null) n'y figurent pas.
+     * Une journée y entre dès sa saisie pour SES DEUX valideurs, et n'en sort,
+     * pour chacun, qu'une fois qu'il a lui-même tranché. Les journées
+     * antérieures au circuit (status null) n'y figurent pas.
      *
      * @return array{0: array<int, array<string, mixed>>, 1: int}
      */
@@ -196,11 +196,7 @@ class HourSheetController extends Controller
                 'is_not_worked' => (bool) $hourSheet->is_not_worked,
                 'status' => $hourSheet->status,
                 'status_label' => $hourSheet->validationStatusLabel(),
-                'validation_level' => $hourSheet->currentValidationLevel(),
-                'validator_1_label' => $hourSheet->validator_1_label,
-                'validator_2_label' => $hourSheet->validator_2_label,
-                'validator_1_decided_at' => $hourSheet->validator_1_decided_at?->toIso8601String(),
-                'validation_group_name' => $hourSheet->validation_group_name,
+                'validation_summary' => $hourSheet->validationSummary(),
             ])
             ->values()
             ->all();
@@ -397,23 +393,26 @@ class HourSheetController extends Controller
             return $this->staleValidationResponse($request);
         }
 
-        if ($transition->isFinal) {
+        // Le salarié n'est prévenu qu'une fois TOUS les accords réunis.
+        if ($transition->completesApproval()) {
             $this->notifyHourSheetOwner($hourSheet, true, $request->user());
         }
 
         $this->auditLogService->log([
-            'action' => $transition->isFinal ? 'approve_hour_sheet' : 'approve_hour_sheet_level_1',
+            'action' => $transition->completesApproval()
+                ? 'approve_hour_sheet'
+                : 'approve_hour_sheet_partial',
             'module' => 'heures',
             'description' => sprintf(
-                '%s a validé les heures du %s de %s (niveau %d)',
+                '%s a validé les heures du %s de %s%s',
                 $this->userLabel($request->user()),
                 $hourSheet->work_date?->toDateString() ?? '',
                 $this->userLabel($hourSheet->user),
-                $transition->level ?? 1,
+                $transition->completesApproval() ? '' : ' ; l\'autre valideur doit encore se prononcer',
             ),
             'payload' => [
                 'hour_sheet_id' => (int) $hourSheet->id,
-                'validation_level' => $transition->level,
+                'validation_levels' => $transition->levels,
                 'validation_trail' => $hourSheet->validationTrail(),
                 'before' => $before,
                 'after' => $this->hourSheetAuditSnapshot($hourSheet),
@@ -424,12 +423,9 @@ class HourSheetController extends Controller
             return response()->json(['ok' => true, 'status' => $hourSheet->status]);
         }
 
-        return back()->with('success', $transition->isFinal
+        return back()->with('success', $transition->completesApproval()
             ? 'Journée définitivement validée.'
-            : sprintf(
-                'Validation enregistrée. La journée passe à %s pour la seconde validation.',
-                $hourSheet->validator_2_label ?? 'le second valideur',
-            ));
+            : 'Votre validation est enregistrée. La journée reste en attente de la seconde validation.');
     }
 
     /**
@@ -461,15 +457,14 @@ class HourSheetController extends Controller
             'action' => 'refuse_hour_sheet',
             'module' => 'heures',
             'description' => sprintf(
-                '%s a refusé les heures du %s de %s (niveau %d)',
+                '%s a refusé les heures du %s de %s',
                 $this->userLabel($request->user()),
                 $hourSheet->work_date?->toDateString() ?? '',
                 $this->userLabel($hourSheet->user),
-                $transition->level ?? 1,
             ),
             'payload' => [
                 'hour_sheet_id' => (int) $hourSheet->id,
-                'validation_level' => $transition->level,
+                'validation_levels' => $transition->levels,
                 'refusal_reason' => $hourSheet->refusal_reason,
                 'validation_trail' => $hourSheet->validationTrail(),
                 'before' => $before,

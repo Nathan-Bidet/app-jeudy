@@ -1196,8 +1196,12 @@ export default function HoursIndex({
                                                 <p className="font-semibold">Date : {formatHistoryDate(sheet.work_date)}</p>
                                                 {/* État de validation de la journée. `status` à null signale une
                                                     saisie antérieure à la mise en place du circuit : elle n'est ni
-                                                    validée ni en attente, et le libellé le dit tel quel. */}
+                                                    validée ni en attente, et le libellé le dit tel quel.
+                                                    Les valideurs ne sont jamais nommés ici. */}
                                                 <p>Validation : {sheet.status_label || '—'}</p>
+                                                {(sheet.validation_summary || []).map((entry) => (
+                                                    <p key={entry.level}>Valideur {entry.level} : {entry.label}</p>
+                                                ))}
                                                 {sheet.status === 'refused' && sheet.refusal_reason ? (
                                                     <p className="text-red-700">Motif du refus : {sheet.refusal_reason}</p>
                                                 ) : null}

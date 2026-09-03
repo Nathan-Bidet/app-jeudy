@@ -10,7 +10,6 @@ use App\Models\User;
 use App\Models\ValidationGroup;
 use App\Notifications\HourSheetDecisionNotification;
 use App\Notifications\LeaveRequestApprovedNotification;
-use App\Notifications\LeaveRequestFirstLevelApprovedNotification;
 use App\Notifications\LeaveRequestRefusedNotification;
 use App\Notifications\LeaveRequestSubmittedNotification;
 use App\Services\Validation\TwoStepValidationService;
@@ -122,6 +121,7 @@ function submitHourSheet(User $user, string $date = '2026-10-05'): HourSheet
     return HourSheet::query()->where('user_id', $user->id)->whereDate('work_date', $date)->firstOrFail();
 }
 
+
 /*
 |--------------------------------------------------------------------------
 | Congés — affectation des valideurs
@@ -136,10 +136,11 @@ it('fige les deux valideurs du groupe sur une nouvelle demande de congé', funct
 
     $leave = submitLeave($requester);
 
-    expect($leave->status)->toBe(ValidationStage::PENDING_VALIDATOR_1)
+    expect($leave->status)->toBe(ValidationStage::PENDING)
         ->and((int) $leave->validator_1_id)->toBe((int) $v1->id)
         ->and((int) $leave->validator_2_id)->toBe((int) $v2->id)
-        ->and((int) $leave->validator_user_id)->toBe((int) $v1->id)
+        ->and($leave->validator_1_decision)->toBeNull()
+        ->and($leave->validator_2_decision)->toBeNull()
         ->and((int) $leave->validation_group_id)->toBe((int) $group->id)
         ->and($leave->validation_group_name)->toBe('Atelier')
         ->and($leave->validator_1_label)->not->toBeNull()
@@ -157,7 +158,7 @@ it('retombe sur le valideur historique quand le demandeur n\'a pas de groupe', f
 
     $leave = submitLeave($requester);
 
-    // Circuit à un seul niveau : exactement le comportement d'avant.
+    // Un seul valideur : un seul accord suffira.
     expect((int) $leave->validator_1_id)->toBe((int) $legacyValidator->id)
         ->and($leave->validator_2_id)->toBeNull()
         ->and($leave->hasSecondValidationLevel())->toBeFalse()
@@ -165,49 +166,73 @@ it('retombe sur le valideur historique quand le demandeur n\'a pas de groupe', f
 });
 
 it('ignore un valideur désactivé et ne laisse pas la demande sans destinataire', function (): void {
-    $v1 = twoStepUser(['is_active' => false]);
+    $inactive = twoStepUser(['is_active' => false]);
     $v2 = twoStepUser();
     $requester = twoStepUser();
 
-    // Le groupe est créé avec deux comptes actifs, puis le premier est
-    // désactivé — le cas réel d'un départ après configuration.
     $active = twoStepUser();
     $group = groupWith($active, $v2, [$requester]);
-    $group->update(['validator_1_id' => $v1->id]);
+    $group->update(['validator_1_id' => $inactive->id]);
 
     $leave = submitLeave($requester);
 
-    // Le Valideur 2 prend le premier rang : la demande reste traitable.
     expect((int) $leave->validator_1_id)->toBe((int) $v2->id)
+        ->and($leave->validator_2_id)->toBeNull();
+});
+
+it('refuse qu\'une même personne occupe les deux rangs', function (): void {
+    // L'administration l'interdit déjà à la création du groupe...
+    $admin = twoStepUser();
+    $admin->assignRole(Role::findOrCreate('admin', 'web'));
+    $same = twoStepUser();
+
+    $this->actingAs($admin)
+        ->post(route('admin.leaves.validation-groups.store'), [
+            'name' => 'Doublon',
+            'validator_1_id' => $same->id,
+            'validator_2_id' => $same->id,
+            'member_user_ids' => [],
+        ])
+        ->assertSessionHasErrors('validator_2_id');
+
+    // ... et le moteur ne l'accepterait pas davantage si la base contenait
+    // une configuration héritée de ce type.
+    $requester = twoStepUser();
+    $group = groupWith($same, twoStepUser(), [$requester]);
+    $group->update(['validator_2_id' => $same->id]);
+
+    $leave = submitLeave($requester);
+
+    expect((int) $leave->validator_1_id)->toBe((int) $same->id)
         ->and($leave->validator_2_id)->toBeNull();
 });
 
 /*
 |--------------------------------------------------------------------------
-| Congés — ordre strict
+| Congés — les deux valideurs agissent en parallèle
 |--------------------------------------------------------------------------
 */
 
-it('interdit au Valideur 2 d\'agir avant le Valideur 1', function (): void {
+it('rend la demande accessible aux DEUX valideurs dès sa création', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
     groupWith($v1, $v2, [$requester]);
 
-    $leave = submitLeave($requester);
+    submitLeave($requester);
 
-    $this->actingAs($v2)
-        ->postJson(route('leaves.approve', $leave->id))
-        ->assertForbidden();
-
-    $this->actingAs($v2)
-        ->postJson(route('leaves.refuse', $leave->id))
-        ->assertForbidden();
-
-    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_1);
+    foreach ([$v1, $v2] as $validator) {
+        $this->actingAs($validator)
+            ->get(route('leaves.index'))
+            ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+                ->has('leaveRequestsToValidate', 1)
+                ->where('pendingValidationCount', 1)
+                ->where('leaveRequestsToValidate.0.awaiting_my_decision', true)
+            );
+    }
 });
 
-it('passe au second niveau après la validation du premier, sans accepter définitivement', function (): void {
+it('laisse le Valideur 2 valider en premier', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -215,17 +240,20 @@ it('passe au second niveau après la validation du premier, sans accepter défin
 
     $leave = submitLeave($requester);
 
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id))->assertSessionHasNoErrors();
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id))->assertSessionHasNoErrors();
     $leave->refresh();
 
-    expect($leave->status)->toBe(ValidationStage::PENDING_VALIDATOR_2)
-        ->and($leave->validator_1_decided_at)->not->toBeNull()
-        ->and((int) $leave->validator_1_decided_by_id)->toBe((int) $v1->id)
-        ->and($leave->validator_2_decided_at)->toBeNull()
-        ->and((int) $leave->validator_user_id)->toBe((int) $v2->id);
+    // Un seul accord ne suffit pas : la demande reste en attente.
+    expect($leave->status)->toBe(ValidationStage::PENDING)
+        ->and($leave->validator_2_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($leave->validator_1_decision)->toBeNull();
+
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('accepte définitivement après la validation du second niveau', function (): void {
+it('laisse le Valideur 1 valider en premier', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -234,15 +262,40 @@ it('accepte définitivement après la validation du second niveau', function ():
     $leave = submitLeave($requester);
 
     $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
-    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
     $leave->refresh();
 
-    expect($leave->status)->toBe(ValidationStage::APPROVED)
-        ->and($leave->validator_2_decided_at)->not->toBeNull()
-        ->and((int) $leave->validator_2_decided_by_id)->toBe((int) $v2->id);
+    expect($leave->status)->toBe(ValidationStage::PENDING)
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($leave->validator_2_decision)->toBeNull();
+
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('empêche le Valideur 1 de se prononcer une seconde fois', function (): void {
+it('retire la demande de la file de celui qui a validé, pas de celle de l\'autre', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+
+    $this->actingAs($v2)->get(route('leaves.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            ->where('pendingValidationCount', 0)
+            ->where('leaveRequestsToValidate.0.awaiting_my_decision', false)
+        );
+
+    $this->actingAs($v1)->get(route('leaves.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            ->where('pendingValidationCount', 1)
+            ->where('leaveRequestsToValidate.0.awaiting_my_decision', true)
+        );
+});
+
+it('empêche un valideur de se prononcer deux fois', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -255,10 +308,13 @@ it('empêche le Valideur 1 de se prononcer une seconde fois', function (): void 
         ->postJson(route('leaves.approve', $leave->id))
         ->assertForbidden();
 
-    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+    // L'autre valideur, lui, reste libre d'agir.
+    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING);
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('valide en une seule étape quand le groupe n\'a pas de second valideur', function (): void {
+it('valide en un seul accord quand aucun second valideur n\'est désigné', function (): void {
     $legacyValidator = twoStepUser();
     $requester = twoStepUser();
     LeaveUserValidator::query()->create([
@@ -284,7 +340,6 @@ it('refuse à un valideur d\'un autre groupe toute intervention', function (): v
     $requester = twoStepUser();
     groupWith($v1, $v2, [$requester], 'Atelier');
 
-    // Valideur d'un tout autre groupe : aucun droit ici.
     $otherV1 = twoStepUser();
     $otherV2 = twoStepUser();
     groupWith($otherV1, $otherV2, [twoStepUser()], 'Commerce');
@@ -294,8 +349,11 @@ it('refuse à un valideur d\'un autre groupe toute intervention', function (): v
     $this->actingAs($otherV1)
         ->postJson(route('leaves.approve', $leave->id))
         ->assertForbidden();
+    $this->actingAs($otherV2)
+        ->postJson(route('leaves.approve', $leave->id))
+        ->assertForbidden();
 
-    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_1);
+    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING);
 });
 
 it('ne montre à un valideur que les demandes des groupes dont il est valideur', function (): void {
@@ -313,35 +371,16 @@ it('ne montre à un valideur que les demandes des groupes dont il est valideur',
     submitLeave($mine, $type);
     submitLeave($theirs, $type);
 
-    $this->actingAs($v1)
-        ->get(route('leaves.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
-            ->has('leaveRequestsToValidate', 1)
-            ->where('leaveRequestsToValidate.0.target_user_id', $mine->id)
-        );
-});
-
-it('ne compte une demande que chez le valideur dont c\'est le tour', function (): void {
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $requester = twoStepUser();
-    groupWith($v1, $v2, [$requester]);
-
-    $leave = submitLeave($requester);
-
-    // Étape 1 : elle compte pour V1, pas pour V2.
-    $this->actingAs($v1)->get(route('leaves.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 1));
-    $this->actingAs($v2)->get(route('leaves.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
-
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
-
-    // Étape 2 : elle a basculé, sans jamais être comptée deux fois.
-    $this->actingAs($v1)->get(route('leaves.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
-    $this->actingAs($v2)->get(route('leaves.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 1));
+    // Vrai pour les deux rangs : le Valideur 2 n'hérite d'aucune visibilité
+    // supplémentaire sur les autres groupes.
+    foreach ([$v1, $v2] as $validator) {
+        $this->actingAs($validator)
+            ->get(route('leaves.index'))
+            ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+                ->has('leaveRequestsToValidate', 1)
+                ->where('leaveRequestsToValidate.0.target_user_id', $mine->id)
+            );
+    }
 });
 
 /*
@@ -350,7 +389,7 @@ it('ne compte une demande que chez le valideur dont c\'est le tour', function ()
 |--------------------------------------------------------------------------
 */
 
-it('arrête le circuit sur un refus de premier niveau', function (): void {
+it('refuse globalement la demande sur un refus du Valideur 1', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -361,16 +400,34 @@ it('arrête le circuit sur un refus de premier niveau', function (): void {
     $leave->refresh();
 
     expect($leave->status)->toBe(ValidationStage::REFUSED)
-        ->and($leave->validator_1_decided_at)->not->toBeNull()
-        ->and($leave->validator_2_decided_at)->toBeNull();
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_REFUSED)
+        ->and($leave->validator_2_decision)->toBeNull();
 
-    // Le second valideur ne peut rien rouvrir.
+    // L'autre valideur ne peut plus rien rouvrir.
     $this->actingAs($v2)
         ->postJson(route('leaves.approve', $leave->id))
         ->assertForbidden();
+    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
 });
 
-it('arrête le circuit sur un refus de second niveau', function (): void {
+it('refuse globalement la demande sur un refus du Valideur 2', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
+
+    $this->actingAs($v1)
+        ->postJson(route('leaves.approve', $leave->id))
+        ->assertForbidden();
+    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
+});
+
+it('refuse la demande même après l\'accord de l\'autre valideur', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -382,8 +439,8 @@ it('arrête le circuit sur un refus de second niveau', function (): void {
     $leave->refresh();
 
     expect($leave->status)->toBe(ValidationStage::REFUSED)
-        ->and($leave->validator_1_decided_at)->not->toBeNull()
-        ->and($leave->validator_2_decided_at)->not->toBeNull();
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($leave->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED);
 });
 
 /*
@@ -392,7 +449,7 @@ it('arrête le circuit sur un refus de second niveau', function (): void {
 |--------------------------------------------------------------------------
 */
 
-it('ne saute pas le second niveau quand le demandeur accepte une contre-proposition du premier', function (): void {
+it('ne clôt pas la demande quand le demandeur accepte la contre-proposition d\'un seul valideur', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -410,14 +467,18 @@ it('ne saute pas le second niveau quand le demandeur accepte une contre-proposit
     $this->actingAs($requester)->post(route('leaves.accept_modification', $leave->id));
     $leave->refresh();
 
-    // Le premier valideur a proposé donc approuvé son niveau ; le second doit
-    // encore se prononcer.
-    expect($leave->status)->toBe(ValidationStage::PENDING_VALIDATOR_2)
-        ->and($leave->validator_1_decided_at)->not->toBeNull()
+    // Le proposant a de fait donné son accord ; l'autre doit encore se
+    // prononcer, et le fera sur la nouvelle période.
+    expect($leave->status)->toBe(ValidationStage::PENDING)
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($leave->validator_2_decision)->toBeNull()
         ->and($leave->start_at?->toDateString())->toBe('2026-10-12');
+
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('accepte définitivement une contre-proposition émise au second niveau', function (): void {
+it('clôt la demande quand la contre-proposition acceptée était le dernier accord manquant', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -436,7 +497,7 @@ it('accepte définitivement une contre-proposition émise au second niveau', fun
     expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('interdit au second valideur de proposer une modification avant son tour', function (): void {
+it('laisse le Valideur 2 proposer une modification dès la création', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -444,7 +505,24 @@ it('interdit au second valideur de proposer une modification avant son tour', fu
 
     $leave = submitLeave($requester);
 
-    $this->actingAs($v2)->postJson(route('leaves.propose_modification', $leave->id), [
+    $this->actingAs($v2)->post(route('leaves.propose_modification', $leave->id), [
+        'proposed_start_at' => '2026-10-12',
+        'proposed_end_at' => '2026-10-13',
+    ])->assertSessionHasNoErrors();
+
+    expect($leave->fresh()->status)->toBe(LeaveRequest::STATUS_PENDING_USER_CONFIRMATION);
+});
+
+it('interdit de proposer une modification à un valideur qui a déjà tranché', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+
+    $this->actingAs($v1)->postJson(route('leaves.propose_modification', $leave->id), [
         'proposed_start_at' => '2026-10-12',
         'proposed_end_at' => '2026-10-13',
     ])->assertForbidden();
@@ -456,7 +534,21 @@ it('interdit au second valideur de proposer une modification avant son tour', fu
 |--------------------------------------------------------------------------
 */
 
-it('notifie le bon destinataire à chaque étape', function (): void {
+it('notifie les DEUX valideurs dès la création', function (): void {
+    Notification::fake();
+
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    submitLeave($requester);
+
+    Notification::assertSentTo($v1, LeaveRequestSubmittedNotification::class);
+    Notification::assertSentTo($v2, LeaveRequestSubmittedNotification::class);
+});
+
+it('ne notifie le demandeur qu\'une fois les deux accords réunis', function (): void {
     Notification::fake();
 
     $v1 = twoStepUser();
@@ -465,19 +557,15 @@ it('notifie le bon destinataire à chaque étape', function (): void {
     groupWith($v1, $v2, [$requester]);
 
     $leave = submitLeave($requester);
-    Notification::assertSentTo($v1, LeaveRequestSubmittedNotification::class);
-    Notification::assertNotSentTo($v2, LeaveRequestSubmittedNotification::class);
-
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
-    Notification::assertSentTo($v2, LeaveRequestFirstLevelApprovedNotification::class);
-    // Le demandeur n'est pas encore prévenu : rien n'est définitif.
-    Notification::assertNotSentTo($requester, LeaveRequestApprovedNotification::class);
 
     $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+    Notification::assertNotSentTo($requester, LeaveRequestApprovedNotification::class);
+
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
     Notification::assertSentTo($requester, LeaveRequestApprovedNotification::class);
 });
 
-it('notifie le demandeur du refus, quel que soit le niveau', function (): void {
+it('notifie le demandeur du refus, par quelque valideur qu\'il vienne', function (): void {
     Notification::fake();
 
     $v1 = twoStepUser();
@@ -486,7 +574,6 @@ it('notifie le demandeur du refus, quel que soit le niveau', function (): void {
     groupWith($v1, $v2, [$requester]);
 
     $leave = submitLeave($requester);
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
     $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
 
     Notification::assertSentTo($requester, LeaveRequestRefusedNotification::class);
@@ -494,11 +581,53 @@ it('notifie le demandeur du refus, quel que soit le niveau', function (): void {
 
 /*
 |--------------------------------------------------------------------------
-| Congés — administrateurs, concurrence, historique
+| Congés — anonymat, administrateurs, concurrence, historique
 |--------------------------------------------------------------------------
 */
 
-it('laisse l\'administrateur agir, mais à l\'étape courante seulement', function (): void {
+it('n\'expose aucun nom de valideur dans les données de la page Congés', function (): void {
+    $v1 = twoStepUser(['first_name' => 'Alice', 'last_name' => 'Blanchet']);
+    $v2 = twoStepUser(['first_name' => 'Floriane', 'last_name' => 'Blanchet']);
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+
+    // Les libellés existent bien en base — c'est l'historique.
+    expect($leave->validator_1_label)->toBe('Alice Blanchet')
+        ->and($leave->validator_2_label)->toBe('Floriane Blanchet');
+
+    // ... mais ne sortent jamais vers le navigateur.
+    $response = $this->actingAs($requester)->get(route('leaves.index'));
+    $payload = json_encode($response->viewData('page')['props'], JSON_UNESCAPED_UNICODE);
+
+    expect($payload)->not->toContain('Alice Blanchet')
+        ->and($payload)->not->toContain('Floriane Blanchet')
+        ->and($payload)->not->toContain('validator_1_label')
+        ->and($payload)->not->toContain('validator_2_label');
+});
+
+it('expose un unique bloc d\'état de validation par demande', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+
+    $this->actingAs($v1)
+        ->get(route('leaves.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            // Une seule clé, deux entrées : un rang, un état, pas de doublon.
+            ->has('leaveRequestsToValidate.0.validation_summary', 2)
+            ->where('leaveRequestsToValidate.0.validation_summary.0.label', 'Validé')
+            ->where('leaveRequestsToValidate.0.validation_summary.1.label', 'En attente')
+            ->where('leaveRequestsToValidate.0.status_label', 'En attente de validation')
+        );
+});
+
+it('laisse l\'administrateur trancher la demande d\'un seul geste', function (): void {
     $admin = twoStepAdmin();
     $v1 = twoStepUser();
     $v2 = twoStepUser();
@@ -507,14 +636,28 @@ it('laisse l\'administrateur agir, mais à l\'étape courante seulement', functi
 
     $leave = submitLeave($requester);
 
-    // L'administrateur conserve son droit d'intervention — sans pour autant
-    // court-circuiter l'ordre : sa validation vaut niveau 1.
+    // Un administrateur qui n'est valideur d'aucun rang décide pour les rangs
+    // restants : c'est le pouvoir qu'il avait avant la double validation.
     $this->actingAs($admin)->post(route('leaves.approve', $leave->id));
 
-    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('ne transitionne qu\'une fois sur un double clic', function (): void {
+it('limite l\'administrateur à son propre rang lorsqu\'il est lui-même valideur', function (): void {
+    $admin = twoStepAdmin();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($admin, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($admin)->post(route('leaves.approve', $leave->id));
+
+    // Désigné au rang 1, il n'a validé que celui-là.
+    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING)
+        ->and($leave->fresh()->validator_2_decision)->toBeNull();
+});
+
+it('ne décide qu\'une fois sur un double clic', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
@@ -523,29 +666,31 @@ it('ne transitionne qu\'une fois sur un double clic', function (): void {
     $leave = submitLeave($requester);
     $service = app(TwoStepValidationService::class);
 
-    // Deux instances distinctes du même enregistrement : ce que produisent
-    // deux onglets ouverts sur la même demande.
+    // Deux instances du même enregistrement : ce que produisent deux onglets.
     $first = LeaveRequest::query()->findOrFail($leave->id);
     $second = LeaveRequest::query()->findOrFail($leave->id);
 
     expect($service->approve($first, $v1)->wasApplied)->toBeTrue()
         ->and($service->approve($second, $v1)->wasApplied)->toBeFalse()
-        ->and($leave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+        ->and($leave->fresh()->status)->toBe(ValidationStage::PENDING)
+        ->and($leave->fresh()->validator_2_decision)->toBeNull();
 });
 
-it('répond 409 plutôt que de rejouer une décision déjà prise', function (): void {
+it('ignore la décision d\'un valideur sur une demande déjà refusée par l\'autre', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
     groupWith($v1, $v2, [$requester]);
 
     $leave = submitLeave($requester);
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+    $service = app(TwoStepValidationService::class);
 
-    // Le second appel est refusé par la Policy d'étape (403), la demande reste
-    // au niveau 2 : jamais deux transitions.
-    expect($leave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+    $stale = LeaveRequest::query()->findOrFail($leave->id);
+    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
+
+    // $stale a été chargé avant le refus : le verrou relit l'état réel.
+    expect($service->approve($stale, $v1)->wasApplied)->toBeFalse()
+        ->and($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
 });
 
 it('garde l\'historique intact quand l\'administration change les valideurs du groupe', function (): void {
@@ -557,7 +702,6 @@ it('garde l\'historique intact quand l\'administration change les valideurs du g
     $leave = submitLeave($requester);
     $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
 
-    // L'administration remplace les deux valideurs du groupe.
     $newV1 = twoStepUser();
     $newV2 = twoStepUser();
     app(ValidationGroupService::class)->update($group, [
@@ -569,8 +713,6 @@ it('garde l\'historique intact quand l\'administration change les valideurs du g
 
     $leave->refresh();
 
-    // La demande en cours garde SES valideurs : c'est bien l'ancien second
-    // valideur qui doit conclure, et l'historique nomme le bon premier.
     expect((int) $leave->validator_1_id)->toBe((int) $v1->id)
         ->and((int) $leave->validator_2_id)->toBe((int) $v2->id);
 
@@ -589,7 +731,6 @@ it('laisse les demandes en cours au groupe d\'origine et n\'applique le nouveau 
     $type = leaveTypeForTests();
     $firstLeave = submitLeave($requester, $type);
 
-    // Le salarié change de groupe alors que sa demande est en cours.
     $newV1 = twoStepUser();
     $newV2 = twoStepUser();
     app(ValidationGroupService::class)->update($atelier, [
@@ -607,26 +748,31 @@ it('laisse les demandes en cours au groupe d\'origine et n\'applique le nouveau 
         ->and((int) $secondLeave->validator_1_id)->toBe((int) $newV1->id)
         ->and($secondLeave->validation_group_name)->toBe('Commerce');
 
-    // L'ancienne demande reste traitable par son valideur d'origine.
     $this->actingAs($v1)->post(route('leaves.approve', $firstLeave->id));
-    expect($firstLeave->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+    expect($firstLeave->fresh()->status)->toBe(ValidationStage::PENDING);
 });
 
-it('conserve le libellé du valideur même après suppression de son compte', function (): void {
+it('conserve le libellé et l\'auteur de la décision après suppression du compte valideur', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $requester = twoStepUser();
     groupWith($v1, $v2, [$requester]);
 
     $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+    $leave->refresh();
+
     $label = $leave->validator_1_label;
+    $decidedAt = $leave->validator_1_decided_at;
 
     $v1->delete();
     $leave->refresh();
 
     expect($leave->validator_1_id)->toBeNull()
         ->and($leave->validator_1_label)->toBe($label)
-        ->and($label)->not->toBeNull();
+        ->and($label)->not->toBeNull()
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($leave->validator_1_decided_at?->toIso8601String())->toBe($decidedAt?->toIso8601String());
 });
 
 /*
@@ -635,7 +781,7 @@ it('conserve le libellé du valideur même après suppression de son compte', fu
 |--------------------------------------------------------------------------
 */
 
-it('soumet une journée d\'heures au premier valideur dès l\'enregistrement', function (): void {
+it('soumet une journée d\'heures aux deux valideurs dès l\'enregistrement', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $employee = hoursUser();
@@ -643,29 +789,55 @@ it('soumet une journée d\'heures au premier valideur dès l\'enregistrement', f
 
     $sheet = submitHourSheet($employee);
 
-    expect($sheet->status)->toBe(ValidationStage::PENDING_VALIDATOR_1)
+    expect($sheet->status)->toBe(ValidationStage::PENDING)
         ->and((int) $sheet->validator_1_id)->toBe((int) $v1->id)
-        ->and((int) $sheet->validator_2_id)->toBe((int) $v2->id);
+        ->and((int) $sheet->validator_2_id)->toBe((int) $v2->id)
+        ->and($sheet->validator_1_decision)->toBeNull()
+        ->and($sheet->validator_2_decision)->toBeNull();
 });
 
-it('applique le même ordre strict aux heures', function (): void {
+it('laisse le Valideur 2 des heures agir en premier', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $employee = hoursUser();
     groupWith($v1, $v2, [$employee]);
     $sheet = submitHourSheet($employee);
 
-    // V2 avant V1 : refusé.
-    $this->actingAs($v2)->postJson(route('hours.approve', $sheet->id))->assertForbidden();
+    $this->actingAs($v2)->post(route('hours.approve', $sheet->id));
+    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
 
     $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
-    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+    expect($sheet->fresh()->status)->toBe(ValidationStage::APPROVED);
+});
+
+it('laisse le Valideur 1 des heures agir en premier', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+    $sheet = submitHourSheet($employee);
+
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
 
     $this->actingAs($v2)->post(route('hours.approve', $sheet->id));
     expect($sheet->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
-it('arrête le circuit des heures sur un refus et transmet le motif', function (): void {
+it('empêche un valideur des heures de se prononcer deux fois', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+    $sheet = submitHourSheet($employee);
+
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+    $this->actingAs($v1)->postJson(route('hours.approve', $sheet->id))->assertForbidden();
+
+    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
+});
+
+it('refuse globalement des heures dès le refus de l\'un des deux valideurs', function (): void {
     Notification::fake();
 
     $v1 = twoStepUser();
@@ -674,16 +846,58 @@ it('arrête le circuit des heures sur un refus et transmet le motif', function (
     groupWith($v1, $v2, [$employee]);
     $sheet = submitHourSheet($employee);
 
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), [
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), [
         'refusal_reason' => 'Horaires incohérents',
     ]);
     $sheet->refresh();
 
     expect($sheet->status)->toBe(ValidationStage::REFUSED)
+        ->and($sheet->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED)
         ->and($sheet->refusal_reason)->toBe('Horaires incohérents');
 
     Notification::assertSentTo($employee, HourSheetDecisionNotification::class);
-    $this->actingAs($v2)->postJson(route('hours.approve', $sheet->id))->assertForbidden();
+
+    $this->actingAs($v1)->postJson(route('hours.approve', $sheet->id))->assertForbidden();
+    expect($sheet->fresh()->status)->toBe(ValidationStage::REFUSED);
+});
+
+it('ne notifie le salarié de ses heures qu\'après les deux accords', function (): void {
+    Notification::fake();
+
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+    $sheet = submitHourSheet($employee);
+
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
+
+    $this->actingAs($v2)->post(route('hours.approve', $sheet->id));
+    Notification::assertSentTo($employee, HourSheetDecisionNotification::class);
+});
+
+it('rend les heures visibles aux deux valideurs dès la saisie', function (): void {
+    $v1 = hoursUser();
+    $v2 = hoursUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+    $sheet = submitHourSheet($employee);
+
+    foreach ([$v1, $v2] as $validator) {
+        $this->actingAs($validator)->get(route('hours.index'))
+            ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+                ->where('pendingValidationCount', 1)
+                ->has('hourSheetsToValidate', 1)
+            );
+    }
+
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+
+    $this->actingAs($v1)->get(route('hours.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
+    $this->actingAs($v2)->get(route('hours.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 1));
 });
 
 it('refuse à un valideur d\'un autre groupe de traiter des heures', function (): void {
@@ -698,10 +912,28 @@ it('refuse à un valideur d\'un autre groupe de traiter des heures', function ()
     $sheet = submitHourSheet($employee);
 
     $this->actingAs($intruder)->postJson(route('hours.approve', $sheet->id))->assertForbidden();
-    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_1);
+    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
 });
 
-it('renvoie au premier niveau une journée déjà validée puis modifiée', function (): void {
+it('n\'expose aucun nom de valideur dans les données de la page Heures', function (): void {
+    $v1 = hoursUser();
+    $v1->update(['first_name' => 'Alice', 'last_name' => 'Blanchet']);
+    $v2 = twoStepUser(['first_name' => 'Floriane', 'last_name' => 'Blanchet']);
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+    submitHourSheet($employee);
+
+    foreach ([$employee, $v1] as $viewer) {
+        $response = $this->actingAs($viewer)->get(route('hours.index'));
+        $payload = json_encode($response->viewData('page')['props'], JSON_UNESCAPED_UNICODE);
+
+        expect($payload)->not->toContain('Floriane Blanchet')
+            ->and($payload)->not->toContain('validator_1_label')
+            ->and($payload)->not->toContain('validator_2_label');
+    }
+});
+
+it('renvoie au circuit complet une journée déjà validée puis modifiée', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $employee = hoursUser();
@@ -713,32 +945,12 @@ it('renvoie au premier niveau une journée déjà validée puis modifiée', func
     expect($sheet->fresh()->status)->toBe(ValidationStage::APPROVED);
 
     // La validation portait sur le contenu précédent : rouvrir la journée
-    // relance le circuit depuis le début.
+    // remet les deux accords à zéro.
     $sheet = submitHourSheet($employee);
 
-    expect($sheet->status)->toBe(ValidationStage::PENDING_VALIDATOR_1)
-        ->and($sheet->validator_1_decided_at)->toBeNull()
-        ->and($sheet->validator_2_decided_at)->toBeNull();
-});
-
-it('ne compte les heures que chez le valideur dont c\'est le tour', function (): void {
-    $v1 = hoursUser();
-    $v2 = hoursUser();
-    $employee = hoursUser();
-    groupWith($v1, $v2, [$employee]);
-    $sheet = submitHourSheet($employee);
-
-    $this->actingAs($v1)->get(route('hours.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 1));
-    $this->actingAs($v2)->get(route('hours.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
-
-    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
-
-    $this->actingAs($v1)->get(route('hours.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
-    $this->actingAs($v2)->get(route('hours.index'))
-        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 1));
+    expect($sheet->status)->toBe(ValidationStage::PENDING)
+        ->and($sheet->validator_1_decision)->toBeNull()
+        ->and($sheet->validator_2_decision)->toBeNull();
 });
 
 it('laisse hors circuit les journées saisies avant la mise en place de la validation', function (): void {
@@ -747,8 +959,6 @@ it('laisse hors circuit les journées saisies avant la mise en place de la valid
     $employee = hoursUser();
     groupWith($v1, $v2, [$employee]);
 
-    // Journée écrite sans passer par le circuit : c'est l'état des lignes
-    // existantes au moment du déploiement.
     $legacy = HourSheet::query()->create([
         'user_id' => $employee->id,
         'work_date' => '2026-01-15',
@@ -759,12 +969,11 @@ it('laisse hors circuit les journées saisies avant la mise en place de la valid
     expect($legacy->status)->toBeNull()
         ->and($legacy->isLegacyEntry())->toBeTrue();
 
-    // Elle n'encombre aucune file de validation.
     $this->actingAs($v1)->get(route('hours.index'))
         ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
 });
 
-it('ne transitionne qu\'une fois une journée d\'heures sur un double clic', function (): void {
+it('ne décide qu\'une fois une journée d\'heures sur un double clic', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();
     $employee = hoursUser();
@@ -777,7 +986,7 @@ it('ne transitionne qu\'une fois une journée d\'heures sur un double clic', fun
 
     expect($service->approve($first, $v1)->wasApplied)->toBeTrue()
         ->and($service->approve($second, $v1)->wasApplied)->toBeFalse()
-        ->and($sheet->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_2);
+        ->and($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
 });
 
 it('refuse toute décision sur les heures à un utilisateur non authentifié', function (): void {
@@ -788,7 +997,7 @@ it('refuse toute décision sur les heures à un utilisateur non authentifié', f
     $sheet = submitHourSheet($employee);
 
     $this->post(route('hours.approve', $sheet->id))->assertRedirect();
-    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING_VALIDATOR_1);
+    expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
 });
 
 /*
@@ -810,17 +1019,46 @@ it('laisse intactes les demandes de congé déjà tranchées', function (): void
         'validator_user_id' => $validator->id,
         'validator_1_id' => $validator->id,
         'validator_1_label' => 'Ancien valideur',
+        'validator_1_decision' => ValidationStage::DECISION_APPROVED,
         'validator_1_decided_at' => now()->subMonth(),
     ]);
 
-    // Aucun second valideur n'est inventé rétroactivement, et l'état terminal
-    // interdit toute reprise du circuit.
-    expect($approved->hasSecondValidationLevel())->toBeFalse()
-        ->and(app(TwoStepValidationService::class)->canDecide($approved, $validator))->toBeFalse();
+    expect(app(TwoStepValidationService::class)->canDecide($approved, $validator))->toBeFalse();
 
     $this->actingAs($validator)
         ->postJson(route('leaves.approve', $approved->id))
         ->assertForbidden();
+
+    expect($approved->fresh()->status)->toBe(ValidationStage::APPROVED);
+});
+
+it('rend agissables les demandes héritées du circuit séquentiel', function (): void {
+    // Ligne telle que la migration l'a laissée : accord du rang 1 déjà acquis,
+    // statut global ramené sur `pending`, rang 2 encore ouvert.
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+
+    $leave = LeaveRequest::query()->create([
+        'requester_user_id' => $requester->id,
+        'target_user_id' => $requester->id,
+        'start_at' => '2026-11-02 00:00:00',
+        'end_at' => '2026-11-03 18:00:00',
+        'status' => ValidationStage::PENDING,
+        'validator_user_id' => $v2->id,
+        'validator_1_id' => $v1->id,
+        'validator_1_label' => 'Ancien valideur 1',
+        'validator_1_decision' => ValidationStage::DECISION_APPROVED,
+        'validator_1_decided_at' => now()->subWeek(),
+        'validator_2_id' => $v2->id,
+        'validator_2_label' => 'Ancien valideur 2',
+    ]);
+
+    // Le rang 1 est clos, le rang 2 reste à trancher.
+    $this->actingAs($v1)->postJson(route('leaves.approve', $leave->id))->assertForbidden();
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
 });
 
 it('continue de bloquer la saisie d\'heures sur un congé définitivement validé', function (): void {
@@ -843,18 +1081,19 @@ it('continue de bloquer la saisie d\'heures sur un congé définitivement valid�
     ])->assertSessionHasErrors();
 });
 
-it('ne bloque pas la saisie d\'heures sur un congé encore en cours de validation', function (): void {
+it('ne bloque pas la saisie d\'heures sur un congé partiellement validé', function (): void {
     $employee = hoursUser();
 
-    // Un congé arrêté au second niveau n'est pas acquis : il ne doit pas
-    // encore empêcher la saisie des heures.
+    // Un seul accord obtenu : le congé n'est pas acquis, il ne doit pas encore
+    // empêcher la saisie des heures.
     LeaveRequest::query()->create([
         'requester_user_id' => $employee->id,
         'target_user_id' => $employee->id,
         'start_at' => '2026-10-05 00:00:00',
         'end_at' => '2026-10-05 18:00:00',
         'is_all_day' => true,
-        'status' => ValidationStage::PENDING_VALIDATOR_2,
+        'status' => ValidationStage::PENDING,
+        'validator_1_decision' => ValidationStage::DECISION_APPROVED,
     ]);
 
     $this->actingAs($employee)->post(route('hours.store'), [

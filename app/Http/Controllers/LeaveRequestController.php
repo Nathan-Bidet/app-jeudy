@@ -9,7 +9,6 @@ use App\Models\LeaveType;
 use App\Models\LeaveUserValidator;
 use App\Models\User;
 use App\Notifications\LeaveRequestApprovedNotification;
-use App\Notifications\LeaveRequestFirstLevelApprovedNotification;
 use App\Notifications\LeaveRequestModificationAcceptedNotification;
 use App\Notifications\LeaveRequestModificationProposedNotification;
 use App\Notifications\LeaveRequestModificationRefusedNotification;
@@ -86,6 +85,27 @@ class LeaveRequestController extends Controller
             ->orderByRaw('COALESCE(last_name, name) asc')
             ->orderByRaw('COALESCE(first_name, name) asc')
             ->first();
+    }
+
+    /**
+     * Comptes des valideurs désignés sur une demande, sans doublon.
+     *
+     * @return array<int, User>
+     */
+    private function assignedValidators(LeaveRequest $leaveRequest): array
+    {
+        $ids = collect([$leaveRequest->validator_1_id, $leaveRequest->validator_2_id])
+            ->filter()
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return User::query()->whereIn('id', $ids)->get()->all();
     }
 
     /**
@@ -188,23 +208,21 @@ class LeaveRequestController extends Controller
                     'name' => $proposedBy->name,
                 ] : null,
 
-                // Étape du circuit, pour que la carte annonce « 1/2 » ou
-                // « 2/2 » et montre au second valideur que le premier a déjà
-                // donné son accord.
+                // Statut global, sans numéro d'étape : les deux valideurs sont
+                // sur le même plan, « 1/2 » suggérerait un ordre inexistant.
                 'status_label' => $leaveRequest->validationStatusLabel(),
                 'has_second_level' => $leaveRequest->hasSecondValidationLevel(),
-                'validation_level' => $leaveRequest->currentValidationLevel(),
-                'validator_1_label' => $leaveRequest->validator_1_label,
-                'validator_2_label' => $leaveRequest->validator_2_label,
-                'validator_1_decided_at' => $leaveRequest->validator_1_decided_at?->toIso8601String(),
-                'validator_2_decided_at' => $leaveRequest->validator_2_decided_at?->toIso8601String(),
-                'validation_group_name' => $leaveRequest->validation_group_name,
 
-                // Vrai seulement si c'est à CE lecteur d'agir maintenant : les
-                // boutons d'action ne s'affichent pas ailleurs.
+                // État des deux valideurs, ANONYMISÉ : « Validé », « Refusé »
+                // ou « En attente ». Aucun nom n'est transmis au navigateur —
+                // l'identité reste en base et dans le journal d'audit.
+                'validation_summary' => $leaveRequest->validationSummary(),
+
+                // Vrai tant que CE lecteur peut encore se prononcer. Il devient
+                // faux dès qu'il a tranché, sans dépendre de l'autre valideur.
                 'awaiting_my_decision' => $isAdmin
-                    ? $leaveRequest->currentValidationLevel() !== null
-                    : $leaveRequest->currentValidatorId() === $viewerId,
+                    ? $leaveRequest->undecidedLevels() !== []
+                    : $leaveRequest->undecidedLevelsFor($viewerId) !== [],
             ];
         };
 
@@ -436,19 +454,18 @@ class LeaveRequestController extends Controller
                 fn (): ?User => $this->legacyLeaveValidatorFor($targetUser),
             );
 
-            $validator = $leaveRequest->validator_1_id
-                ? User::query()->find($leaveRequest->validator_1_id)
-                : null;
-
-            // `validator_user_id` reste « le valideur dont la décision est
-            // attendue » : le calendrier, l'écran de détail et les relances
-            // continuent de s'appuyer dessus sans rien changer.
+            // `validator_user_id` désigne le premier valideur : le calendrier
+            // et l'écran de détail s'en servent encore. Il ne dit plus « à qui
+            // le tour » — cette notion n'existe plus, les deux valideurs
+            // peuvent agir dès maintenant.
             $leaveRequest->validator_user_id = $leaveRequest->validator_1_id;
             $leaveRequest->save();
 
             $this->warnWhenNoValidationGroup($leaveRequest, $targetUser);
 
-            if ($validator) {
+            // Les DEUX valideurs sont prévenus immédiatement : aucun des deux
+            // n'attend l'autre pour pouvoir se prononcer.
+            foreach ($this->assignedValidators($leaveRequest) as $validator) {
                 $validator->notify(new LeaveRequestSubmittedNotification($leaveRequest, $requesterLabel));
 
                 SendWebPushNotificationJob::dispatch($validator->id, [
@@ -524,30 +541,32 @@ class LeaveRequestController extends Controller
             return $this->staleValidationResponse($request);
         }
 
-        if ($transition->isFinal) {
+        // Le demandeur n'est prévenu que lorsque TOUS les accords sont réunis.
+        // Un accord isolé ne vaut pas acceptation et ne doit surtout pas être
+        // annoncé comme telle.
+        if ($transition->completesApproval()) {
             $this->notifyFinalApproval($leaveRequest);
-        } else {
-            $this->notifySecondLevelValidator($leaveRequest);
         }
 
         $this->auditLogService->log([
-            'action' => $transition->isFinal ? 'approve_leave_request' : 'approve_leave_request_level_1',
+            'action' => $transition->completesApproval()
+                ? 'approve_leave_request'
+                : 'approve_leave_request_partial',
             'module' => 'leaves',
-            'description' => $transition->isFinal
+            'description' => $transition->completesApproval()
                 ? sprintf(
-                    '%s a définitivement accepté le congé de %s',
+                    '%s a donné le dernier accord sur le congé de %s',
                     $this->userLabel($request->user()),
                     $this->userLabel($leaveRequest->target)
                 )
                 : sprintf(
-                    '%s a validé au premier niveau le congé de %s, en attente de %s',
+                    '%s a validé le congé de %s ; l\'autre valideur doit encore se prononcer',
                     $this->userLabel($request->user()),
-                    $this->userLabel($leaveRequest->target),
-                    $leaveRequest->validator_2_label ?? 'la seconde validation'
+                    $this->userLabel($leaveRequest->target)
                 ),
             'payload' => [
                 'leave_request_id' => (int) $leaveRequest->id,
-                'validation_level' => $transition->level,
+                'validation_levels' => $transition->levels,
                 'validation_trail' => $leaveRequest->validationTrail(),
                 'before' => $before,
                 'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
@@ -558,53 +577,10 @@ class LeaveRequestController extends Controller
             return response()->json(['ok' => true, 'status' => $leaveRequest->status]);
         }
 
-        return back()->with('success', $transition->isFinal
+        return back()->with('success', $transition->completesApproval()
             ? 'Demande de congé définitivement acceptée.'
-            : sprintf(
-                'Validation enregistrée. La demande passe à %s pour la seconde validation.',
-                $leaveRequest->validator_2_label ?? 'le second valideur'
-            ));
-    }
-
-    /**
-     * Notifie le Valideur 2 que la demande lui revient.
-     */
-    private function notifySecondLevelValidator(LeaveRequest $leaveRequest): void
-    {
-        // Le valideur attendu change : `validator_user_id` suit, pour que le
-        // calendrier et l'écran de détail désignent la bonne personne.
-        $leaveRequest->validator_user_id = $leaveRequest->validator_2_id;
-        $leaveRequest->save();
-
-        $secondValidator = $leaveRequest->validator_2_id
-            ? User::query()->find($leaveRequest->validator_2_id)
-            : null;
-
-        if (! $secondValidator) {
-            return;
-        }
-
-        $targetLabel = $this->userLabel($leaveRequest->target);
-        $firstValidatorLabel = $leaveRequest->validator_1_label ?? 'le premier valideur';
-
-        $secondValidator->notify(new LeaveRequestFirstLevelApprovedNotification(
-            $leaveRequest,
-            $targetLabel,
-            $firstValidatorLabel,
-        ));
-
-        SendWebPushNotificationJob::dispatch($secondValidator->id, [
-            'title' => 'Congé à valider (2/2)',
-            'body' => sprintf(
-                'La demande de %s a été validée au premier niveau et attend votre validation.',
-                $targetLabel,
-            ),
-            'icon' => '/pwa-192.png',
-            'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
-            'resourceType' => 'leave_request',
-            'resourceId' => (int) $leaveRequest->id,
-            'action' => 'view',
-        ]);
+            // Sans nommer l'autre valideur : son identité n'est pas exposée.
+            : 'Votre validation est enregistrée. La demande reste en attente de la seconde validation.');
     }
 
     /**
@@ -657,10 +633,11 @@ class LeaveRequestController extends Controller
         $user = $request->user();
 
         // Proposer une autre période est un acte de valideur : mêmes règles
-        // que valider ou refuser, donc seul le valideur de l'étape courante
-        // (ou un administrateur) peut le faire.
-        $proposingLevel = $this->twoStepValidation->authorizedLevelFor($leaveRequest, $user);
-        abort_unless($proposingLevel !== null, 403);
+        // que valider ou refuser. Un valideur qui a déjà tranché n'a donc plus
+        // la main, et l'un comme l'autre peut proposer dès la création.
+        $proposingLevels = $this->twoStepValidation->decidableLevelsFor($leaveRequest, $user);
+        abort_unless($proposingLevels !== [], 403);
+        $proposingLevel = $proposingLevels[0];
         $before = $this->leaveRequestAuditSnapshot($leaveRequest);
 
         $validated = $request->validate([
@@ -750,13 +727,12 @@ class LeaveRequestController extends Controller
         $leaveRequest->is_all_day = $startPortion === 'full_day' && $endPortion === 'full_day';
 
         // Le valideur qui a proposé cette période l'approuve de fait — mais
-        // seulement pour SON niveau. Là où l'acceptation clôturait auparavant
-        // la demande d'un coup, elle valide désormais l'étape d'où venait la
-        // proposition, puis le circuit reprend son cours : une contre-
-        // proposition du Valideur 1 ne saute pas le Valideur 2.
+        // seulement pour SON rang. L'acceptation ne clôt donc pas la demande :
+        // l'autre valideur doit toujours se prononcer, et le fera sur la
+        // nouvelle période.
         $proposedAtLevel = (int) ($leaveRequest->proposed_at_level ?: 1);
         $proposedBy = $leaveRequest->proposedBy;
-        $this->twoStepValidation->completeLevelAfterAgreement($leaveRequest, $proposedAtLevel, $proposedBy);
+        $this->twoStepValidation->recordAgreement($leaveRequest, $proposedAtLevel, $proposedBy);
         $leaveRequest->proposed_at_level = null;
         $leaveRequest->proposed_start_at = null;
         $leaveRequest->proposed_end_at = null;
@@ -788,11 +764,10 @@ class LeaveRequestController extends Controller
             ]);
         }
 
-        // Puis le circuit reprend là où il en était : second niveau à prévenir,
-        // ou demandeur à informer que tout est définitivement accepté.
-        if ($leaveRequest->status === ValidationStage::PENDING_VALIDATOR_2) {
-            $this->notifySecondLevelValidator($leaveRequest);
-        } elseif ($leaveRequest->status === ValidationStage::APPROVED) {
+        // Si cet accord était le dernier attendu, la demande est acceptée et le
+        // demandeur en est informé. Sinon elle retourne simplement en attente
+        // de l'autre valideur, qui pouvait déjà agir et le peut toujours.
+        if ($leaveRequest->status === ValidationStage::APPROVED) {
             $this->notifyFinalApproval($leaveRequest);
         }
 
@@ -917,19 +892,17 @@ class LeaveRequestController extends Controller
         $requester = $leaveRequest->requester;
 
         if ($requester) {
-            $requester->notify(new LeaveRequestRefusedNotification(
-                $leaveRequest,
-                $refusedByLabel,
-                $transition->level,
-            ));
+            // Le refus est annoncé sans nommer son auteur : l'identité des
+            // valideurs n'est pas exposée aux utilisateurs. Elle reste dans le
+            // journal d'audit et dans les colonnes de la demande.
+            $requester->notify(new LeaveRequestRefusedNotification($leaveRequest));
 
             SendWebPushNotificationJob::dispatch($requester->id, [
                 'title' => 'Congé refusé',
                 'body' => sprintf(
-                    'Votre demande de congé du %s au %s a été refusée par %s.',
+                    'Votre demande de congé du %s au %s a été refusée.',
                     $leaveRequest->start_at?->format('d/m/Y') ?? '-',
                     $leaveRequest->end_at?->format('d/m/Y') ?? '-',
-                    $refusedByLabel,
                 ),
                 'icon' => '/pwa-192.png',
                 'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
@@ -943,14 +916,13 @@ class LeaveRequestController extends Controller
             'action' => 'refuse_leave_request',
             'module' => 'leaves',
             'description' => sprintf(
-                '%s a refusé le congé de %s au niveau %d',
+                '%s a refusé le congé de %s',
                 $refusedByLabel,
                 $this->userLabel($leaveRequest->target),
-                $transition->level ?? 1,
             ),
             'payload' => [
                 'leave_request_id' => (int) $leaveRequest->id,
-                'validation_level' => $transition->level,
+                'validation_levels' => $transition->levels,
                 'validation_trail' => $leaveRequest->validationTrail(),
                 'before' => $before,
                 'after' => $this->leaveRequestAuditSnapshot($leaveRequest),
@@ -1023,11 +995,10 @@ class LeaveRequestController extends Controller
         $isAdmin = (bool) $user->hasRole('admin');
         $canAct = $isRequester || $isTarget;
 
-        // Le droit d'agir est celui du moteur de validation : il n'est vrai
-        // que pour le valideur de l'étape courante. Le Valideur 2 lit la
-        // demande dès le départ, mais ses boutons n'apparaissent qu'à son tour.
-        $decisionLevel = $this->twoStepValidation->authorizedLevelFor($leaveRequest, $user);
-        $canValidate = $decisionLevel !== null;
+        // Le droit d'agir vient du moteur de validation : il est vrai pour
+        // chacun des deux valideurs tant qu'il n'a pas lui-même tranché, et
+        // faux dès qu'il l'a fait. Aucun des deux n'attend l'autre.
+        $canValidate = $this->twoStepValidation->canDecide($leaveRequest, $user);
 
         return [
             'id' => (int) $leaveRequest->id,
@@ -1035,7 +1006,8 @@ class LeaveRequestController extends Controller
             'requester_label' => $this->userLabel($leaveRequest->requester),
             'target_label' => $this->userLabel($leaveRequest->target),
             'requester_is_target' => (int) $leaveRequest->requester_user_id === (int) $leaveRequest->target_user_id,
-            'validator_label' => $leaveRequest->validator ? $this->userLabel($leaveRequest->validator) : null,
+            // Nom du valideur volontairement absent du payload : les écrans
+            // n'exposent plus l'identité des valideurs.
             'leave_type_label' => $leaveRequest->leaveType?->name ?? '—',
             'start_at' => $leaveRequest->start_at?->toDateString(),
             'end_at' => $leaveRequest->end_at?->toDateString(),
@@ -1056,12 +1028,11 @@ class LeaveRequestController extends Controller
             'created_at' => $leaveRequest->created_at?->toIso8601String(),
             'updated_at' => $leaveRequest->updated_at?->toIso8601String(),
 
-            // Le fil de validation : qui était Valideur 1, qui est Valideur 2,
-            // et quand chacun a tranché. Ces libellés sont figés sur la demande
-            // et ne bougent plus, même si le groupe change ensuite.
+            // État des deux valideurs, ANONYMISÉ. L'identité réelle et les
+            // horodatages restent en base et dans le journal d'audit
+            // (validationTrail), mais ne sont pas envoyés au navigateur.
             'status_label' => $leaveRequest->validationStatusLabel(),
-            'validation_level' => $leaveRequest->currentValidationLevel(),
-            'validation' => $leaveRequest->validationTrail(),
+            'validation_summary' => $leaveRequest->validationSummary(),
 
             'permissions' => [
                 // `$canValidate` porte déjà l'étape : il est faux pour le

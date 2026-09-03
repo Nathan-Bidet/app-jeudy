@@ -152,9 +152,8 @@ class CalendarController extends Controller
                 ->get()
                 ->filter(function (LeaveRequest $leave) use ($userId): bool {
                     // Une demande en cours ne se montre qu'au demandeur et à
-                    // ceux qui la valident. Depuis la double validation, cela
-                    // inclut le Valideur 2 : il doit voir arriver la période
-                    // avant d'avoir à se prononcer.
+                    // ceux qui la valident — les DEUX valideurs, dès la
+                    // création : chacun peut se prononcer immédiatement.
                     $concernsViewer = (int) $leave->requester_user_id === $userId
                         || (int) $leave->validator_user_id === $userId
                         || (int) $leave->validator_1_id === $userId
@@ -489,8 +488,8 @@ class CalendarController extends Controller
         return match ((string) $status) {
             LeaveRequest::STATUS_APPROVED => 'Approuvé',
             LeaveRequest::STATUS_REFUSED => 'Refusé',
-            LeaveRequest::STATUS_PENDING => 'En attente (validation 1/2)',
-            LeaveRequest::STATUS_PENDING_VALIDATOR_2 => 'En attente (validation 2/2)',
+            LeaveRequest::STATUS_PENDING,
+            LeaveRequest::STATUS_PENDING_VALIDATOR_2,
             LeaveRequest::STATUS_PENDING_USER_CONFIRMATION => 'En attente',
             default => 'En attente',
         };

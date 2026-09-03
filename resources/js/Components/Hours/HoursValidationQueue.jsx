@@ -21,22 +21,13 @@ const formatDuration = (totalMinutes) => {
     return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
 };
 
-const formatDecisionDate = (isoDate) => {
-    if (!isoDate) {
-        return null;
-    }
-
-    const parsed = new Date(isoDate);
-
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toLocaleDateString('fr-FR');
-};
-
 /**
  * File de validation des heures.
  *
- * N'affiche que les journées qui attendent une décision du lecteur, au niveau
- * qui est le sien : le serveur a déjà fait ce tri, une journée ne peut donc pas
- * apparaître simultanément chez les deux valideurs.
+ * N'affiche que les journées sur lesquelles le lecteur peut encore se
+ * prononcer. Une journée y entre dès sa saisie pour ses deux valideurs, et n'en
+ * sort, pour chacun, qu'une fois qu'il a lui-même tranché — aucun des deux
+ * n'attend l'autre.
  */
 export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
     const [openUser, setOpenUser] = useState(null);
@@ -131,7 +122,9 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                 {isOpen ? (
                                     <div className="mt-3 space-y-2">
                                         {group.days.map((day) => {
-                                            const firstDecidedAt = formatDecisionDate(day.validator_1_decided_at);
+                                            const summary = Array.isArray(day.validation_summary)
+                                                ? day.validation_summary
+                                                : [];
 
                                             return (
                                                 <div key={day.id} className="rounded-lg border border-[var(--app-border)] p-3">
@@ -152,12 +145,15 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                         <p className="mt-1 text-sm text-[var(--app-muted)]">{day.description}</p>
                                                     ) : null}
 
-                                                    {/* Le second valideur doit constater l'accord du premier. */}
-                                                    {day.validation_level === 2 && day.validator_1_label ? (
-                                                        <p className="mt-2 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
-                                                            Validé par {day.validator_1_label}
-                                                            {firstDecidedAt ? ` le ${firstDecidedAt}` : ''}
-                                                        </p>
+                                                    {/* Chaque valideur voit où en est l'autre, sans le nommer. */}
+                                                    {summary.length > 0 ? (
+                                                        <div className="mt-2 space-y-0.5 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
+                                                            {summary.map((entry) => (
+                                                                <p key={entry.level}>
+                                                                    <span className="font-semibold">Valideur {entry.level} :</span> {entry.label}
+                                                                </p>
+                                                            ))}
+                                                        </div>
                                                     ) : null}
 
                                                     <div className="mt-3 flex flex-wrap gap-2">
@@ -167,7 +163,7 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                             onClick={() => approve(day.id)}
                                                             className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] disabled:opacity-60 sm:w-auto"
                                                         >
-                                                            {day.validation_level === 2 ? 'Valider (2/2)' : 'Valider (1/2)'}
+                                                            Valider
                                                         </button>
                                                         <button
                                                             type="button"

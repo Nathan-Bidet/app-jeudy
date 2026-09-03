@@ -9,19 +9,20 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Colonnes, relations et lectures communes aux objets soumis à la validation
- * à deux niveaux (demandes de congé, journées d'heures).
+ * Colonnes, relations et lectures communes aux objets soumis à la double
+ * validation (demandes de congé, journées d'heures).
  *
- * Les colonnes `validator_1_*` / `validator_2_*` sont un INSTANTANÉ pris au
- * moment de la soumission, jamais relu depuis le groupe. C'est ce qui rend
- * l'historique insensible aux modifications ultérieures de l'administration :
- * changer les valideurs d'un groupe, renommer le groupe, le supprimer, ou
- * déplacer un utilisateur d'un groupe à l'autre ne réécrit aucune demande déjà
- * partie en validation.
+ * Les deux valideurs sont sur le même plan : chacun porte sa propre décision
+ * (`validator_N_decision`), sa propre date, et son propre auteur. Aucun des
+ * deux n'attend l'autre.
  *
- * Les libellés `validator_1_label` / `validator_2_label` doublent les clés
- * étrangères pour la même raison : la suppression d'un compte vide la clé, le
- * libellé, lui, dit toujours qui était le valideur.
+ * Les colonnes `validator_N_*` sont un INSTANTANÉ pris à la soumission, jamais
+ * relu depuis le groupe : changer les valideurs d'un groupe, le renommer, le
+ * supprimer ou déplacer un utilisateur ne réécrit aucune demande en cours.
+ * Les libellés `validator_N_label` doublent les clés étrangères parce que la
+ * suppression d'un compte vide la clé — le libellé, lui, dit toujours qui
+ * était le valideur. Ils servent l'audit, pas l'affichage : les écrans
+ * n'exposent que « Validé » / « Refusé » / « En attente ».
  */
 trait HasTwoStepValidation
 {
@@ -50,22 +51,11 @@ trait HasTwoStepValidation
         return $this->belongsTo(ValidationGroup::class, 'validation_group_id');
     }
 
-    public function isPendingValidator1(): bool
-    {
-        return $this->status === ValidationStage::PENDING_VALIDATOR_1;
-    }
-
-    public function isPendingValidator2(): bool
-    {
-        return $this->status === ValidationStage::PENDING_VALIDATOR_2;
-    }
-
     /**
-     * Un second niveau a-t-il été prévu à la soumission ?
+     * Un second valideur a-t-il été désigné à la soumission ?
      *
      * Faux quand l'utilisateur n'appartenait à aucun groupe, ou que son groupe
-     * n'avait pas de Valideur 2 : le circuit est alors à un seul niveau, comme
-     * avant cette évolution.
+     * n'avait pas de Valideur 2 : un seul accord suffit alors.
      */
     public function hasSecondValidationLevel(): bool
     {
@@ -73,54 +63,131 @@ trait HasTwoStepValidation
     }
 
     /**
-     * Niveau auquel se trouve l'objet, ou null s'il est dans un état terminal.
+     * Rangs réellement attendus sur cet objet : [1] ou [1, 2].
+     *
+     * @return array<int, int>
      */
-    public function currentValidationLevel(): ?int
+    public function expectedValidationLevels(): array
     {
-        return ValidationStage::levelFor($this->status);
+        return $this->hasSecondValidationLevel() ? [1, 2] : [1];
+    }
+
+    public function decisionForLevel(int $level): ?string
+    {
+        return $level === 1 ? $this->validator_1_decision : $this->validator_2_decision;
+    }
+
+    public function validatorIdForLevel(int $level): ?int
+    {
+        $id = $level === 1 ? $this->validator_1_id : $this->validator_2_id;
+
+        return $id !== null ? (int) $id : null;
+    }
+
+    /**
+     * Rangs sur lesquels cet utilisateur est désigné et n'a pas encore décidé.
+     *
+     * Aucune notion d'ordre : le rang 2 est ouvert dès la création, exactement
+     * comme le rang 1.
+     *
+     * @return array<int, int>
+     */
+    public function undecidedLevelsFor(User|int $user): array
+    {
+        $userId = $user instanceof User ? (int) $user->id : (int) $user;
+
+        return array_values(array_filter(
+            $this->expectedValidationLevels(),
+            fn (int $level): bool => $this->validatorIdForLevel($level) === $userId
+                && $this->decisionForLevel($level) === null,
+        ));
+    }
+
+    /**
+     * Rangs attendus qui n'ont encore reçu aucune décision, quel qu'en soit le
+     * titulaire.
+     *
+     * @return array<int, int>
+     */
+    public function undecidedLevels(): array
+    {
+        return array_values(array_filter(
+            $this->expectedValidationLevels(),
+            fn (int $level): bool => $this->decisionForLevel($level) === null,
+        ));
+    }
+
+    /**
+     * Statut global déduit des décisions individuelles.
+     *
+     * Un seul refus suffit à refuser ; il faut en revanche TOUS les accords
+     * attendus pour valider.
+     */
+    public function resolveGlobalStatus(): string
+    {
+        foreach ($this->expectedValidationLevels() as $level) {
+            if ($this->decisionForLevel($level) === ValidationStage::DECISION_REFUSED) {
+                return ValidationStage::REFUSED;
+            }
+        }
+
+        foreach ($this->expectedValidationLevels() as $level) {
+            if ($this->decisionForLevel($level) !== ValidationStage::DECISION_APPROVED) {
+                return ValidationStage::PENDING;
+            }
+        }
+
+        return ValidationStage::APPROVED;
     }
 
     public function validationStatusLabel(): string
     {
-        return ValidationStage::label($this->status, $this->hasSecondValidationLevel());
+        return ValidationStage::label($this->status);
     }
 
     /**
-     * Valideur dont la décision est attendue maintenant.
-     */
-    public function currentValidatorId(): ?int
-    {
-        return match ($this->currentValidationLevel()) {
-            1 => $this->validator_1_id !== null ? (int) $this->validator_1_id : null,
-            2 => $this->validator_2_id !== null ? (int) $this->validator_2_id : null,
-            default => null,
-        };
-    }
-
-    /**
-     * Objets en attente d'une décision de cet utilisateur, au niveau qui le
-     * concerne et à ce niveau seulement.
+     * État des deux valideurs, ANONYMISÉ : destiné aux écrans, il ne contient
+     * ni nom ni identifiant. L'identité reste en base et dans validationTrail().
      *
-     * C'est cette portée qui garantit qu'une même demande n'apparaît jamais
-     * « à traiter » chez les deux valideurs en même temps.
+     * @return array<int, array{level:int, decision:?string, label:string}>
+     */
+    public function validationSummary(): array
+    {
+        return array_map(
+            fn (int $level): array => [
+                'level' => $level,
+                'decision' => $this->decisionForLevel($level),
+                'label' => ValidationStage::decisionLabel($this->decisionForLevel($level)),
+            ],
+            $this->expectedValidationLevels(),
+        );
+    }
+
+    /**
+     * Objets en attente d'une décision de cet utilisateur.
+     *
+     * Une demande apparaît chez les DEUX valideurs dès sa création, et quitte
+     * la liste de celui qui a tranché sans quitter celle de l'autre.
      */
     public function scopeAwaitingDecisionBy(Builder $query, User|int $user): Builder
     {
         $userId = $user instanceof User ? (int) $user->id : (int) $user;
 
-        return $query->where(function (Builder $query) use ($userId): void {
-            $query
-                ->where(function (Builder $first) use ($userId): void {
-                    $first
-                        ->where('status', ValidationStage::PENDING_VALIDATOR_1)
-                        ->where('validator_1_id', $userId);
-                })
-                ->orWhere(function (Builder $second) use ($userId): void {
-                    $second
-                        ->where('status', ValidationStage::PENDING_VALIDATOR_2)
-                        ->where('validator_2_id', $userId);
-                });
-        });
+        return $query
+            ->whereIn('status', ValidationStage::OPEN)
+            ->where(function (Builder $query) use ($userId): void {
+                $query
+                    ->where(function (Builder $first) use ($userId): void {
+                        $first
+                            ->where('validator_1_id', $userId)
+                            ->whereNull('validator_1_decision');
+                    })
+                    ->orWhere(function (Builder $second) use ($userId): void {
+                        $second
+                            ->where('validator_2_id', $userId)
+                            ->whereNull('validator_2_decision');
+                    });
+            });
     }
 
     /**
@@ -141,8 +208,10 @@ trait HasTwoStepValidation
     }
 
     /**
-     * Instantané des acteurs de la validation, pour l'audit et les écrans de
-     * détail.
+     * Instantané complet, NOMS COMPRIS, pour l'audit et les journaux.
+     *
+     * Ne jamais renvoyer ceci à une vue : les écrans utilisent
+     * validationSummary(), qui est anonymisé.
      *
      * @return array<string, mixed>
      */
@@ -152,15 +221,18 @@ trait HasTwoStepValidation
             'group_id' => $this->validation_group_id !== null ? (int) $this->validation_group_id : null,
             'group_name' => $this->validation_group_name,
             'has_second_level' => $this->hasSecondValidationLevel(),
+            'global_status' => $this->status,
             'validator_1' => [
                 'user_id' => $this->validator_1_id !== null ? (int) $this->validator_1_id : null,
                 'label' => $this->validator_1_label,
+                'decision' => $this->validator_1_decision,
                 'decided_at' => $this->validator_1_decided_at?->toIso8601String(),
                 'decided_by_id' => $this->validator_1_decided_by_id !== null ? (int) $this->validator_1_decided_by_id : null,
             ],
             'validator_2' => [
                 'user_id' => $this->validator_2_id !== null ? (int) $this->validator_2_id : null,
                 'label' => $this->validator_2_label,
+                'decision' => $this->validator_2_decision,
                 'decided_at' => $this->validator_2_decided_at?->toIso8601String(),
                 'decided_by_id' => $this->validator_2_decided_by_id !== null ? (int) $this->validator_2_decided_by_id : null,
             ],

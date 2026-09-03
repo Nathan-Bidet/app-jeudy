@@ -11,14 +11,12 @@ class LeaveRequestRefusedNotification extends Notification
     use Queueable;
 
     /**
-     * $refusedByLabel et $level disent au demandeur qui a refusé et à quelle
-     * étape, sans quoi un refus de second niveau serait indiscernable d'un
-     * refus immédiat.
+     * Le nom du valideur n'est volontairement pas transmis : l'identité des
+     * valideurs n'est pas exposée aux utilisateurs. Elle reste dans les
+     * colonnes de la demande et dans le journal d'audit.
      */
     public function __construct(
         private readonly LeaveRequest $leaveRequest,
-        private readonly ?string $refusedByLabel = null,
-        private readonly ?int $level = null,
     ) {
     }
 
@@ -39,13 +37,10 @@ class LeaveRequestRefusedNotification extends Notification
                 'start_at' => $startAt,
                 'end_at' => $endAt,
             ],
-            'refused_by_label' => $this->refusedByLabel,
-            'validation_level' => $this->level,
             'message' => sprintf(
-                'Votre demande du %s au %s a été refusée%s.',
+                'Votre demande du %s au %s a été refusée.',
                 $this->formatDateFr($startAt),
                 $this->formatDateFr($endAt),
-                $this->refusedByLabel !== null ? ' par '.$this->refusedByLabel : '',
             ),
         ];
     }

@@ -3,32 +3,50 @@
 namespace App\Support\Validation;
 
 /**
- * Vocabulaire commun aux Congés et aux Heures pour la validation à deux
- * niveaux.
+ * Vocabulaire commun aux Congés et aux Heures pour la double validation.
  *
- * `PENDING_VALIDATOR_1` vaut délibérément `pending` : c'est la valeur que
- * portent déjà toutes les demandes de congé en base. Le premier niveau n'est
- * pas un nouvel état, c'est celui qui existait — seul le second est nouveau.
- * Aucune ligne d'historique n'a donc besoin d'être réécrite, et le calendrier,
- * les exports et le front continuent de lire ce qu'ils lisaient.
+ * Les deux valideurs décident INDÉPENDAMMENT l'un de l'autre, dans l'ordre
+ * qu'ils veulent. Le statut ne décrit donc pas une étape mais l'issue globale :
+ * en attente tant que les deux accords ne sont pas réunis, validé quand ils le
+ * sont, refusé dès qu'un seul refus tombe.
+ *
+ * L'état individuel de chaque valideur ne vit pas ici : il est porté par les
+ * colonnes `validator_1_decision` / `validator_2_decision` de chaque objet.
  */
 final class ValidationStage
 {
-    public const PENDING_VALIDATOR_1 = 'pending';
-
-    public const PENDING_VALIDATOR_2 = 'pending_validator_2';
+    public const PENDING = 'pending';
 
     public const APPROVED = 'approved';
 
     public const REFUSED = 'refused';
 
+    /**
+     * Décisions individuelles possibles pour un valideur.
+     */
+    public const DECISION_APPROVED = 'approved';
+
+    public const DECISION_REFUSED = 'refused';
+
+    /**
+     * État de l'ancien circuit séquentiel (« en attente du Valideur 2 »).
+     *
+     * Plus aucune écriture ne le produit et la migration a ramené les lignes
+     * concernées sur `pending`. La constante subsiste, et `isOpen()` la
+     * reconnaît, pour qu'une base pas encore migrée ne rende pas les demandes
+     * invisibles à leurs valideurs.
+     *
+     * @deprecated Remplacé par PENDING + décisions individuelles.
+     */
+    public const LEGACY_PENDING_VALIDATOR_2 = 'pending_validator_2';
+
     /** États dans lesquels une décision de valideur est encore attendue. */
     public const OPEN = [
-        self::PENDING_VALIDATOR_1,
-        self::PENDING_VALIDATOR_2,
+        self::PENDING,
+        self::LEGACY_PENDING_VALIDATOR_2,
     ];
 
-    /** États terminaux : plus aucune transition de validation n'est possible. */
+    /** États terminaux : plus aucune décision n'est possible. */
     public const TERMINAL = [
         self::APPROVED,
         self::REFUSED,
@@ -45,33 +63,29 @@ final class ValidationStage
     }
 
     /**
-     * Niveau attendu pour l'état donné, ou null si plus rien n'est attendu.
+     * Libellé global.
+     *
+     * Volontairement sans numéro d'étape : « 1/2 » laisserait croire à un ordre
+     * entre les deux valideurs, alors qu'ils sont interchangeables. Le détail
+     * par valideur est rendu à côté, via decisionLabel().
      */
-    public static function levelFor(?string $status): ?int
+    public static function label(?string $status): string
     {
         return match ((string) $status) {
-            self::PENDING_VALIDATOR_1 => 1,
-            self::PENDING_VALIDATOR_2 => 2,
-            default => null,
+            self::APPROVED => 'Validé',
+            self::REFUSED => 'Refusé',
+            default => 'En attente de validation',
         };
     }
 
     /**
-     * Libellé destiné à l'utilisateur.
-     *
-     * `$hasSecondLevel` distingue « 1/2 » de « 1/1 » : un utilisateur dont le
-     * groupe n'a pas de Valideur 2 (ou qui n'a pas encore de groupe) suit un
-     * circuit à un seul niveau, exactement comme avant cette évolution.
+     * Libellé de la décision d'un valideur, sans jamais nommer personne.
      */
-    public static function label(?string $status, bool $hasSecondLevel = true): string
+    public static function decisionLabel(?string $decision): string
     {
-        return match ((string) $status) {
-            self::PENDING_VALIDATOR_1 => $hasSecondLevel
-                ? 'En attente de validation 1/2'
-                : 'En attente de validation',
-            self::PENDING_VALIDATOR_2 => 'En attente de validation 2/2',
-            self::APPROVED => 'Validé',
-            self::REFUSED => 'Refusé',
+        return match ((string) $decision) {
+            self::DECISION_APPROVED => 'Validé',
+            self::DECISION_REFUSED => 'Refusé',
             default => 'En attente',
         };
     }

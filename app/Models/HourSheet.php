@@ -11,8 +11,7 @@ class HourSheet extends Model
 {
     use HasTwoStepValidation;
 
-    public const STATUS_PENDING = ValidationStage::PENDING_VALIDATOR_1;
-    public const STATUS_PENDING_VALIDATOR_2 = ValidationStage::PENDING_VALIDATOR_2;
+    public const STATUS_PENDING = ValidationStage::PENDING;
     public const STATUS_APPROVED = ValidationStage::APPROVED;
     public const STATUS_REFUSED = ValidationStage::REFUSED;
 
@@ -36,10 +35,12 @@ class HourSheet extends Model
         'validation_group_name',
         'validator_1_id',
         'validator_1_label',
+        'validator_1_decision',
         'validator_1_decided_at',
         'validator_1_decided_by_id',
         'validator_2_id',
         'validator_2_label',
+        'validator_2_decision',
         'validator_2_decided_at',
         'validator_2_decided_by_id',
         'refusal_reason',

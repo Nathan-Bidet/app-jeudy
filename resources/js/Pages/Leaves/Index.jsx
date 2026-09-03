@@ -43,9 +43,9 @@ export default function LeavesIndex({
     };
 
     /**
-     * Le serveur calcule déjà le libellé d'étape (« 1/2 », « 2/2 », ou sans
-     * numéro quand le circuit n'a qu'un niveau) : on l'utilise tel quel, et on
-     * ne recalcule ici que les cas qu'il ne couvre pas.
+     * Statut global, sans numéro d'étape : les deux valideurs sont
+     * indépendants, « 1/2 » laisserait croire à un ordre entre eux. Le serveur
+     * fournit déjà le libellé ; on ne recalcule ici que ce qu'il ne couvre pas.
      */
     const formatLeaveStatus = (request) => {
         const status = typeof request === 'string' ? request : request?.status;
@@ -59,68 +59,40 @@ export default function LeavesIndex({
             return request.status_label;
         }
 
-        if (normalized === 'pending') {
-            return 'En attente';
-        }
-
-        if (normalized === 'pending_validator_2') {
-            return 'En attente de validation 2/2';
-        }
-
         if (normalized === 'approved') {
-            return 'Approuvé';
+            return 'Validé';
         }
 
         if (normalized === 'refused') {
             return 'Refusé';
         }
 
-        return status;
-    };
-
-    const formatDecisionDate = (isoDate) => {
-        if (!isoDate) {
-            return null;
-        }
-
-        const parsed = new Date(isoDate);
-
-        return Number.isNaN(parsed.getTime())
-            ? null
-            : parsed.toLocaleDateString('fr-FR');
+        return 'En attente de validation';
     };
 
     /**
-     * Rappel du circuit sur une carte : qui a déjà validé, qui doit encore le
-     * faire. C'est ce qui permet au Valideur 2 de constater que le premier a
-     * donné son accord avant de se prononcer.
+     * État des deux valideurs, ANONYMISÉ.
+     *
+     * Le serveur n'envoie ni nom ni identifiant : `validation_summary` ne
+     * contient que le rang et l'état (« Validé », « Refusé », « En attente »).
+     * Un seul appel par carte — c'est le doublon d'affichage corrigé.
      */
-    const renderValidationTrail = (request) => {
-        if (!request?.validator_1_label && !request?.validator_2_label) {
+    const renderValidationSummary = (request) => {
+        const summary = Array.isArray(request?.validation_summary)
+            ? request.validation_summary
+            : [];
+
+        if (summary.length === 0) {
             return null;
         }
 
-        const firstDecidedAt = formatDecisionDate(request.validator_1_decided_at);
-        const secondDecidedAt = formatDecisionDate(request.validator_2_decided_at);
-
         return (
             <div className="mt-2 space-y-0.5 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
-                {request.validator_1_label ? (
-                    <p>
-                        <span className="font-semibold">Validation 1 :</span>{' '}
-                        {firstDecidedAt
-                            ? `validé par ${request.validator_1_label} le ${firstDecidedAt}`
-                            : `en attente de ${request.validator_1_label}`}
+                {summary.map((entry) => (
+                    <p key={entry.level}>
+                        <span className="font-semibold">Valideur {entry.level} :</span> {entry.label}
                     </p>
-                ) : null}
-                {request.validator_2_label ? (
-                    <p>
-                        <span className="font-semibold">Validation 2 :</span>{' '}
-                        {secondDecidedAt
-                            ? `validé par ${request.validator_2_label} le ${secondDecidedAt}`
-                            : `en attente de ${request.validator_2_label}`}
-                    </p>
-                ) : null}
+                ))}
             </div>
         );
     };
@@ -262,8 +234,9 @@ export default function LeavesIndex({
         router.delete(route('leaves.destroy', id));
     };
 
-    // Ce qui reste à traiter, tous niveaux confondus : le second niveau
-    // rejoint la liste des demandes encore ouvertes.
+    // Ce qui reste à traiter. `pending_validator_2` est l'ancien état du
+    // circuit séquentiel : la migration l'a ramené sur `pending`, il n'est
+    // conservé ici que par prudence pour une base pas encore migrée.
     const defaultValidationStatuses = ['pending', 'pending_validator_2', 'pending_user_confirmation'];
     const sortedMyLeaveRequests = useMemo(() => {
         const requestTimestamp = (request) => {
@@ -366,6 +339,7 @@ export default function LeavesIndex({
                                     <p className="text-sm text-[var(--app-text)]">
                                         <span className="font-semibold">Statut :</span> {formatLeaveStatus(request)}
                                     </p>
+                                    {renderValidationSummary(request)}
                                     {request.message ? (
                                         <p className="text-sm text-[var(--app-text)]">
                                             <span className="font-semibold">Message :</span> {request.message}
@@ -487,7 +461,6 @@ export default function LeavesIndex({
                                         <p className="text-sm text-[var(--app-text)]">
                                             <span className="font-semibold">Statut :</span> {formatLeaveStatus(request)}
                                         </p>
-                                        {renderValidationTrail(request)}
                                         {request.message ? (
                                             <p className="text-sm text-[var(--app-text)]">
                                                 <span className="font-semibold">Message :</span> {request.message}
@@ -505,7 +478,7 @@ export default function LeavesIndex({
                                                 ) : null}
                                             </div>
                                         ) : null}
-                                        {renderValidationTrail(request)}
+                                        {renderValidationSummary(request)}
 
                                         <div className="mt-3 flex flex-wrap gap-2">
                                             {request.awaiting_my_decision ? (
@@ -514,7 +487,7 @@ export default function LeavesIndex({
                                                     className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
                                                     onClick={() => postApprove(request.id)}
                                                 >
-                                                    {request.validation_level === 2 ? 'Valider (2/2)' : 'Approuver'}
+                                                    Approuver
                                                 </button>
                                             ) : null}
                                             {request.awaiting_my_decision ? (
