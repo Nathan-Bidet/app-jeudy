@@ -43,21 +43,35 @@ final class ValidationTransition
     }
 
     /**
-     * L'objet est-il devenu définitivement validé grâce à cette décision ?
+     * Cette décision a-t-elle clos le circuit ?
+     *
+     * Vrai seulement quand les deux valideurs se sont prononcés. Le sens de
+     * l'issue (validée ou refusée) se lit dans `$to` : il ne se déduit PAS de
+     * la décision qui vient d'être prise, puisque c'est le Valideur 2 qui
+     * tranche en cas de désaccord — un accord du Valideur 1 peut donc clore une
+     * demande sur un refus, et son refus la clore sur une validation.
      */
+    public function closesCircuit(): bool
+    {
+        return $this->wasApplied && ValidationStage::isTerminal($this->to);
+    }
+
     public function completesApproval(): bool
     {
-        return $this->wasApplied && $this->to === ValidationStage::APPROVED;
+        return $this->closesCircuit() && $this->to === ValidationStage::APPROVED;
+    }
+
+    public function completesRefusal(): bool
+    {
+        return $this->closesCircuit() && $this->to === ValidationStage::REFUSED;
     }
 
     /**
-     * Accord enregistré, mais l'autre valideur doit encore se prononcer.
+     * Décision enregistrée, mais l'autre valideur doit encore se prononcer.
      */
-    public function isPartialApproval(): bool
+    public function isPartial(): bool
     {
-        return $this->wasApplied
-            && $this->decision === ValidationStage::DECISION_APPROVED
-            && $this->to === ValidationStage::PENDING;
+        return $this->wasApplied && $this->to === ValidationStage::PENDING;
     }
 
     public function isRefusal(): bool

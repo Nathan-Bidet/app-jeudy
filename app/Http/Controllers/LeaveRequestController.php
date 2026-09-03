@@ -17,6 +17,7 @@ use App\Notifications\LeaveRequestSubmittedNotification;
 use App\Jobs\SendWebPushNotificationJob;
 use App\Services\AuditLogService;
 use App\Services\Validation\TwoStepValidationService;
+use App\Services\Validation\ValidationTransition;
 use App\Services\Validation\ValidationGroupService;
 use App\Support\Validation\ValidationStage;
 use Illuminate\Http\JsonResponse;
@@ -551,23 +552,25 @@ class LeaveRequestController extends Controller
             return $this->staleValidationResponse($request);
         }
 
-        // Le demandeur n'est prévenu que lorsque TOUS les accords sont réunis.
-        // Un accord isolé ne vaut pas acceptation et ne doit surtout pas être
-        // annoncé comme telle.
-        if ($transition->completesApproval()) {
-            $this->notifyFinalApproval($leaveRequest);
+        // Le demandeur n'est prévenu que lorsque les DEUX valideurs se sont
+        // prononcés — et de l'issue réelle, qui n'est pas forcément celle que
+        // vient d'exprimer l'acteur : si le Valideur 2 avait refusé, l'accord
+        // du Valideur 1 clôt la demande sur un refus.
+        if ($transition->closesCircuit()) {
+            $this->notifyRequesterOfOutcome($leaveRequest);
         }
 
         $this->auditLogService->log([
-            'action' => $transition->completesApproval()
+            'action' => $transition->closesCircuit()
                 ? 'approve_leave_request'
                 : 'approve_leave_request_partial',
             'module' => 'leaves',
-            'description' => $transition->completesApproval()
+            'description' => $transition->closesCircuit()
                 ? sprintf(
-                    '%s a donné le dernier accord sur le congé de %s',
+                    '%s a validé le congé de %s ; issue finale : %s',
                     $this->userLabel($request->user()),
-                    $this->userLabel($leaveRequest->target)
+                    $this->userLabel($leaveRequest->target),
+                    $transition->completesApproval() ? 'validé' : 'refusé (décision du Valideur 2)'
                 )
                 : sprintf(
                     '%s a validé le congé de %s ; l\'autre valideur doit encore se prononcer',
@@ -587,10 +590,41 @@ class LeaveRequestController extends Controller
             return response()->json(['ok' => true, 'status' => $leaveRequest->status]);
         }
 
-        return back()->with('success', $transition->completesApproval()
-            ? 'Demande de congé définitivement acceptée.'
+        return back()->with('success', $this->outcomeMessage($transition, $leaveRequest));
+    }
+
+    /**
+     * Message rendu au valideur après sa décision.
+     *
+     * Tant que l'autre n'a pas répondu, on se garde de laisser croire que la
+     * demande est tranchée. Une fois close, on annonce l'issue réelle — y
+     * compris quand elle contredit la décision qui vient d'être prise, ce qui
+     * arrive dès que les deux valideurs ne sont pas d'accord.
+     */
+    private function outcomeMessage(ValidationTransition $transition, LeaveRequest $leaveRequest): string
+    {
+        if (! $transition->closesCircuit()) {
             // Sans nommer l'autre valideur : son identité n'est pas exposée.
-            : 'Votre validation est enregistrée. La demande reste en attente de la seconde validation.');
+            return 'Votre décision est enregistrée. La demande reste en attente de la seconde validation.';
+        }
+
+        return $transition->completesApproval()
+            ? 'Demande de congé définitivement acceptée.'
+            : 'Demande de congé définitivement refusée.';
+    }
+
+    /**
+     * Prévient le demandeur de l'issue définitive de sa demande.
+     */
+    private function notifyRequesterOfOutcome(LeaveRequest $leaveRequest): void
+    {
+        if ($leaveRequest->status === ValidationStage::APPROVED) {
+            $this->notifyFinalApproval($leaveRequest);
+
+            return;
+        }
+
+        $this->notifyFinalRefusal($leaveRequest);
     }
 
     /**
@@ -774,11 +808,12 @@ class LeaveRequestController extends Controller
             ]);
         }
 
-        // Si cet accord était le dernier attendu, la demande est acceptée et le
-        // demandeur en est informé. Sinon elle retourne simplement en attente
-        // de l'autre valideur, qui pouvait déjà agir et le peut toujours.
-        if ($leaveRequest->status === ValidationStage::APPROVED) {
-            $this->notifyFinalApproval($leaveRequest);
+        // Si cet accord était la dernière décision attendue, la demande est
+        // close et le demandeur est informé de son issue — laquelle dépend du
+        // Valideur 2, pas de l'accord qui vient d'être enregistré. Sinon elle
+        // retourne en attente de l'autre valideur, qui peut toujours agir.
+        if (ValidationStage::isTerminal($leaveRequest->status)) {
+            $this->notifyRequesterOfOutcome($leaveRequest);
         }
 
         $after = $this->leaveRequestAuditSnapshot($leaveRequest);
@@ -890,46 +925,36 @@ class LeaveRequestController extends Controller
 
         $before = $this->leaveRequestAuditSnapshot($leaveRequest);
 
-        // Un refus arrête le circuit quel que soit le niveau : une demande
-        // refusée au premier n'atteint jamais le second valideur.
+        // Un refus n'arrête plus le circuit à lui seul : les deux valideurs
+        // doivent se prononcer, et c'est la décision du Valideur 2 qui tranche
+        // en cas de désaccord.
         $transition = $this->twoStepValidation->refuse($leaveRequest, $request->user());
 
         if (! $transition->wasApplied) {
             return $this->staleValidationResponse($request);
         }
 
-        $refusedByLabel = $this->userLabel($request->user());
-        $requester = $leaveRequest->requester;
-
-        if ($requester) {
-            // Le refus est annoncé sans nommer son auteur : l'identité des
-            // valideurs n'est pas exposée aux utilisateurs. Elle reste dans le
-            // journal d'audit et dans les colonnes de la demande.
-            $requester->notify(new LeaveRequestRefusedNotification($leaveRequest));
-
-            SendWebPushNotificationJob::dispatch($requester->id, [
-                'title' => 'Congé refusé',
-                'body' => sprintf(
-                    'Votre demande de congé du %s au %s a été refusée.',
-                    $leaveRequest->start_at?->format('d/m/Y') ?? '-',
-                    $leaveRequest->end_at?->format('d/m/Y') ?? '-',
-                ),
-                'icon' => '/pwa-192.png',
-                'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
-                'resourceType' => 'leave_request',
-                'resourceId' => (int) $leaveRequest->id,
-                'action' => 'view',
-            ]);
+        if ($transition->closesCircuit()) {
+            $this->notifyRequesterOfOutcome($leaveRequest);
         }
 
         $this->auditLogService->log([
-            'action' => 'refuse_leave_request',
+            'action' => $transition->closesCircuit()
+                ? 'refuse_leave_request'
+                : 'refuse_leave_request_partial',
             'module' => 'leaves',
-            'description' => sprintf(
-                '%s a refusé le congé de %s',
-                $refusedByLabel,
-                $this->userLabel($leaveRequest->target),
-            ),
+            'description' => $transition->closesCircuit()
+                ? sprintf(
+                    '%s a refusé le congé de %s ; issue finale : %s',
+                    $this->userLabel($request->user()),
+                    $this->userLabel($leaveRequest->target),
+                    $transition->completesRefusal() ? 'refusé' : 'validé (décision du Valideur 2)'
+                )
+                : sprintf(
+                    '%s a refusé le congé de %s ; l\'autre valideur doit encore se prononcer',
+                    $this->userLabel($request->user()),
+                    $this->userLabel($leaveRequest->target),
+                ),
             'payload' => [
                 'leave_request_id' => (int) $leaveRequest->id,
                 'validation_levels' => $transition->levels,
@@ -943,7 +968,37 @@ class LeaveRequestController extends Controller
             return response()->json(['ok' => true, 'status' => $leaveRequest->status]);
         }
 
-        return back()->with('success', 'Demande de congé refusée.');
+        return back()->with('success', $this->outcomeMessage($transition, $leaveRequest));
+    }
+
+    /**
+     * Prévient le demandeur que sa demande est définitivement refusée.
+     */
+    private function notifyFinalRefusal(LeaveRequest $leaveRequest): void
+    {
+        $requester = $leaveRequest->requester;
+
+        if (! $requester) {
+            return;
+        }
+
+        // Sans nommer l'auteur du refus : l'identité des valideurs n'est pas
+        // exposée. Elle reste dans le journal d'audit et sur la demande.
+        $requester->notify(new LeaveRequestRefusedNotification($leaveRequest));
+
+        SendWebPushNotificationJob::dispatch($requester->id, [
+            'title' => 'Congé refusé',
+            'body' => sprintf(
+                'Votre demande de congé du %s au %s a été refusée.',
+                $leaveRequest->start_at?->format('d/m/Y') ?? '-',
+                $leaveRequest->end_at?->format('d/m/Y') ?? '-',
+            ),
+            'icon' => '/pwa-192.png',
+            'url' => route('leaves.index', ['highlight' => $leaveRequest->id]),
+            'resourceType' => 'leave_request',
+            'resourceId' => (int) $leaveRequest->id,
+            'action' => 'view',
+        ]);
     }
 
     public function destroy(Request $request, int $id): RedirectResponse

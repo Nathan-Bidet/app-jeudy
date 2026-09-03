@@ -389,59 +389,8 @@ it('ne montre à un valideur que les demandes des groupes dont il est valideur',
 |--------------------------------------------------------------------------
 */
 
-it('refuse globalement la demande sur un refus du Valideur 1', function (): void {
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $requester = twoStepUser();
-    groupWith($v1, $v2, [$requester]);
 
-    $leave = submitLeave($requester);
-    $this->actingAs($v1)->post(route('leaves.refuse', $leave->id));
-    $leave->refresh();
 
-    expect($leave->status)->toBe(ValidationStage::REFUSED)
-        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_REFUSED)
-        ->and($leave->validator_2_decision)->toBeNull();
-
-    // L'autre valideur ne peut plus rien rouvrir.
-    $this->actingAs($v2)
-        ->postJson(route('leaves.approve', $leave->id))
-        ->assertForbidden();
-    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
-});
-
-it('refuse globalement la demande sur un refus du Valideur 2', function (): void {
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $requester = twoStepUser();
-    groupWith($v1, $v2, [$requester]);
-
-    $leave = submitLeave($requester);
-    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
-
-    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
-
-    $this->actingAs($v1)
-        ->postJson(route('leaves.approve', $leave->id))
-        ->assertForbidden();
-    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
-});
-
-it('refuse la demande même après l\'accord de l\'autre valideur', function (): void {
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $requester = twoStepUser();
-    groupWith($v1, $v2, [$requester]);
-
-    $leave = submitLeave($requester);
-    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
-    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
-    $leave->refresh();
-
-    expect($leave->status)->toBe(ValidationStage::REFUSED)
-        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
-        ->and($leave->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED);
-});
 
 /*
 |--------------------------------------------------------------------------
@@ -565,19 +514,6 @@ it('ne notifie le demandeur qu\'une fois les deux accords réunis', function ():
     Notification::assertSentTo($requester, LeaveRequestApprovedNotification::class);
 });
 
-it('notifie le demandeur du refus, par quelque valideur qu\'il vienne', function (): void {
-    Notification::fake();
-
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $requester = twoStepUser();
-    groupWith($v1, $v2, [$requester]);
-
-    $leave = submitLeave($requester);
-    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
-
-    Notification::assertSentTo($requester, LeaveRequestRefusedNotification::class);
-});
 
 /*
 |--------------------------------------------------------------------------
@@ -757,22 +693,6 @@ it('ne décide qu\'une fois sur un double clic', function (): void {
         ->and($leave->fresh()->validator_2_decision)->toBeNull();
 });
 
-it('ignore la décision d\'un valideur sur une demande déjà refusée par l\'autre', function (): void {
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $requester = twoStepUser();
-    groupWith($v1, $v2, [$requester]);
-
-    $leave = submitLeave($requester);
-    $service = app(TwoStepValidationService::class);
-
-    $stale = LeaveRequest::query()->findOrFail($leave->id);
-    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
-
-    // $stale a été chargé avant le refus : le verrou relit l'état réel.
-    expect($service->approve($stale, $v1)->wasApplied)->toBeFalse()
-        ->and($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
-});
 
 it('garde l\'historique intact quand l\'administration change les valideurs du groupe', function (): void {
     $v1 = twoStepUser();
@@ -918,29 +838,6 @@ it('empêche un valideur des heures de se prononcer deux fois', function (): voi
     expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
 });
 
-it('refuse globalement des heures dès le refus de l\'un des deux valideurs', function (): void {
-    Notification::fake();
-
-    $v1 = twoStepUser();
-    $v2 = twoStepUser();
-    $employee = hoursUser();
-    groupWith($v1, $v2, [$employee]);
-    $sheet = submitHourSheet($employee);
-
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), [
-        'refusal_reason' => 'Horaires incohérents',
-    ]);
-    $sheet->refresh();
-
-    expect($sheet->status)->toBe(ValidationStage::REFUSED)
-        ->and($sheet->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED)
-        ->and($sheet->refusal_reason)->toBe('Horaires incohérents');
-
-    Notification::assertSentTo($employee, HourSheetDecisionNotification::class);
-
-    $this->actingAs($v1)->postJson(route('hours.approve', $sheet->id))->assertForbidden();
-    expect($sheet->fresh()->status)->toBe(ValidationStage::REFUSED);
-});
 
 it('ne notifie le salarié de ses heures qu\'après les deux accords', function (): void {
     Notification::fake();
@@ -1183,4 +1080,264 @@ it('ne bloque pas la saisie d\'heures sur un congé partiellement validé', func
         'morning_end' => '12:00',
         'description' => 'Travaux',
     ])->assertSessionHasNoErrors();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Matrice de décision — le Valideur 2 a le dernier mot
+|--------------------------------------------------------------------------
+|
+| Les deux valideurs répondent dans l'ordre qu'ils veulent, mais LES DEUX
+| doivent répondre. Une fois les deux décisions présentes, c'est celle du
+| Valideur 2 qui l'emporte en cas de désaccord.
+*/
+
+/**
+ * Joue une demande de congé complète et renvoie son statut final.
+ *
+ * $order dit qui se prononce en premier, pour prouver que le résultat n'en
+ * dépend pas.
+ */
+function playLeaveMatrix(string $decision1, string $decision2, string $order = 'v1-first'): LeaveRequest
+{
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+
+    $act = function (User $validator, string $decision) use ($leave): void {
+        $route = $decision === 'approve' ? 'leaves.approve' : 'leaves.refuse';
+        test()->actingAs($validator)->post(route($route, $leave->id))->assertSessionHasNoErrors();
+    };
+
+    if ($order === 'v1-first') {
+        $act($v1, $decision1);
+        expect($leave->fresh()->status)->toBe(ValidationStage::PENDING);
+        $act($v2, $decision2);
+    } else {
+        $act($v2, $decision2);
+        expect($leave->fresh()->status)->toBe(ValidationStage::PENDING);
+        $act($v1, $decision1);
+    }
+
+    return $leave->fresh();
+}
+
+function playHourMatrix(string $decision1, string $decision2, string $order = 'v1-first'): HourSheet
+{
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+
+    $sheet = submitHourSheet($employee);
+
+    $act = function (User $validator, string $decision) use ($sheet): void {
+        $route = $decision === 'approve' ? 'hours.approve' : 'hours.refuse';
+        test()->actingAs($validator)->post(route($route, $sheet->id))->assertSessionHasNoErrors();
+    };
+
+    if ($order === 'v1-first') {
+        $act($v1, $decision1);
+        expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
+        $act($v2, $decision2);
+    } else {
+        $act($v2, $decision2);
+        expect($sheet->fresh()->status)->toBe(ValidationStage::PENDING);
+        $act($v1, $decision1);
+    }
+
+    return $sheet->fresh();
+}
+
+it('congés — cas 1 : les deux valident, la demande est validée', function (string $order): void {
+    expect(playLeaveMatrix('approve', 'approve', $order)->status)->toBe(ValidationStage::APPROVED);
+})->with(['v1-first', 'v2-first']);
+
+it('congés — cas 2 : les deux refusent, la demande est refusée', function (string $order): void {
+    expect(playLeaveMatrix('refuse', 'refuse', $order)->status)->toBe(ValidationStage::REFUSED);
+})->with(['v1-first', 'v2-first']);
+
+it('congés — cas 3 : le Valideur 1 refuse, le Valideur 2 valide, la demande est validée', function (string $order): void {
+    $leave = playLeaveMatrix('refuse', 'approve', $order);
+
+    // Les deux décisions restent inscrites : celle qui n'a pas emporté la
+    // décision reste lisible dans l'historique.
+    expect($leave->status)->toBe(ValidationStage::APPROVED)
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_REFUSED)
+        ->and($leave->validator_2_decision)->toBe(ValidationStage::DECISION_APPROVED);
+})->with(['v1-first', 'v2-first']);
+
+it('congés — cas 4 : le Valideur 1 valide, le Valideur 2 refuse, la demande est refusée', function (string $order): void {
+    $leave = playLeaveMatrix('approve', 'refuse', $order);
+
+    expect($leave->status)->toBe(ValidationStage::REFUSED)
+        ->and($leave->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($leave->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED);
+})->with(['v1-first', 'v2-first']);
+
+it('heures — cas 1 : les deux valident, la journée est validée', function (string $order): void {
+    expect(playHourMatrix('approve', 'approve', $order)->status)->toBe(ValidationStage::APPROVED);
+})->with(['v1-first', 'v2-first']);
+
+it('heures — cas 2 : les deux refusent, la journée est refusée', function (string $order): void {
+    expect(playHourMatrix('refuse', 'refuse', $order)->status)->toBe(ValidationStage::REFUSED);
+})->with(['v1-first', 'v2-first']);
+
+it('heures — cas 3 : le Valideur 1 refuse, le Valideur 2 valide, la journée est validée', function (string $order): void {
+    $sheet = playHourMatrix('refuse', 'approve', $order);
+
+    expect($sheet->status)->toBe(ValidationStage::APPROVED)
+        ->and($sheet->validator_1_decision)->toBe(ValidationStage::DECISION_REFUSED)
+        ->and($sheet->validator_2_decision)->toBe(ValidationStage::DECISION_APPROVED);
+})->with(['v1-first', 'v2-first']);
+
+it('heures — cas 4 : le Valideur 1 valide, le Valideur 2 refuse, la journée est refusée', function (string $order): void {
+    $sheet = playHourMatrix('approve', 'refuse', $order);
+
+    expect($sheet->status)->toBe(ValidationStage::REFUSED)
+        ->and($sheet->validator_1_decision)->toBe(ValidationStage::DECISION_APPROVED)
+        ->and($sheet->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED);
+})->with(['v1-first', 'v2-first']);
+
+it('ne clôt pas la demande sur un refus isolé, quel qu\'en soit l\'auteur', function (): void {
+    foreach ([1, 2] as $refusingLevel) {
+        $v1 = twoStepUser();
+        $v2 = twoStepUser();
+        $requester = twoStepUser();
+        groupWith($v1, $v2, [$requester], 'Groupe niveau '.$refusingLevel);
+
+        $leave = submitLeave($requester);
+        $refuser = $refusingLevel === 1 ? $v1 : $v2;
+        $other = $refusingLevel === 1 ? $v2 : $v1;
+
+        $this->actingAs($refuser)->post(route('leaves.refuse', $leave->id));
+
+        // Le refus est enregistré mais la demande reste ouverte : on veut
+        // l'avis des deux valideurs.
+        expect($leave->fresh()->status)->toBe(ValidationStage::PENDING);
+
+        // L'autre valideur peut donc toujours se prononcer.
+        $this->actingAs($other)->post(route('leaves.approve', $leave->id))->assertSessionHasNoErrors();
+        expect($leave->fresh()->status)->toBe(
+            $refusingLevel === 1 ? ValidationStage::APPROVED : ValidationStage::REFUSED
+        );
+    }
+});
+
+it('empêche un valideur de revenir sur sa décision, y compris un refus', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.refuse', $leave->id));
+
+    $this->actingAs($v1)->postJson(route('leaves.approve', $leave->id))->assertForbidden();
+    $this->actingAs($v1)->postJson(route('leaves.refuse', $leave->id))->assertForbidden();
+
+    expect($leave->fresh()->validator_1_decision)->toBe(ValidationStage::DECISION_REFUSED);
+});
+
+it('interdit toute décision une fois les deux valideurs prononcés', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $admin = twoStepAdmin();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
+
+    foreach ([$v1, $v2, $admin] as $actor) {
+        $this->actingAs($actor)->postJson(route('leaves.approve', $leave->id))->assertForbidden();
+    }
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::REFUSED);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Notifications de l'issue finale
+|--------------------------------------------------------------------------
+*/
+
+it('ne notifie le demandeur qu\'une fois les deux valideurs prononcés', function (): void {
+    Notification::fake();
+
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+
+    $this->actingAs($v2)->post(route('leaves.refuse', $leave->id));
+    Notification::assertNotSentTo($requester, LeaveRequestRefusedNotification::class);
+    Notification::assertNotSentTo($requester, LeaveRequestApprovedNotification::class);
+
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+    Notification::assertSentTo($requester, LeaveRequestRefusedNotification::class);
+});
+
+it('notifie l\'issue réelle et non la décision qui vient d\'être prise', function (): void {
+    Notification::fake();
+
+    // Le Valideur 2 valide, puis le Valideur 1 refuse : c'est l'accord du
+    // Valideur 2 qui l'emporte, donc une notification d'ACCEPTATION doit
+    // partir depuis l'action « refuser » du Valideur 1.
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v2)->post(route('leaves.approve', $leave->id));
+    $this->actingAs($v1)->post(route('leaves.refuse', $leave->id));
+
+    expect($leave->fresh()->status)->toBe(ValidationStage::APPROVED);
+    Notification::assertSentTo($requester, LeaveRequestApprovedNotification::class);
+    Notification::assertNotSentTo($requester, LeaveRequestRefusedNotification::class);
+});
+
+it('notifie le salarié de l\'issue réelle de ses heures', function (): void {
+    Notification::fake();
+
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+
+    $sheet = submitHourSheet($employee);
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
+
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires incohérents']);
+
+    $sheet->refresh();
+    expect($sheet->status)->toBe(ValidationStage::REFUSED)
+        ->and($sheet->refusal_reason)->toBe('Horaires incohérents');
+
+    Notification::assertSentTo($employee, HourSheetDecisionNotification::class);
+});
+
+it('retire la journée de la file du valideur qui a refusé, pas de celle de l\'autre', function (): void {
+    $v1 = hoursUser();
+    $v2 = hoursUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+    $sheet = submitHourSheet($employee);
+
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
+
+    $this->actingAs($v2)->get(route('hours.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));
+    $this->actingAs($v1)->get(route('hours.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 1));
 });

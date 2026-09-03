@@ -118,26 +118,46 @@ trait HasTwoStepValidation
     }
 
     /**
+     * Rang qui tranche en cas de désaccord.
+     *
+     * Le Valideur 2 est hiérarchiquement le décideur final ; quand il n'y en a
+     * pas, le rang 1 décide seul.
+     */
+    public function decisiveValidationLevel(): int
+    {
+        return (int) max($this->expectedValidationLevels());
+    }
+
+    /**
      * Statut global déduit des décisions individuelles.
      *
-     * Un seul refus suffit à refuser ; il faut en revanche TOUS les accords
-     * attendus pour valider.
+     * Deux règles, dans cet ordre :
+     *
+     *   1. LES DEUX doivent s'être prononcés. Une seule décision, fût-elle
+     *      celle du décideur final, ne clôt pas la demande : on veut l'avis
+     *      des deux valideurs, et l'ordre dans lequel ils le donnent est
+     *      indifférent.
+     *   2. Une fois les deux décisions présentes, c'est celle du rang le plus
+     *      élevé qui l'emporte. En cas de désaccord, le Valideur 2 a le dernier
+     *      mot — dans les deux sens : il valide ce que le Valideur 1 a refusé,
+     *      et refuse ce que le Valideur 1 a validé.
+     *
+     * Les deux décisions restent inscrites sur l'objet quoi qu'il arrive :
+     * celle qui n'a pas emporté la décision reste lisible dans l'historique.
      */
     public function resolveGlobalStatus(): string
     {
-        foreach ($this->expectedValidationLevels() as $level) {
-            if ($this->decisionForLevel($level) === ValidationStage::DECISION_REFUSED) {
-                return ValidationStage::REFUSED;
-            }
-        }
+        $levels = $this->expectedValidationLevels();
 
-        foreach ($this->expectedValidationLevels() as $level) {
-            if ($this->decisionForLevel($level) !== ValidationStage::DECISION_APPROVED) {
+        foreach ($levels as $level) {
+            if ($this->decisionForLevel($level) === null) {
                 return ValidationStage::PENDING;
             }
         }
 
-        return ValidationStage::APPROVED;
+        return $this->decisionForLevel($this->decisiveValidationLevel()) === ValidationStage::DECISION_REFUSED
+            ? ValidationStage::REFUSED
+            : ValidationStage::APPROVED;
     }
 
     public function validationStatusLabel(): string

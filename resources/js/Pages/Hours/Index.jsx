@@ -738,6 +738,333 @@ export default function HoursIndex({
         return entries;
     }, [sheetsByDate, approvedLeavesByDate]);
 
+    /**
+     * Une journée est « en validation » tant que son circuit n'est pas clos.
+     *
+     * `pending_validator_2` est l'ancien état du circuit séquentiel : la
+     * migration l'a ramené sur `pending`, il n'est testé ici que par prudence.
+     * Une journée sans statut est antérieure au circuit de validation : elle
+     * n'a rien à faire dans les demandes en cours et rejoint l'historique.
+     */
+    const isAwaitingValidation = (sheet) => (
+        ['pending', 'pending_validator_2'].includes(String(sheet?.status || '').toLowerCase())
+    );
+
+    // Les deux sections partagent le tri de `historyEntries` : du plus récent
+    // au plus ancien.
+    const pendingEntries = useMemo(
+        () => historyEntries.filter((entry) => entry.type === 'sheet' && isAwaitingValidation(entry.sheet)),
+        [historyEntries],
+    );
+    const settledEntries = useMemo(
+        () => historyEntries.filter((entry) => !(entry.type === 'sheet' && isAwaitingValidation(entry.sheet))),
+        [historyEntries],
+    );
+
+    /**
+     * Rendu d'une journée : carte en lecture, formulaire quand la journée est
+     * en cours d'édition, ou mention de congé.
+     *
+     * Extrait du bloc « Historique » pour être partagé avec la section
+     * « Mes heures en validation » : les deux sections affichent exactement la
+     * même carte, seule la liste qui les alimente diffère.
+     */
+    const renderDayEntry = (entry) => {
+        const sheet = entry.sheet;
+        return (
+        <article key={entry.key} className="rounded-xl border border-[var(--app-border)] bg-white p-3 text-sm text-black">
+            {entry.type === 'leave' ? (
+                <div>
+                    <p className="font-semibold">Date : {formatHistoryDate(entry.date)}</p>
+                    <p>Statut : En congé</p>
+                    <p>{entry.leave?.message || 'Congé validé'}</p>
+                </div>
+            ) : (canCreate && inlineEditingByDate[sheet.work_date] ? (() => {
+                const dayState = inlineEditingByDate[sheet.work_date];
+                const isNotWorked = Boolean(dayState.is_not_worked);
+                const coverage = leaveCoverage(approvedLeavesByDate[sheet.work_date]);
+                const canUseContinuousDay = !coverage.morning && !coverage.afternoon;
+                const isContinuousDay = canUseContinuousDay && Boolean(dayState.is_continuous_day);
+                const { totalMinutes: totalWorkedMinutes, errors: inlineRangeErrors } = computeDayTotals(
+                    { ...dayState, is_continuous_day: isContinuousDay },
+                    coverage,
+                );
+                const errorMessages = isNotWorked ? [] : inlineRangeErrors;
+                const descriptionMissing = !isNotWorked && !String(dayState.description || '').trim();
+                const isSaving = savingDates.has(sheet.work_date);
+
+                        return (
+                    <div>
+                        <p className="text-center font-semibold uppercase">{formatHistoryDate(sheet.work_date)}</p>
+
+                        <div className="mt-3">
+                            <button
+                                type="button"
+                                onClick={() => setInlineEditingByDate((prev) => ({
+                                    ...prev,
+                                    [sheet.work_date]: prev[sheet.work_date]?.is_not_worked
+                                        ? defaultDayState()
+                                        : nonWorkedDayState(),
+                                }))}
+                                className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-semibold"
+                            >
+                                {isNotWorked ? 'Revenir en mode normal' : 'Non travaillé'}
+                            </button>
+                        </div>
+
+                        {canUseContinuousDay && (
+                            <button
+                                type="button"
+                                onClick={() => onInlineToggleCheck(sheet.work_date, 'is_continuous_day')}
+                                disabled={isNotWorked}
+                                className="mt-3 flex items-center justify-center gap-3 text-left"
+                            >
+                                <span
+                                    className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--app-border)] bg-white text-xs"
+                                    aria-hidden="true"
+                                >
+                                    {dayState.is_continuous_day ? '✔️' : ''}
+                                </span>
+                                <span className="text-sm">Journée continue / Demi-journée</span>
+                            </button>
+                        )}
+
+                        {isNotWorked && (
+                            <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                Journée marquée comme non travaillée
+                            </p>
+                        )}
+
+                        <div className="mt-4 grid gap-3">
+                            {isContinuousDay ? (
+                                CONTINUOUS_TIME_FIELDS.map((field) => (
+                                    <label key={field.key} className="grid gap-1 text-sm">
+                                        <span className="font-medium">{field.label}</span>
+                                        <select
+                                            value={dayState[field.key]}
+                                            onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
+                                            disabled={isNotWorked}
+                                            className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                        >
+                                            <option value="">--:--</option>
+                                            {timeOptions.map((time) => (
+                                                <option key={time} value={time}>
+                                                    {time}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                ))
+                            ) : (
+                            <>
+                            {coverage.morning ? (
+                                <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                    Vous êtes en congé ce matin.
+                                </p>
+                            ) : MORNING_TIME_FIELDS.map((field) => (
+                                <label key={field.key} className="grid gap-1 text-sm">
+                                    <span className="font-medium">{field.label}</span>
+                                    <select
+                                        value={dayState[field.key]}
+                                        onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
+                                        disabled={isNotWorked}
+                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                    >
+                                        <option value="">--:--</option>
+                                        {timeOptions.map((time) => (
+                                            <option key={time} value={time}>
+                                                {time}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            ))}
+                            {coverage.afternoon ? (
+                                <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
+                                    Vous êtes en congé cet après-midi.
+                                </p>
+                            ) : AFTERNOON_TIME_FIELDS.map((field) => (
+                                <label key={field.key} className="grid gap-1 text-sm">
+                                    <span className="font-medium">{field.label}</span>
+                                    <select
+                                        value={dayState[field.key]}
+                                        onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
+                                        disabled={isNotWorked}
+                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
+                                    >
+                                        <option value="">--:--</option>
+                                        {timeOptions.map((time) => (
+                                            <option key={time} value={time}>
+                                                {time}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            ))}
+                            </>
+                            )}
+                        </div>
+
+                        <div className="mt-4 text-center">
+                            <p className="text-sm">Total heures travaillées</p>
+                            <p className="text-lg font-semibold">{formatWorkedDuration(totalWorkedMinutes)}</p>
+                        </div>
+
+                        {errorMessages.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                                {errorMessages.map((message) => (
+                                    <p key={message} className="text-xs text-red-600">
+                                        {message}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="mt-4 grid gap-2">
+                            {CHECKBOX_FIELDS.map((field) => {
+                                const checked = dayState[field.key];
+
+                                return (
+                                    <button
+                                        key={field.key}
+                                        type="button"
+                                        onClick={() => onInlineToggleCheck(sheet.work_date, field.key)}
+                                        disabled={isNotWorked}
+                                        className="flex items-center gap-3 text-left"
+                                    >
+                                        <span
+                                            className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--app-border)] bg-white text-xs"
+                                            aria-hidden="true"
+                                        >
+                                            {checked ? '✔️' : ''}
+                                        </span>
+                                        <span className="text-sm">{field.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <label className="mt-4 grid gap-1 text-sm">
+                            <span className="font-medium">Description des travaux réalisés</span>
+                            <textarea
+                                rows={4}
+                                maxLength={5000}
+                                value={dayState.description || ''}
+                                onChange={(event) => onInlineDescriptionChange(sheet.work_date, event.target.value)}
+                                disabled={isNotWorked}
+                                placeholder="Décrivez les travaux effectués durant la journée..."
+                                className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)] disabled:bg-gray-100"
+                            />
+                            {descriptionMissing && (
+                                <span className="text-xs text-red-600">
+                                    La description des travaux réalisés est obligatoire.
+                                </span>
+                            )}
+                            {errors.description && (
+                                <span className="text-xs text-red-600">{errors.description}</span>
+                            )}
+                        </label>
+
+                        <div className="mt-4 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => saveInlineDay(sheet.work_date)}
+                                disabled={isSaving || errorMessages.length > 0 || descriptionMissing}
+                                className="rounded-xl bg-[var(--brand-yellow)] px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {isSaving ? 'Enregistrement...' : 'Enregistrer'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => cancelInlineEdit(sheet.work_date)}
+                                disabled={isSaving}
+                                className="rounded-xl border border-[var(--app-border)] px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                Annuler
+                            </button>
+                        </div>
+                    </div>
+                );
+            })() : (
+                <div>
+                    {/* En-tête : la date à gauche, le badge d'état à droite.
+                        L'état est global — le salarié n'a pas à savoir lequel
+                        des deux valideurs manque. `status` à null signale une
+                        saisie antérieure à la mise en place du circuit. */}
+                    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                        <p className="min-w-0 basis-full font-semibold sm:flex-1 sm:basis-0">
+                            Date : {formatHistoryDate(sheet.work_date)}
+                        </p>
+                        <span className="shrink-0">
+                            <HourSheetStatusBadge sheet={sheet} />
+                        </span>
+                    </div>
+                    {sheet.status === 'refused' && sheet.refusal_reason ? (
+                        <p className="text-red-700">Motif du refus : {sheet.refusal_reason}</p>
+                    ) : null}
+                    {sheet.is_not_worked ? (
+                        <>
+                            <p>Statut : Non travaillé</p>
+                            <p>
+                                Description : {String(sheet.description || '').trim() || 'Non renseignée'}
+                            </p>
+                        </>
+                    ) : (
+                        (() => {
+                            const coverage = leaveCoverage(entry.leave);
+                            const isContinuousDay = Boolean(sheet.is_continuous_day) && !coverage.morning && !coverage.afternoon;
+                            const { totalMinutes: totalWorkedMinutes } = computeDayTotals(
+                                { ...sheet, is_continuous_day: isContinuousDay },
+                                coverage,
+                            );
+                            const morningStart = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_start);
+                            const morningEnd = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_end);
+                            const afternoonStart = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_start);
+                            const afternoonEnd = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_end);
+                            const hoursLabel = isContinuousDay
+                                ? `${formatHistoryTime(sheet.morning_start)} - ${formatHistoryTime(sheet.afternoon_end)} (journée continue)`
+                                : coverage.morning
+                                    ? `Congé / Congé / ${afternoonStart} - ${afternoonEnd}`
+                                    : coverage.afternoon
+                                        ? `${morningStart} - ${morningEnd} / Congé / Congé`
+                                        : `${morningStart} - ${morningEnd} / ${afternoonStart} - ${afternoonEnd}`;
+
+                            return (
+                        <>
+                    <p>Heures : {hoursLabel}</p>
+                    <p>Total heures travaillées : {formatWorkedDuration(totalWorkedMinutes)}</p>
+                    <p>
+                        Description : {String(sheet.description || '').trim() || 'Non renseignée'}
+                    </p>
+                    <p>
+                        Cases cochées :
+                        {' '}
+                        {[
+                            sheet.has_breakfast_before_5 ? 'Casse-croûte' : null,
+                            sheet.has_lunch ? 'Déjeuner' : null,
+                            sheet.has_dinner_after_21 ? 'Dîner' : null,
+                            sheet.has_long_night ? 'Nuit' : null,
+                        ].filter(Boolean).join(', ') || 'Aucune'}
+                    </p>
+                        </>
+                            );
+                        })()
+                    )}
+                    {canCreate && !leaveCoverage(approvedLeavesByDate[sheet.work_date]).fullDay && (
+                        <button
+                            type="button"
+                            onClick={() => startInlineEdit(sheet.work_date)}
+                            className="mt-2 rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-medium"
+                        >
+                            Modifier
+                        </button>
+                    )}
+                </div>
+            ))}
+        </article>
+        );
+    };
+
     return (
         <AppLayout
             title="Heures"
@@ -1018,309 +1345,28 @@ export default function HoursIndex({
                     </div>
                 )}
 
+                {/* Les journées encore en validation ont leur propre section, au-dessus
+                    de l'historique et toujours dépliée : elles étaient auparavant
+                    noyées dans un historique replié par défaut. */}
+                {canCreate && pendingEntries.length > 0 && (
+                    <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
+                        <h2 className="text-lg font-semibold">Mes heures en validation</h2>
+
+                        <div className="mt-4 space-y-3">
+                            {pendingEntries.map(renderDayEntry)}
+                        </div>
+                    </section>
+                )}
+
                 {canCreate && historyOpen && (
                     <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
                         <h2 className="text-lg font-semibold">Historique</h2>
 
-                        {historyEntries.length === 0 ? (
-                            <p className="mt-3 text-sm text-[var(--app-text-soft)]">Aucune journée enregistrée.</p>
+                        {settledEntries.length === 0 ? (
+                            <p className="mt-3 text-sm text-[var(--app-text-soft)]">Aucune journée terminée.</p>
                         ) : (
                             <div className="mt-4 space-y-3">
-                                {historyEntries.map((entry) => {
-                                    const sheet = entry.sheet;
-                                    return (
-                                    <article key={entry.key} className="rounded-xl border border-[var(--app-border)] bg-white p-3 text-sm text-black">
-                                        {entry.type === 'leave' ? (
-                                            <div>
-                                                <p className="font-semibold">Date : {formatHistoryDate(entry.date)}</p>
-                                                <p>Statut : En congé</p>
-                                                <p>{entry.leave?.message || 'Congé validé'}</p>
-                                            </div>
-                                        ) : (canCreate && inlineEditingByDate[sheet.work_date] ? (() => {
-                                            const dayState = inlineEditingByDate[sheet.work_date];
-                                            const isNotWorked = Boolean(dayState.is_not_worked);
-                                            const coverage = leaveCoverage(approvedLeavesByDate[sheet.work_date]);
-                                            const canUseContinuousDay = !coverage.morning && !coverage.afternoon;
-                                            const isContinuousDay = canUseContinuousDay && Boolean(dayState.is_continuous_day);
-                                            const { totalMinutes: totalWorkedMinutes, errors: inlineRangeErrors } = computeDayTotals(
-                                                { ...dayState, is_continuous_day: isContinuousDay },
-                                                coverage,
-                                            );
-                                            const errorMessages = isNotWorked ? [] : inlineRangeErrors;
-                                            const descriptionMissing = !isNotWorked && !String(dayState.description || '').trim();
-                                            const isSaving = savingDates.has(sheet.work_date);
-
-                                                    return (
-                                                <div>
-                                                    <p className="text-center font-semibold uppercase">{formatHistoryDate(sheet.work_date)}</p>
-
-                                                    <div className="mt-3">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setInlineEditingByDate((prev) => ({
-                                                                ...prev,
-                                                                [sheet.work_date]: prev[sheet.work_date]?.is_not_worked
-                                                                    ? defaultDayState()
-                                                                    : nonWorkedDayState(),
-                                                            }))}
-                                                            className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-semibold"
-                                                        >
-                                                            {isNotWorked ? 'Revenir en mode normal' : 'Non travaillé'}
-                                                        </button>
-                                                    </div>
-
-                                                    {canUseContinuousDay && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => onInlineToggleCheck(sheet.work_date, 'is_continuous_day')}
-                                                            disabled={isNotWorked}
-                                                            className="mt-3 flex items-center justify-center gap-3 text-left"
-                                                        >
-                                                            <span
-                                                                className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--app-border)] bg-white text-xs"
-                                                                aria-hidden="true"
-                                                            >
-                                                                {dayState.is_continuous_day ? '✔️' : ''}
-                                                            </span>
-                                                            <span className="text-sm">Journée continue / Demi-journée</span>
-                                                        </button>
-                                                    )}
-
-                                                    {isNotWorked && (
-                                                        <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
-                                                            Journée marquée comme non travaillée
-                                                        </p>
-                                                    )}
-
-                                                    <div className="mt-4 grid gap-3">
-                                                        {isContinuousDay ? (
-                                                            CONTINUOUS_TIME_FIELDS.map((field) => (
-                                                                <label key={field.key} className="grid gap-1 text-sm">
-                                                                    <span className="font-medium">{field.label}</span>
-                                                                    <select
-                                                                        value={dayState[field.key]}
-                                                                        onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
-                                                                        disabled={isNotWorked}
-                                                                        className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
-                                                                    >
-                                                                        <option value="">--:--</option>
-                                                                        {timeOptions.map((time) => (
-                                                                            <option key={time} value={time}>
-                                                                                {time}
-                                                                            </option>
-                                                                        ))}
-                                                                    </select>
-                                                                </label>
-                                                            ))
-                                                        ) : (
-                                                        <>
-                                                        {coverage.morning ? (
-                                                            <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
-                                                                Vous êtes en congé ce matin.
-                                                            </p>
-                                                        ) : MORNING_TIME_FIELDS.map((field) => (
-                                                            <label key={field.key} className="grid gap-1 text-sm">
-                                                                <span className="font-medium">{field.label}</span>
-                                                                <select
-                                                                    value={dayState[field.key]}
-                                                                    onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
-                                                                    disabled={isNotWorked}
-                                                                    className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
-                                                                >
-                                                                    <option value="">--:--</option>
-                                                                    {timeOptions.map((time) => (
-                                                                        <option key={time} value={time}>
-                                                                            {time}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            </label>
-                                                        ))}
-                                                        {coverage.afternoon ? (
-                                                            <p className="rounded-lg bg-gray-100 px-3 py-2 text-center text-sm font-semibold text-gray-700">
-                                                                Vous êtes en congé cet après-midi.
-                                                            </p>
-                                                        ) : AFTERNOON_TIME_FIELDS.map((field) => (
-                                                            <label key={field.key} className="grid gap-1 text-sm">
-                                                                <span className="font-medium">{field.label}</span>
-                                                                <select
-                                                                    value={dayState[field.key]}
-                                                                    onChange={(event) => onInlineTimeChange(sheet.work_date, field.key, event.target.value)}
-                                                                    disabled={isNotWorked}
-                                                                    className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)]"
-                                                                >
-                                                                    <option value="">--:--</option>
-                                                                    {timeOptions.map((time) => (
-                                                                        <option key={time} value={time}>
-                                                                            {time}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            </label>
-                                                        ))}
-                                                        </>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="mt-4 text-center">
-                                                        <p className="text-sm">Total heures travaillées</p>
-                                                        <p className="text-lg font-semibold">{formatWorkedDuration(totalWorkedMinutes)}</p>
-                                                    </div>
-
-                                                    {errorMessages.length > 0 && (
-                                                        <div className="mt-2 space-y-1">
-                                                            {errorMessages.map((message) => (
-                                                                <p key={message} className="text-xs text-red-600">
-                                                                    {message}
-                                                                </p>
-                                                            ))}
-                                                        </div>
-                                                    )}
-
-                                                    <div className="mt-4 grid gap-2">
-                                                        {CHECKBOX_FIELDS.map((field) => {
-                                                            const checked = dayState[field.key];
-
-                                                            return (
-                                                                <button
-                                                                    key={field.key}
-                                                                    type="button"
-                                                                    onClick={() => onInlineToggleCheck(sheet.work_date, field.key)}
-                                                                    disabled={isNotWorked}
-                                                                    className="flex items-center gap-3 text-left"
-                                                                >
-                                                                    <span
-                                                                        className="flex h-5 w-5 items-center justify-center rounded-sm border border-[var(--app-border)] bg-white text-xs"
-                                                                        aria-hidden="true"
-                                                                    >
-                                                                        {checked ? '✔️' : ''}
-                                                                    </span>
-                                                                    <span className="text-sm">{field.label}</span>
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
-
-                                                    <label className="mt-4 grid gap-1 text-sm">
-                                                        <span className="font-medium">Description des travaux réalisés</span>
-                                                        <textarea
-                                                            rows={4}
-                                                            maxLength={5000}
-                                                            value={dayState.description || ''}
-                                                            onChange={(event) => onInlineDescriptionChange(sheet.work_date, event.target.value)}
-                                                            disabled={isNotWorked}
-                                                            placeholder="Décrivez les travaux effectués durant la journée..."
-                                                            className="rounded-xl border border-[var(--app-border)] bg-white px-3 py-2 text-sm text-black outline-none focus:ring-2 focus:ring-[var(--brand-yellow)] disabled:bg-gray-100"
-                                                        />
-                                                        {descriptionMissing && (
-                                                            <span className="text-xs text-red-600">
-                                                                La description des travaux réalisés est obligatoire.
-                                                            </span>
-                                                        )}
-                                                        {errors.description && (
-                                                            <span className="text-xs text-red-600">{errors.description}</span>
-                                                        )}
-                                                    </label>
-
-                                                    <div className="mt-4 flex gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => saveInlineDay(sheet.work_date)}
-                                                            disabled={isSaving || errorMessages.length > 0 || descriptionMissing}
-                                                            className="rounded-xl bg-[var(--brand-yellow)] px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
-                                                        >
-                                                            {isSaving ? 'Enregistrement...' : 'Enregistrer'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => cancelInlineEdit(sheet.work_date)}
-                                                            disabled={isSaving}
-                                                            className="rounded-xl border border-[var(--app-border)] px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
-                                                        >
-                                                            Annuler
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })() : (
-                                            <div>
-                                                {/* En-tête : la date à gauche, le badge d'état à droite.
-                                                    L'état est global — le salarié n'a pas à savoir lequel
-                                                    des deux valideurs manque. `status` à null signale une
-                                                    saisie antérieure à la mise en place du circuit. */}
-                                                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                                                    <p className="min-w-0 basis-full font-semibold sm:flex-1 sm:basis-0">
-                                                        Date : {formatHistoryDate(sheet.work_date)}
-                                                    </p>
-                                                    <span className="shrink-0">
-                                                        <HourSheetStatusBadge sheet={sheet} />
-                                                    </span>
-                                                </div>
-                                                {sheet.status === 'refused' && sheet.refusal_reason ? (
-                                                    <p className="text-red-700">Motif du refus : {sheet.refusal_reason}</p>
-                                                ) : null}
-                                                {sheet.is_not_worked ? (
-                                                    <>
-                                                        <p>Statut : Non travaillé</p>
-                                                        <p>
-                                                            Description : {String(sheet.description || '').trim() || 'Non renseignée'}
-                                                        </p>
-                                                    </>
-                                                ) : (
-                                                    (() => {
-                                                        const coverage = leaveCoverage(entry.leave);
-                                                        const isContinuousDay = Boolean(sheet.is_continuous_day) && !coverage.morning && !coverage.afternoon;
-                                                        const { totalMinutes: totalWorkedMinutes } = computeDayTotals(
-                                                            { ...sheet, is_continuous_day: isContinuousDay },
-                                                            coverage,
-                                                        );
-                                                        const morningStart = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_start);
-                                                        const morningEnd = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_end);
-                                                        const afternoonStart = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_start);
-                                                        const afternoonEnd = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_end);
-                                                        const hoursLabel = isContinuousDay
-                                                            ? `${formatHistoryTime(sheet.morning_start)} - ${formatHistoryTime(sheet.afternoon_end)} (journée continue)`
-                                                            : coverage.morning
-                                                                ? `Congé / Congé / ${afternoonStart} - ${afternoonEnd}`
-                                                                : coverage.afternoon
-                                                                    ? `${morningStart} - ${morningEnd} / Congé / Congé`
-                                                                    : `${morningStart} - ${morningEnd} / ${afternoonStart} - ${afternoonEnd}`;
-
-                                                        return (
-                                                    <>
-                                                <p>Heures : {hoursLabel}</p>
-                                                <p>Total heures travaillées : {formatWorkedDuration(totalWorkedMinutes)}</p>
-                                                <p>
-                                                    Description : {String(sheet.description || '').trim() || 'Non renseignée'}
-                                                </p>
-                                                <p>
-                                                    Cases cochées :
-                                                    {' '}
-                                                    {[
-                                                        sheet.has_breakfast_before_5 ? 'Casse-croûte' : null,
-                                                        sheet.has_lunch ? 'Déjeuner' : null,
-                                                        sheet.has_dinner_after_21 ? 'Dîner' : null,
-                                                        sheet.has_long_night ? 'Nuit' : null,
-                                                    ].filter(Boolean).join(', ') || 'Aucune'}
-                                                </p>
-                                                    </>
-                                                        );
-                                                    })()
-                                                )}
-                                                {canCreate && !leaveCoverage(approvedLeavesByDate[sheet.work_date]).fullDay && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => startInlineEdit(sheet.work_date)}
-                                                        className="mt-2 rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs font-medium"
-                                                    >
-                                                        Modifier
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </article>
-                                    );
-                                })}
+                                {settledEntries.map(renderDayEntry)}
                             </div>
                         )}
                     </section>

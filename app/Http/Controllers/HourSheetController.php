@@ -9,6 +9,7 @@ use App\Notifications\HourSheetDecisionNotification;
 use App\Services\AuditLogService;
 use App\Services\Hours\ApprovedLeaveDayService;
 use App\Services\Validation\TwoStepValidationService;
+use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
 use App\Support\Validation\ValidationStage;
 use Carbon\CarbonImmutable;
@@ -392,13 +393,16 @@ class HourSheetController extends Controller
             return $this->staleValidationResponse($request);
         }
 
-        // Le salarié n'est prévenu qu'une fois TOUS les accords réunis.
-        if ($transition->completesApproval()) {
-            $this->notifyHourSheetOwner($hourSheet, true, $request->user());
+        // Le salarié n'est prévenu qu'une fois les DEUX valideurs prononcés, et
+        // de l'issue réelle : elle n'est pas forcément celle que vient
+        // d'exprimer l'acteur, puisque le Valideur 2 tranche en cas de
+        // désaccord.
+        if ($transition->closesCircuit()) {
+            $this->notifyHourSheetOwner($hourSheet, $transition->completesApproval(), $request->user());
         }
 
         $this->auditLogService->log([
-            'action' => $transition->completesApproval()
+            'action' => $transition->closesCircuit()
                 ? 'approve_hour_sheet'
                 : 'approve_hour_sheet_partial',
             'module' => 'heures',
@@ -407,7 +411,9 @@ class HourSheetController extends Controller
                 $this->userLabel($request->user()),
                 $hourSheet->work_date?->toDateString() ?? '',
                 $this->userLabel($hourSheet->user),
-                $transition->completesApproval() ? '' : ' ; l\'autre valideur doit encore se prononcer',
+                $transition->closesCircuit()
+                    ? ' ; issue finale : '.($transition->completesApproval() ? 'validé' : 'refusé (décision du Valideur 2)')
+                    : ' ; l\'autre valideur doit encore se prononcer',
             ),
             'payload' => [
                 'hour_sheet_id' => (int) $hourSheet->id,
@@ -422,9 +428,25 @@ class HourSheetController extends Controller
             return response()->json(['ok' => true, 'status' => $hourSheet->status]);
         }
 
-        return back()->with('success', $transition->completesApproval()
+        return back()->with('success', $this->hourSheetOutcomeMessage($transition));
+    }
+
+    /**
+     * Message rendu au valideur après sa décision.
+     *
+     * Tant que l'autre n'a pas répondu, rien n'est tranché. Une fois la
+     * journée close, on annonce l'issue réelle, même quand elle contredit la
+     * décision qui vient d'être prise.
+     */
+    private function hourSheetOutcomeMessage(ValidationTransition $transition): string
+    {
+        if (! $transition->closesCircuit()) {
+            return 'Votre décision est enregistrée. La journée reste en attente de la seconde validation.';
+        }
+
+        return $transition->completesApproval()
             ? 'Journée définitivement validée.'
-            : 'Votre validation est enregistrée. La journée reste en attente de la seconde validation.');
+            : 'Journée définitivement refusée.';
     }
 
     /**
@@ -446,20 +468,30 @@ class HourSheetController extends Controller
             return $this->staleValidationResponse($request);
         }
 
+        // Le motif est conservé même si l'issue finit par être une validation :
+        // c'est la trace de la position de ce valideur. L'écran ne l'affiche
+        // que sur une journée effectivement refusée.
         $reason = trim((string) ($validated['refusal_reason'] ?? ''));
         $hourSheet->refusal_reason = $reason !== '' ? $reason : null;
         $hourSheet->save();
 
-        $this->notifyHourSheetOwner($hourSheet, false, $request->user());
+        if ($transition->closesCircuit()) {
+            $this->notifyHourSheetOwner($hourSheet, $transition->completesApproval(), $request->user());
+        }
 
         $this->auditLogService->log([
-            'action' => 'refuse_hour_sheet',
+            'action' => $transition->closesCircuit()
+                ? 'refuse_hour_sheet'
+                : 'refuse_hour_sheet_partial',
             'module' => 'heures',
             'description' => sprintf(
-                '%s a refusé les heures du %s de %s',
+                '%s a refusé les heures du %s de %s%s',
                 $this->userLabel($request->user()),
                 $hourSheet->work_date?->toDateString() ?? '',
                 $this->userLabel($hourSheet->user),
+                $transition->closesCircuit()
+                    ? ' ; issue finale : '.($transition->completesRefusal() ? 'refusé' : 'validé (décision du Valideur 2)')
+                    : ' ; l\'autre valideur doit encore se prononcer',
             ),
             'payload' => [
                 'hour_sheet_id' => (int) $hourSheet->id,
@@ -475,7 +507,7 @@ class HourSheetController extends Controller
             return response()->json(['ok' => true, 'status' => $hourSheet->status]);
         }
 
-        return back()->with('success', 'Journée refusée.');
+        return back()->with('success', $this->hourSheetOutcomeMessage($transition));
     }
 
     /**
