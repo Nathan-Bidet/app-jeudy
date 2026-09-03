@@ -3,6 +3,15 @@ import AppLayout from '@/Layouts/AppLayout';
 import TitleCaps from '@/Layouts/AppShell/TitleCaps';
 import Modal from '@/Components/Modal';
 import { Head, router, usePage } from '@inertiajs/react';
+import {
+    computeDayTotals,
+    dayOvertimeLabel,
+    defaultDayState,
+    formatWorkedDuration,
+    leaveCoverage,
+    nonWorkedDayState,
+    normalizeTimeForSelect,
+} from '@/Support/hoursWorkTime';
 import { useMemo, useState } from 'react';
 
 const DAY_NAMES = [
@@ -112,137 +121,6 @@ function formatHistoryTime(timeValue) {
     return `${safeHours}:${safeMinutes}`;
 }
 
-function normalizeTimeForSelect(value) {
-    const source = String(value || '').trim();
-    if (!source) {
-        return '';
-    }
-
-    const [hours, minutes] = source.split(':');
-    if (hours === undefined || minutes === undefined) {
-        return '';
-    }
-
-    return `${String(hours).padStart(2, '0').slice(-2)}:${String(minutes).padStart(2, '0').slice(-2)}`;
-}
-
-function timeToMinutes(timeValue) {
-    if (!timeValue || !timeValue.includes(':')) {
-        return null;
-    }
-
-    const [hours, minutes] = timeValue.split(':').map((value) => Number(value));
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) {
-        return null;
-    }
-
-    return (hours * 60) + minutes;
-}
-
-// allowOvernight (créneau "soir" uniquement) : si la fin est antérieure au
-// début, on considère qu'elle a lieu le lendemain (+24h) pour le calcul de la
-// durée uniquement, sans jamais modifier la date du jour ni créer d'heures
-// sur la journée suivante.
-function computeRangeDuration(start, end, label, allowOvernight = false) {
-    if (!start || !end) {
-        return { minutes: 0, error: null };
-    }
-
-    const startMinutes = timeToMinutes(start);
-    let endMinutes = timeToMinutes(end);
-
-    if (startMinutes === null || endMinutes === null) {
-        return { minutes: 0, error: null };
-    }
-
-    if (endMinutes < startMinutes) {
-        if (!allowOvernight) {
-            return {
-                minutes: 0,
-                error: `Plage ${label} invalide: arrivée avant départ.`,
-            };
-        }
-
-        endMinutes += 24 * 60;
-    }
-
-    return { minutes: endMinutes - startMinutes, error: null };
-}
-
-// Calcule la durée totale d'une journée et ses éventuelles erreurs, en
-// tenant compte du mode "journée continue / demi-journée" (une seule plage
-// Début -> Fin) ou du mode classique (matin + soir séparés).
-function computeDayTotals(dayState, coverage) {
-    if (dayState?.is_continuous_day) {
-        const range = (coverage.morning || coverage.afternoon)
-            ? { minutes: 0, error: null }
-            : computeRangeDuration(dayState.morning_start, dayState.afternoon_end, 'journée continue', true);
-
-        return { totalMinutes: range.minutes, errors: [range.error].filter(Boolean) };
-    }
-
-    const morningRange = coverage.morning
-        ? { minutes: 0, error: null }
-        : computeRangeDuration(dayState?.morning_start, dayState?.morning_end, 'matin');
-    const eveningRange = coverage.afternoon
-        ? { minutes: 0, error: null }
-        : computeRangeDuration(dayState?.afternoon_start, dayState?.afternoon_end, 'soir', true);
-
-    return {
-        totalMinutes: morningRange.minutes + eveningRange.minutes,
-        errors: [morningRange.error, eveningRange.error].filter(Boolean),
-    };
-}
-
-function formatWorkedDuration(totalMinutes) {
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${String(hours).padStart(2, '0')}h${String(minutes).padStart(2, '0')}`;
-}
-
-function defaultDayState({ isFriday = false } = {}) {
-    return {
-        morning_start: '08:00',
-        morning_end: '12:00',
-        afternoon_start: '14:00',
-        afternoon_end: isFriday ? '17:00' : '18:00',
-        description: '',
-        is_not_worked: false,
-        is_continuous_day: false,
-        has_breakfast_before_5: false,
-        has_lunch: false,
-        has_dinner_after_21: false,
-        has_long_night: false,
-    };
-}
-
-function nonWorkedDayState() {
-    return {
-        morning_start: '',
-        morning_end: '',
-        afternoon_start: '',
-        afternoon_end: '',
-        description: '',
-        is_not_worked: true,
-        is_continuous_day: false,
-        has_breakfast_before_5: false,
-        has_lunch: false,
-        has_dinner_after_21: false,
-        has_long_night: false,
-    };
-}
-
-function leaveCoverage(leaveInfo) {
-    const morning = Boolean(leaveInfo?.morning);
-    const afternoon = Boolean(leaveInfo?.afternoon);
-
-    return {
-        morning,
-        afternoon,
-        fullDay: Boolean(leaveInfo?.is_full_day) || (morning && afternoon),
-    };
-}
-
 /**
  * Badge d'état d'une journée, destiné au salarié.
  *
@@ -251,6 +129,28 @@ function leaveCoverage(leaveInfo) {
  * saisie avant la mise en place de la validation n'a pas d'état de circuit et
  * le dit telle quelle.
  */
+/**
+ * Badge des heures supplémentaires d'une journée.
+ *
+ * Rendu seulement quand il y a un dépassement : une journée conforme ou plus
+ * courte que la normale n'affiche rien. Le libellé vient de
+ * `dayOvertimeLabel()`, unique source du calcul.
+ */
+function OvertimeBadge({ label }) {
+    if (!label) {
+        return null;
+    }
+
+    return (
+        <span
+            title="Heures supplémentaires par rapport à la durée normale de la journée"
+            className="inline-flex shrink-0 items-center rounded-full border border-[#ef4444] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#b91c1c]"
+        >
+            {label}
+        </span>
+    );
+}
+
 function HourSheetStatusBadge({ sheet }) {
     const status = String(sheet?.status || '').toLowerCase();
 
@@ -907,7 +807,15 @@ export default function HoursIndex({
 
                         <div className="mt-4 text-center">
                             <p className="text-sm">Total heures travaillées</p>
-                            <p className="text-lg font-semibold">{formatWorkedDuration(totalWorkedMinutes)}</p>
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                                <p className="text-lg font-semibold">{formatWorkedDuration(totalWorkedMinutes)}</p>
+                                <OvertimeBadge label={dayOvertimeLabel({
+                                    dayState,
+                                    coverage,
+                                    totalMinutes: totalWorkedMinutes,
+                                    dayIndex: day.dayIndex,
+                                })} />
+                            </div>
                         </div>
 
                         {errorMessages.length > 0 && (
@@ -1032,7 +940,15 @@ export default function HoursIndex({
                             return (
                         <>
                     <p>Heures : {hoursLabel}</p>
-                    <p>Total heures travaillées : {formatWorkedDuration(totalWorkedMinutes)}</p>
+                    <p className="flex flex-wrap items-center gap-2">
+                        <span>Total heures travaillées : {formatWorkedDuration(totalWorkedMinutes)}</span>
+                        <OvertimeBadge label={dayOvertimeLabel({
+                            dayState: sheet,
+                            coverage,
+                            totalMinutes: totalWorkedMinutes,
+                            workDate: sheet.work_date,
+                        })} />
+                    </p>
                     <p>
                         Description : {String(sheet.description || '').trim() || 'Non renseignée'}
                     </p>
@@ -1258,7 +1174,15 @@ export default function HoursIndex({
 
                                         <div className="mt-4 text-center">
                                             <p className="text-sm">Total heures travaillées</p>
-                                            <p className="text-lg font-semibold">{formatWorkedDuration(totalWorkedMinutes)}</p>
+                                            <div className="flex flex-wrap items-center justify-center gap-2">
+                                                <p className="text-lg font-semibold">{formatWorkedDuration(totalWorkedMinutes)}</p>
+                                                <OvertimeBadge label={dayOvertimeLabel({
+                                                    dayState,
+                                                    coverage,
+                                                    totalMinutes: totalWorkedMinutes,
+                                                    workDate: sheet.work_date,
+                                                })} />
+                                            </div>
                                         </div>
 
                                         {errorMessages.length > 0 && (
