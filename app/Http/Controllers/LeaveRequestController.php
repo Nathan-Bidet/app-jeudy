@@ -176,7 +176,14 @@ class LeaveRequestController extends Controller
             ]];
 
         $viewerId = (int) $user->id;
-        $formatLeaveRequest = static function (LeaveRequest $leaveRequest) use ($viewerId, $isAdmin): array {
+        /**
+         * $includeValidationDetail décide si l'état rang par rang accompagne la
+         * demande. Il est vrai pour la file des valideurs, faux pour « Mes
+         * demandes » : le demandeur n'a que faire de savoir lequel des deux
+         * valideurs manque, un badge global lui suffit — et rien de ce qu'il
+         * ne doit pas voir ne descend jusqu'au navigateur.
+         */
+        $formatLeaveRequest = static function (LeaveRequest $leaveRequest, bool $includeValidationDetail = true) use ($viewerId, $isAdmin): array {
             $target = $leaveRequest->target;
             $proposedBy = $leaveRequest->proposedBy;
             $leaveType = $leaveRequest->leaveType;
@@ -215,8 +222,11 @@ class LeaveRequestController extends Controller
 
                 // État des deux valideurs, ANONYMISÉ : « Validé », « Refusé »
                 // ou « En attente ». Aucun nom n'est transmis au navigateur —
-                // l'identité reste en base et dans le journal d'audit.
-                'validation_summary' => $leaveRequest->validationSummary(),
+                // l'identité reste en base et dans le journal d'audit. Absent
+                // du payload du demandeur.
+                'validation_summary' => $includeValidationDetail
+                    ? $leaveRequest->validationSummary()
+                    : null,
 
                 // Vrai tant que CE lecteur peut encore se prononcer. Il devient
                 // faux dès qu'il a tranché, sans dépendre de l'autre valideur.
@@ -235,7 +245,7 @@ class LeaveRequestController extends Controller
             ->where('requester_user_id', $user->id)
             ->orderByDesc('created_at')
             ->get()
-            ->map($formatLeaveRequest)
+            ->map(fn (LeaveRequest $leaveRequest): array => $formatLeaveRequest($leaveRequest, false))
             ->values()
             ->all();
 
@@ -258,7 +268,7 @@ class LeaveRequestController extends Controller
         $leaveRequestsToValidate = $leaveRequestsToValidateQuery
             ->orderByDesc('created_at')
             ->get()
-            ->map($formatLeaveRequest)
+            ->map(fn (LeaveRequest $leaveRequest): array => $formatLeaveRequest($leaveRequest, true))
             ->values()
             ->all();
 
@@ -1000,6 +1010,13 @@ class LeaveRequestController extends Controller
         // faux dès qu'il l'a fait. Aucun des deux n'attend l'autre.
         $canValidate = $this->twoStepValidation->canDecide($leaveRequest, $user);
 
+        // Le détail rang par rang est un outil de travail des valideurs : il
+        // leur reste visible même après qu'ils ont tranché, mais n'est pas
+        // servi au demandeur, à qui le badge global suffit.
+        $isAssignedValidator = (int) $leaveRequest->validator_1_id === (int) $user->id
+            || (int) $leaveRequest->validator_2_id === (int) $user->id;
+        $canSeeValidationDetail = $isAssignedValidator || $isAdmin;
+
         return [
             'id' => (int) $leaveRequest->id,
             'status' => (string) $leaveRequest->status,
@@ -1032,7 +1049,10 @@ class LeaveRequestController extends Controller
             // horodatages restent en base et dans le journal d'audit
             // (validationTrail), mais ne sont pas envoyés au navigateur.
             'status_label' => $leaveRequest->validationStatusLabel(),
-            'validation_summary' => $leaveRequest->validationSummary(),
+            'can_see_validation_detail' => $canSeeValidationDetail,
+            'validation_summary' => $canSeeValidationDetail
+                ? $leaveRequest->validationSummary()
+                : null,
 
             'permissions' => [
                 // `$canValidate` porte déjà l'étape : il est faux pour le

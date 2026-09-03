@@ -243,6 +243,57 @@ function leaveCoverage(leaveInfo) {
     };
 }
 
+/**
+ * Badge d'état d'une journée, destiné au salarié.
+ *
+ * Il résume le circuit sans dire lequel des deux valideurs manque : « En
+ * validation » tant que les deux accords ne sont pas réunis. Une journée
+ * saisie avant la mise en place de la validation n'a pas d'état de circuit et
+ * le dit telle quelle.
+ */
+function HourSheetStatusBadge({ sheet }) {
+    const status = String(sheet?.status || '').toLowerCase();
+
+    const { label, dot, className } = (() => {
+        if (status === 'approved') {
+            return {
+                label: 'Validée',
+                dot: '#22c55e',
+                className: 'border-[#22c55e] text-[#15803d]',
+            };
+        }
+
+        if (status === 'refused') {
+            return {
+                label: 'Refusée',
+                dot: '#ef4444',
+                className: 'border-[#ef4444] text-[#b91c1c]',
+            };
+        }
+
+        if (status === '') {
+            return {
+                label: sheet?.status_label || 'Saisie antérieure à la validation',
+                dot: '#9ca3af',
+                className: 'border-gray-300 text-gray-600',
+            };
+        }
+
+        return {
+            label: 'En validation',
+            dot: '#eab308',
+            className: 'border-[#eab308] text-[#a16207]',
+        };
+    })();
+
+    return (
+        <span className={`inline-flex items-center gap-1.5 rounded-full border bg-white px-2.5 py-0.5 text-xs font-semibold ${className}`}>
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dot }} aria-hidden="true" />
+            {label}
+        </span>
+    );
+}
+
 export default function HoursIndex({
     hourSheets = [],
     approvedLeaveDays = {},
@@ -1194,14 +1245,13 @@ export default function HoursIndex({
                                         })() : (
                                             <div>
                                                 <p className="font-semibold">Date : {formatHistoryDate(sheet.work_date)}</p>
-                                                {/* État de validation de la journée. `status` à null signale une
-                                                    saisie antérieure à la mise en place du circuit : elle n'est ni
-                                                    validée ni en attente, et le libellé le dit tel quel.
-                                                    Les valideurs ne sont jamais nommés ici. */}
-                                                <p>Validation : {sheet.status_label || '—'}</p>
-                                                {(sheet.validation_summary || []).map((entry) => (
-                                                    <p key={entry.level}>Valideur {entry.level} : {entry.label}</p>
-                                                ))}
+                                                {/* État global de la journée, pour le salarié lui-même : pas de
+                                                    détail rang par rang, il n'a pas à savoir lequel des deux
+                                                    valideurs manque. `status` à null signale une saisie antérieure
+                                                    à la mise en place du circuit — ni validée ni en attente. */}
+                                                <p className="mt-1">
+                                                    <HourSheetStatusBadge sheet={sheet} />
+                                                </p>
                                                 {sheet.status === 'refused' && sheet.refusal_reason ? (
                                                     <p className="text-red-700">Motif du refus : {sheet.refusal_reason}</p>
                                                 ) : null}

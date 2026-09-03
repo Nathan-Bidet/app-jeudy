@@ -73,9 +73,9 @@ export default function LeavesIndex({
     /**
      * État des deux valideurs, ANONYMISÉ.
      *
-     * Le serveur n'envoie ni nom ni identifiant : `validation_summary` ne
-     * contient que le rang et l'état (« Validé », « Refusé », « En attente »).
-     * Un seul appel par carte — c'est le doublon d'affichage corrigé.
+     * Réservé aux valideurs et à l'administration : le serveur ne renvoie
+     * `validation_summary` que dans la file de validation, jamais dans « Mes
+     * demandes ». Le demandeur voit un badge global à la place.
      */
     const renderValidationSummary = (request) => {
         const summary = Array.isArray(request?.validation_summary)
@@ -94,6 +94,58 @@ export default function LeavesIndex({
                     </p>
                 ))}
             </div>
+        );
+    };
+
+    /**
+     * Badge d'état d'une demande, destiné au demandeur.
+     *
+     * Il résume à lui seul le circuit : tant que les deux accords ne sont pas
+     * réunis, la demande est « En validation », sans dire lequel manque. La
+     * pastille reprend les couleurs déjà utilisées pour les cartes.
+     */
+    const LeaveStatusBadge = ({ request }) => {
+        const status = String(request?.status || '').toLowerCase();
+
+        const { label, dot, className } = (() => {
+            if (status === 'approved') {
+                return {
+                    label: 'Validée',
+                    dot: '#22c55e',
+                    className: 'border-[#22c55e] text-[#15803d] dark:text-[#4ade80]',
+                };
+            }
+
+            if (status === 'refused') {
+                return {
+                    label: 'Refusée',
+                    dot: '#ef4444',
+                    className: 'border-[#ef4444] text-[#b91c1c] dark:text-[#f87171]',
+                };
+            }
+
+            if (status === 'pending_user_confirmation') {
+                return {
+                    label: 'En attente de votre confirmation',
+                    dot: '#3b82f6',
+                    className: 'border-[#3b82f6] text-[#1d4ed8] dark:text-[#60a5fa]',
+                };
+            }
+
+            return {
+                label: 'En validation',
+                dot: '#eab308',
+                className: 'border-[#eab308] text-[#a16207] dark:text-[#facc15]',
+            };
+        })();
+
+        return (
+            <span
+                className={`inline-flex items-center gap-1.5 rounded-full border bg-[var(--app-surface)] px-2.5 py-0.5 text-xs font-semibold ${className}`}
+            >
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dot }} aria-hidden="true" />
+                {label}
+            </span>
         );
     };
 
@@ -336,10 +388,9 @@ export default function LeavesIndex({
                                     <p className="text-sm text-[var(--app-text)]">
                                         <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
                                     </p>
-                                    <p className="text-sm text-[var(--app-text)]">
-                                        <span className="font-semibold">Statut :</span> {formatLeaveStatus(request)}
-                                    </p>
-                                    {renderValidationSummary(request)}
+                                    <div className="mt-2">
+                                        <LeaveStatusBadge request={request} />
+                                    </div>
                                     {request.message ? (
                                         <p className="text-sm text-[var(--app-text)]">
                                             <span className="font-semibold">Message :</span> {request.message}

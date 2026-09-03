@@ -607,6 +607,87 @@ it('n\'expose aucun nom de valideur dans les données de la page Congés', funct
         ->and($payload)->not->toContain('validator_2_label');
 });
 
+it('ne sert pas le détail des validations au demandeur', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+
+    // « Mes demandes » : un statut global, et rien sur les rangs.
+    $this->actingAs($requester)
+        ->get(route('leaves.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            ->has('myLeaveRequests', 1)
+            ->where('myLeaveRequests.0.status', ValidationStage::PENDING)
+            ->where('myLeaveRequests.0.validation_summary', null)
+        );
+
+    // L'écran de détail ne le sert pas davantage.
+    $this->actingAs($requester)
+        ->getJson(route('leaves.show', $leave->id))
+        ->assertOk()
+        ->assertJsonPath('can_see_validation_detail', false)
+        ->assertJsonPath('validation_summary', null);
+});
+
+it('sert le détail des validations aux valideurs et à l\'administration', function (): void {
+    $v1 = twoStepUser();
+    $v2 = twoStepUser();
+    $admin = twoStepAdmin();
+    $requester = twoStepUser();
+    groupWith($v1, $v2, [$requester]);
+
+    $leave = submitLeave($requester);
+    $this->actingAs($v1)->post(route('leaves.approve', $leave->id));
+
+    // Le valideur qui a déjà tranché garde la vue d'ensemble : elle lui sert à
+    // savoir où en est le dossier.
+    foreach ([$v1, $v2, $admin] as $viewer) {
+        $this->actingAs($viewer)
+            ->getJson(route('leaves.show', $leave->id))
+            ->assertOk()
+            ->assertJsonPath('can_see_validation_detail', true)
+            ->assertJsonPath('validation_summary.0.label', 'Validé')
+            ->assertJsonPath('validation_summary.1.label', 'En attente');
+    }
+
+    $this->actingAs($v2)
+        ->get(route('leaves.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            ->has('leaveRequestsToValidate.0.validation_summary', 2)
+        );
+});
+
+it('ne sert pas le détail des validations au salarié sur ses propres heures', function (): void {
+    // Les deux valideurs ont accès au module : c'est ce qui leur permet de
+    // consulter leur file sur la page Heures.
+    $v1 = hoursUser();
+    $v2 = hoursUser();
+    $employee = hoursUser();
+    groupWith($v1, $v2, [$employee]);
+
+    $sheet = submitHourSheet($employee);
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+
+    $this->actingAs($employee)
+        ->get(route('hours.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            ->has('hourSheets', 1)
+            ->where('hourSheets.0.status', ValidationStage::PENDING)
+            ->missing('hourSheets.0.validation_summary')
+        );
+
+    // Le valideur, lui, garde le détail dans sa file.
+    $this->actingAs($v2)
+        ->get(route('hours.index'))
+        ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
+            ->has('hourSheetsToValidate.0.validation_summary', 2)
+        );
+});
+
 it('expose un unique bloc d\'état de validation par demande', function (): void {
     $v1 = twoStepUser();
     $v2 = twoStepUser();

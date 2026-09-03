@@ -225,13 +225,19 @@ export default function LeaveRequestDetailModal({ leaveRequestId, onClose }) {
                                 {!data.requester_is_target && (
                                     <Row label="Bénéficiaire" value={data.target_label} />
                                 )}
-                                {(data?.validation_summary || []).map((entry) => (
-                                    <Row
-                                        key={entry.level}
-                                        label={`Valideur ${entry.level}`}
-                                        value={entry.label}
-                                    />
-                                ))}
+                                {/* Détail rang par rang : outil de travail des
+                                    valideurs et de l'administration. Le serveur
+                                    ne le renvoie pas au demandeur, à qui le
+                                    badge d'état suffit. */}
+                                {data?.can_see_validation_detail
+                                    ? (data.validation_summary || []).map((entry) => (
+                                        <Row
+                                            key={entry.level}
+                                            label={`Valideur ${entry.level}`}
+                                            value={entry.label}
+                                        />
+                                    ))
+                                    : null}
                                 <Row label="Type de congé" value={data.leave_type_label} />
                                 <Row label="Période demandée" value={periodLabel(data)} />
                                 {data.message && <Row label="Message" value={data.message} />}

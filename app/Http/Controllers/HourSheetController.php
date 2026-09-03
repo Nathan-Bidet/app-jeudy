@@ -127,10 +127,9 @@ class HourSheetController extends Controller
                 'status_label' => $hourSheet->isLegacyEntry()
                     ? 'Saisie antérieure à la validation'
                     : $hourSheet->validationStatusLabel(),
-                // État des deux valideurs, sans jamais les nommer.
-                'validation_summary' => $hourSheet->isLegacyEntry()
-                    ? []
-                    : $hourSheet->validationSummary(),
+                // Pas de détail rang par rang ici : ce sont les journées du
+                // salarié lui-même, et un badge global lui suffit. Le détail
+                // reste servi aux valideurs, dans leur file de validation.
                 'refusal_reason' => $hourSheet->refusal_reason,
             ])
             ->values()
