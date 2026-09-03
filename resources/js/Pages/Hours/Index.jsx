@@ -1244,14 +1244,18 @@ export default function HoursIndex({
                                             );
                                         })() : (
                                             <div>
-                                                <p className="font-semibold">Date : {formatHistoryDate(sheet.work_date)}</p>
-                                                {/* État global de la journée, pour le salarié lui-même : pas de
-                                                    détail rang par rang, il n'a pas à savoir lequel des deux
-                                                    valideurs manque. `status` à null signale une saisie antérieure
-                                                    à la mise en place du circuit — ni validée ni en attente. */}
-                                                <p className="mt-1">
-                                                    <HourSheetStatusBadge sheet={sheet} />
-                                                </p>
+                                                {/* En-tête : la date à gauche, le badge d'état à droite.
+                                                    L'état est global — le salarié n'a pas à savoir lequel
+                                                    des deux valideurs manque. `status` à null signale une
+                                                    saisie antérieure à la mise en place du circuit. */}
+                                                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                                                    <p className="min-w-0 basis-full font-semibold sm:flex-1 sm:basis-0">
+                                                        Date : {formatHistoryDate(sheet.work_date)}
+                                                    </p>
+                                                    <span className="shrink-0">
+                                                        <HourSheetStatusBadge sheet={sheet} />
+                                                    </span>
+                                                </div>
                                                 {sheet.status === 'refused' && sheet.refusal_reason ? (
                                                     <p className="text-red-700">Motif du refus : {sheet.refusal_reason}</p>
                                                 ) : null}

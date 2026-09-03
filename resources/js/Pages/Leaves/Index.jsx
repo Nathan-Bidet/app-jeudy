@@ -377,19 +377,28 @@ export default function LeavesIndex({
                         ) : (
                             visibleMyLeaveRequests.map((request) => (
                                 <div key={request.id} className="rounded-xl border p-3" style={getLeaveCardStyle(request.status)}>
-                                    <p className="text-sm text-[var(--app-text)]">
-                                        <span className="font-semibold">Utilisateur :</span> {request.target_label}
-                                    </p>
-                                    {request.leave_type_label ? (
-                                        <p className="text-sm text-[var(--app-text)]">
-                                            <span className="font-semibold">Type de congé :</span> {request.leave_type_label}
-                                        </p>
-                                    ) : null}
-                                    <p className="text-sm text-[var(--app-text)]">
-                                        <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
-                                    </p>
-                                    <div className="mt-2">
-                                        <LeaveStatusBadge request={request} />
+                                    {/* En-tête : les informations à gauche, le badge d'état à droite,
+                                        aligné sur la première ligne. `basis-full` puis `sm:basis-0`
+                                        fait passer le badge sous le bloc sur mobile plutôt que de
+                                        comprimer le texte. */}
+                                    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                                        <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">
+                                            <p className="text-sm text-[var(--app-text)]">
+                                                <span className="font-semibold">Utilisateur :</span> {request.target_label}
+                                            </p>
+                                            {request.leave_type_label ? (
+                                                <p className="text-sm text-[var(--app-text)]">
+                                                    <span className="font-semibold">Type de congé :</span> {request.leave_type_label}
+                                                </p>
+                                            ) : null}
+                                            <p className="text-sm text-[var(--app-text)]">
+                                                <span className="font-semibold">Du :</span> {formatDateFr(request.start_at)} <span className="font-semibold">au :</span> {formatDateFr(request.end_at)}
+                                            </p>
+                                        </div>
+
+                                        <div className="shrink-0">
+                                            <LeaveStatusBadge request={request} />
+                                        </div>
                                     </div>
                                     {request.message ? (
                                         <p className="text-sm text-[var(--app-text)]">
