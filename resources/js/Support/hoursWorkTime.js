@@ -244,3 +244,90 @@ export function dayOvertimeLabel({ dayState, coverage, totalMinutes, dayIndex = 
 
     return formatOvertime(overtimeMinutes(total, reference));
 }
+
+/**
+ * Cases particulières d'une journée, dans l'ordre du formulaire.
+ *
+ * Les libellés courts sont ceux déjà employés dans le récapitulatif d'une
+ * journée ; le formulaire de saisie, lui, utilise des libellés longs
+ * (« Casse-croûte (Avant 5h) ») qui n'auraient pas leur place sur une carte.
+ */
+export const EXTRA_FIELDS = [
+    { key: 'has_breakfast_before_5', label: 'Casse-croûte' },
+    { key: 'has_lunch', label: 'Déjeuner' },
+    { key: 'has_dinner_after_21', label: 'Dîner' },
+    { key: 'has_long_night', label: 'Nuit' },
+];
+
+/**
+ * Libellés des seules cases cochées.
+ *
+ * @returns {string[]} vide si aucune case n'est cochée
+ */
+export function checkedExtraLabels(sheet) {
+    return EXTRA_FIELDS
+        .filter((field) => Boolean(sheet?.[field.key]))
+        .map((field) => field.label);
+}
+
+/**
+ * '08:00' → '08:00', valeur absente → '--:--'.
+ */
+function hourOrPlaceholder(value) {
+    const source = String(value ?? '').trim();
+
+    if (!source) {
+        return '--:--';
+    }
+
+    const [hours, minutes] = source.split(':');
+
+    if (hours === undefined || minutes === undefined) {
+        return '--:--';
+    }
+
+    return `${String(hours).padStart(2, '0').slice(-2)}:${String(minutes).padStart(2, '0').slice(-2)}`;
+}
+
+function hasRange(start, end) {
+    return String(start ?? '').trim() !== '' || String(end ?? '').trim() !== '';
+}
+
+/**
+ * Horaires réellement saisis pour une journée, prêts à afficher.
+ *
+ * Les demi-journées couvertes par un congé sont annoncées comme telles, et la
+ * journée continue est rendue comme la plage unique qu'elle est. Les heures
+ * proviennent toujours de l'enregistrement, jamais des horaires théoriques.
+ *
+ * `omitEmpty` sert aux écrans qui n'ont pas connaissance des congés — la file
+ * de validation : une demi-journée non renseignée y est passée sous silence
+ * plutôt qu'affichée en « --:-- ». Sur l'écran du salarié, où la couverture de
+ * congé est connue, l'emplacement vide reste visible.
+ */
+export function dayHoursLabel(sheet, { coverage = null, omitEmpty = false } = {}) {
+    const onLeave = {
+        morning: Boolean(coverage?.morning),
+        afternoon: Boolean(coverage?.afternoon),
+    };
+
+    if (Boolean(sheet?.is_continuous_day) && ! onLeave.morning && ! onLeave.afternoon) {
+        return `${hourOrPlaceholder(sheet?.morning_start)} - ${hourOrPlaceholder(sheet?.afternoon_end)} (journée continue)`;
+    }
+
+    const parts = [];
+
+    if (onLeave.morning) {
+        parts.push('Congé / Congé');
+    } else if (! omitEmpty || hasRange(sheet?.morning_start, sheet?.morning_end)) {
+        parts.push(`${hourOrPlaceholder(sheet?.morning_start)} - ${hourOrPlaceholder(sheet?.morning_end)}`);
+    }
+
+    if (onLeave.afternoon) {
+        parts.push('Congé / Congé');
+    } else if (! omitEmpty || hasRange(sheet?.afternoon_start, sheet?.afternoon_end)) {
+        parts.push(`${hourOrPlaceholder(sheet?.afternoon_start)} - ${hourOrPlaceholder(sheet?.afternoon_end)}`);
+    }
+
+    return parts.length > 0 ? parts.join(' / ') : null;
+}

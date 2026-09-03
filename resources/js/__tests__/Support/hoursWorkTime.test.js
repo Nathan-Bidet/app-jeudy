@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    checkedExtraLabels,
     computeDayTotals,
+    dayHoursLabel,
     dayOvertimeLabel,
     defaultDayState,
     formatOvertime,
@@ -174,5 +176,69 @@ describe('badge d\'une journée', () => {
             totalMinutes: 525,
             workDate: '2026-08-31',
         })).toBe('+45 min');
+    });
+});
+
+describe('horaires d\'une journée', () => {
+    const sheet = {
+        morning_start: '08:00',
+        morning_end: '12:00',
+        afternoon_start: '14:00',
+        afternoon_end: '19:00',
+        is_continuous_day: false,
+    };
+
+    it('rend les deux demi-journées', () => {
+        expect(dayHoursLabel(sheet)).toBe('08:00 - 12:00 / 14:00 - 19:00');
+    });
+
+    it('rend la journée continue comme une plage unique', () => {
+        expect(dayHoursLabel({ ...sheet, is_continuous_day: true }))
+            .toBe('08:00 - 19:00 (journée continue)');
+    });
+
+    it('annonce les demi-journées couvertes par un congé', () => {
+        expect(dayHoursLabel(sheet, { coverage: { morning: true, afternoon: false } }))
+            .toBe('Congé / Congé / 14:00 - 19:00');
+        expect(dayHoursLabel(sheet, { coverage: { morning: false, afternoon: true } }))
+            .toBe('08:00 - 12:00 / Congé / Congé');
+    });
+
+    it('ignore la journée continue quand un congé couvre une demi-journée', () => {
+        // Le module n'autorise pas la journée continue dans ce cas : la mise en
+        // forme doit suivre la même règle.
+        expect(dayHoursLabel({ ...sheet, is_continuous_day: true }, { coverage: { morning: true, afternoon: false } }))
+            .toBe('Congé / Congé / 14:00 - 19:00');
+    });
+
+    it('affiche les emplacements vides par défaut, et les tait sur demande', () => {
+        const afternoonOnly = { ...sheet, morning_start: null, morning_end: null };
+
+        // Écran du salarié : la couverture de congé est connue, l'emplacement
+        // vide reste visible.
+        expect(dayHoursLabel(afternoonOnly)).toBe('--:-- - --:-- / 14:00 - 19:00');
+
+        // File de validation : pas de plage inexistante affichée.
+        expect(dayHoursLabel(afternoonOnly, { omitEmpty: true })).toBe('14:00 - 19:00');
+    });
+
+    it('ne rend rien quand aucune plage n\'est renseignée', () => {
+        expect(dayHoursLabel({}, { omitEmpty: true })).toBeNull();
+    });
+});
+
+describe('cases particulières', () => {
+    it('ne retient que les cases cochées, dans l\'ordre du formulaire', () => {
+        expect(checkedExtraLabels({
+            has_breakfast_before_5: false,
+            has_lunch: true,
+            has_dinner_after_21: false,
+            has_long_night: true,
+        })).toEqual(['Déjeuner', 'Nuit']);
+    });
+
+    it('renvoie une liste vide quand rien n\'est coché', () => {
+        expect(checkedExtraLabels({})).toEqual([]);
+        expect(checkedExtraLabels(null)).toEqual([]);
     });
 });

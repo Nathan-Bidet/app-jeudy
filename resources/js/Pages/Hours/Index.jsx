@@ -4,7 +4,9 @@ import TitleCaps from '@/Layouts/AppShell/TitleCaps';
 import Modal from '@/Components/Modal';
 import { Head, router, usePage } from '@inertiajs/react';
 import {
+    checkedExtraLabels,
     computeDayTotals,
+    dayHoursLabel,
     dayOvertimeLabel,
     defaultDayState,
     formatWorkedDuration,
@@ -103,22 +105,6 @@ function formatHistoryDate(workDate) {
     const formatted = formatter.format(date);
 
     return formatted.charAt(0).toUpperCase() + formatted.slice(1);
-}
-
-function formatHistoryTime(timeValue) {
-    const source = String(timeValue || '').trim();
-    if (!source) {
-        return '--:--';
-    }
-
-    const [hours, minutes] = source.split(':');
-    if (hours === undefined || minutes === undefined) {
-        return '--:--';
-    }
-
-    const safeHours = String(hours).padStart(2, '0').slice(-2);
-    const safeMinutes = String(minutes).padStart(2, '0').slice(-2);
-    return `${safeHours}:${safeMinutes}`;
 }
 
 /**
@@ -925,17 +911,13 @@ export default function HoursIndex({
                                 { ...sheet, is_continuous_day: isContinuousDay },
                                 coverage,
                             );
-                            const morningStart = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_start);
-                            const morningEnd = coverage.morning ? 'Congé' : formatHistoryTime(sheet.morning_end);
-                            const afternoonStart = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_start);
-                            const afternoonEnd = coverage.afternoon ? 'Congé' : formatHistoryTime(sheet.afternoon_end);
-                            const hoursLabel = isContinuousDay
-                                ? `${formatHistoryTime(sheet.morning_start)} - ${formatHistoryTime(sheet.afternoon_end)} (journée continue)`
-                                : coverage.morning
-                                    ? `Congé / Congé / ${afternoonStart} - ${afternoonEnd}`
-                                    : coverage.afternoon
-                                        ? `${morningStart} - ${morningEnd} / Congé / Congé`
-                                        : `${morningStart} - ${morningEnd} / ${afternoonStart} - ${afternoonEnd}`;
+                            // Même helper que la file de validation : une seule
+                            // manière de mettre en forme les horaires d'une
+                            // journée, congés et journée continue compris.
+                            const hoursLabel = dayHoursLabel(
+                                { ...sheet, is_continuous_day: isContinuousDay },
+                                { coverage },
+                            );
 
                             return (
                         <>
@@ -955,12 +937,7 @@ export default function HoursIndex({
                     <p>
                         Cases cochées :
                         {' '}
-                        {[
-                            sheet.has_breakfast_before_5 ? 'Casse-croûte' : null,
-                            sheet.has_lunch ? 'Déjeuner' : null,
-                            sheet.has_dinner_after_21 ? 'Dîner' : null,
-                            sheet.has_long_night ? 'Nuit' : null,
-                        ].filter(Boolean).join(', ') || 'Aucune'}
+                        {checkedExtraLabels(sheet).join(', ') || 'Aucune'}
                     </p>
                         </>
                             );

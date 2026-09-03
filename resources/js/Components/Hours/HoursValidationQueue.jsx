@@ -1,6 +1,12 @@
 import { router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 
+import {
+    checkedExtraLabels,
+    dayHoursLabel,
+    dayOvertimeLabel,
+} from '@/Support/hoursWorkTime';
+
 const formatDateFr = (isoDate) => {
     if (!isoDate || typeof isoDate !== 'string') {
         return '-';
@@ -20,6 +26,27 @@ const formatDuration = (totalMinutes) => {
 
     return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
 };
+
+/**
+ * Badge des heures supplémentaires, identique à celui des cartes de saisie.
+ *
+ * Le libellé vient de `dayOvertimeLabel()` : la règle des 8 h / 7 h n'est pas
+ * réécrite ici, elle est lue au même endroit que côté salarié.
+ */
+function OvertimeBadge({ label }) {
+    if (!label) {
+        return null;
+    }
+
+    return (
+        <span
+            title="Heures supplémentaires par rapport à la durée normale de la journée"
+            className="inline-flex shrink-0 items-center rounded-full border border-[#ef4444] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#b91c1c]"
+        >
+            {label}
+        </span>
+    );
+}
 
 /**
  * File de validation des heures.
@@ -125,6 +152,17 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                             const summary = Array.isArray(day.validation_summary)
                                                 ? day.validation_summary
                                                 : [];
+                                            // La file ne connaît pas les congés des autres salariés ;
+                                            // elle n'en a pas besoin : store() enregistre déjà à null les
+                                            // demi-journées couvertes, et `omitEmpty` les passe sous
+                                            // silence au lieu d'afficher « --:-- ».
+                                            const hoursLabel = dayHoursLabel(day, { omitEmpty: true });
+                                            const extras = checkedExtraLabels(day);
+                                            const overtimeLabel = dayOvertimeLabel({
+                                                dayState: day,
+                                                totalMinutes: day.total_minutes,
+                                                workDate: day.work_date,
+                                            });
 
                                             return (
                                                 <div key={day.id} className="rounded-lg border border-[var(--app-border)] p-3">
@@ -135,15 +173,35 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                         <span className="text-xs text-[var(--app-muted)]">{day.status_label}</span>
                                                     </div>
 
-                                                    <p className="mt-1 text-sm text-[var(--app-text)]">
-                                                        {day.is_not_worked
-                                                            ? 'Journée non travaillée'
-                                                            : `Total : ${formatDuration(day.total_minutes)}`}
-                                                    </p>
+                                                    {day.is_not_worked ? (
+                                                        <p className="mt-1 text-sm text-[var(--app-text)]">Journée non travaillée</p>
+                                                    ) : (
+                                                        <>
+                                                            {hoursLabel ? (
+                                                                <p className="mt-1 text-sm text-[var(--app-text)]">
+                                                                    <span className="font-semibold">Horaires :</span> {hoursLabel}
+                                                                </p>
+                                                            ) : null}
+
+                                                            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[var(--app-text)]">
+                                                                <span><span className="font-semibold">Total :</span> {formatDuration(day.total_minutes)}</span>
+                                                                <OvertimeBadge label={overtimeLabel} />
+                                                            </p>
+                                                        </>
+                                                    )}
 
                                                     {day.description ? (
-                                                        <p className="mt-1 text-sm text-[var(--app-muted)]">{day.description}</p>
+                                                        <p className="mt-1 text-sm text-[var(--app-muted)]">
+                                                            <span className="font-semibold">Description :</span> {day.description}
+                                                        </p>
                                                     ) : null}
+
+                                                    {day.is_not_worked ? null : (
+                                                        <p className="mt-1 text-sm text-[var(--app-muted)]">
+                                                            <span className="font-semibold">Cases cochées :</span>{' '}
+                                                            {extras.length > 0 ? extras.join(' · ') : 'Aucune'}
+                                                        </p>
+                                                    )}
 
                                                     {/* Chaque valideur voit où en est l'autre, sans le nommer. */}
                                                     {summary.length > 0 ? (

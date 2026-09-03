@@ -191,9 +191,29 @@ class HourSheetController extends Controller
                 'id' => (int) $hourSheet->id,
                 'work_date' => $hourSheet->work_date?->toDateString(),
                 'user_label' => $this->userLabel($hourSheet->user),
+
+                // Horaires réellement enregistrés, sur lesquels porte la
+                // décision. Les demi-journées couvertes par un congé sont déjà
+                // stockées à null par store() : la file n'a donc pas besoin de
+                // reconstituer la couverture pour éviter d'afficher une plage
+                // qui n'existe pas.
+                'morning_start' => $hourSheet->morning_start,
+                'morning_end' => $hourSheet->morning_end,
+                'afternoon_start' => $hourSheet->afternoon_start,
+                'afternoon_end' => $hourSheet->afternoon_end,
+                'is_continuous_day' => (bool) $hourSheet->is_continuous_day,
                 'total_minutes' => (int) $hourSheet->total_minutes,
+
                 'description' => $hourSheet->description,
                 'is_not_worked' => (bool) $hourSheet->is_not_worked,
+
+                // Cases particulières : le valideur doit voir ce qui est
+                // déclaré avant de se prononcer.
+                'has_breakfast_before_5' => (bool) $hourSheet->has_breakfast_before_5,
+                'has_lunch' => (bool) $hourSheet->has_lunch,
+                'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
+                'has_long_night' => (bool) $hourSheet->has_long_night,
+
                 'status' => $hourSheet->status,
                 'status_label' => $hourSheet->validationStatusLabel(),
                 'validation_summary' => $hourSheet->validationSummary(),
