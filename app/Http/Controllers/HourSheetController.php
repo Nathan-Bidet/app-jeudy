@@ -12,6 +12,7 @@ use App\Services\Validation\TwoStepValidationService;
 use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
+use App\Support\Hours\WorkTimeReference;
 use App\Support\Validation\ValidationStage;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -22,12 +23,43 @@ use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use OpenSpout\Common\Entity\Row;
+use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\Exception\InvalidSheetNameException;
+use OpenSpout\Writer\XLSX\Options as XlsxOptions;
 use OpenSpout\Writer\XLSX\Writer;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class HourSheetController extends Controller
 {
+    /**
+     * Colonnes de l'export Excel, dans l'ordre.
+     *
+     * Unique définition : l'en-tête et toutes les lignes s'y réfèrent, ce qui
+     * évite qu'une ligne se décale d'une colonne par rapport aux autres.
+     */
+    private const EXPORT_COLUMNS = [
+        'Date',
+        'Jour',
+        'Début matin',
+        'Fin matin',
+        'Début soir',
+        'Fin soir',
+        'Total heures travaillées',
+        'Heures supplémentaires',
+        'Description',
+        'Casse-croûte (Avant 5h)',
+        'Déjeuner',
+        'Dîner (Après 21h)',
+        'Nuit (Déplacement long)',
+        'Valideur 1',
+        'Valideur 2',
+    ];
+
+    /** Rangs des colonnes de validation, seules à recevoir du texte libre. */
+    private const EXPORT_COLUMN_VALIDATOR_1 = 13;
+
+    private const EXPORT_COLUMN_VALIDATOR_2 = 14;
+
     public function __construct(
         private readonly ApprovedLeaveDayService $approvedLeaveDayService,
         private readonly AuditLogService $auditLogService,
@@ -655,7 +687,13 @@ class HourSheetController extends Controller
             mkdir(dirname($filePath), 0755, true);
         }
 
-        $writer = new Writer();
+        // Les seules colonnes dont la largeur est fixée sont les deux nouvelles :
+        // elles peuvent contenir « Refusé - » suivi d'un motif libre. Les autres
+        // gardent la largeur par défaut, l'export ne change donc pas d'allure.
+        $options = new XlsxOptions();
+        $options->setColumnWidth(38.0, self::EXPORT_COLUMN_VALIDATOR_1 + 1, self::EXPORT_COLUMN_VALIDATOR_2 + 1);
+
+        $writer = new Writer($options);
         $writer->openToFile($filePath);
 
         $groupedByUser = $hourSheets->groupBy(fn (HourSheet $sheet): int => (int) $sheet->user_id);
@@ -683,20 +721,7 @@ class HourSheetController extends Controller
                 $sheetRef->setName('Utilisateur '.($index + 1));
             }
 
-            $writer->addRow(Row::fromValues([
-                'Date',
-                'Jour',
-                'Début matin',
-                'Fin matin',
-                'Début soir',
-                'Fin soir',
-                'Total heures travaillées',
-                'Description',
-                'Casse-croûte (Avant 5h)',
-                'Déjeuner',
-                'Dîner (Après 21h)',
-                'Nuit (Déplacement long)',
-            ]));
+            $writer->addRow($this->exportRow(self::EXPORT_COLUMNS));
 
             $userId = (int) $exportUserId;
             $rowsByDate = [];
@@ -720,19 +745,14 @@ class HourSheetController extends Controller
 
                 if ($isFullDayLeave) {
                     $leaveDate = CarbonImmutable::parse($dateKey);
-                    $writer->addRow(Row::fromValues([
+                    $writer->addRow($this->exportRow([
                         $leaveDate->format('d/m/Y'),
                         ucfirst((string) $leaveDate->locale('fr')->translatedFormat('l')),
                         'Congé validé',
-                        '',
-                        '',
-                        '',
-                        '',
-                        '',
-                        '',
-                        '',
-                        '',
-                        '',
+                        '', '', '', '',
+                        '', // heures supplémentaires
+                        '', '', '', '', '',
+                        '', '', // valideurs : aucune journée saisie ce jour-là
                     ]));
                     continue;
                 }
@@ -741,19 +761,19 @@ class HourSheetController extends Controller
                     $sheet = $rowsByDate[$dateKey];
                     $date = $sheet->work_date;
                     if ((bool) $sheet->is_not_worked) {
-                        $writer->addRow(Row::fromValues([
+                        $writer->addRow($this->exportRow([
                             $date?->format('d/m/Y'),
                             $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
                             'Non travaillé',
-                            '',
-                            '',
-                            '',
-                            '',
+                            '', '', '',
+                            '', // total : déjà vide avant cette évolution
+                            '', // heures supplémentaires : aucune durée, donc aucun écart
                             $sheet->description ?? '',
-                            '',
-                            '',
-                            '',
-                            '',
+                            '', '', '', '',
+                            // La journée reste dans le circuit de validation :
+                            // ses décisions sont exportées comme les autres.
+                            $this->validatorDecisionForExport($sheet, 1),
+                            $this->validatorDecisionForExport($sheet, 2),
                         ]));
                         continue;
                     }
@@ -780,7 +800,7 @@ class HourSheetController extends Controller
                         ));
                     }
 
-                    $writer->addRow(Row::fromValues([
+                    $writer->addRow($this->exportRow([
                         $date?->format('d/m/Y'),
                         $date?->locale('fr')->translatedFormat('l') ? ucfirst((string) $date->locale('fr')->translatedFormat('l')) : '',
                         $morningOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->morning_start),
@@ -788,11 +808,19 @@ class HourSheetController extends Controller
                         $afternoonOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->afternoon_start),
                         $afternoonOnLeave ? 'Congé' : $this->formatTimeForExport($sheet->afternoon_end),
                         $this->formatMinutesForExport($totalMinutes),
+                        // Même référence et même écart que le badge de la page
+                        // Heures et que la file du valideur, au format de
+                        // l'export : 01h00 plutôt que +1h00.
+                        $this->formatMinutesForExport(
+                            WorkTimeReference::overtimeForDay($totalMinutes, $date)
+                        ),
                         $sheet->description ?? '',
                         $sheet->has_breakfast_before_5 ? 'Oui' : 'Non',
                         $sheet->has_lunch ? 'Oui' : 'Non',
                         $sheet->has_dinner_after_21 ? 'Oui' : 'Non',
                         $sheet->has_long_night ? 'Oui' : 'Non',
+                        $this->validatorDecisionForExport($sheet, 1),
+                        $this->validatorDecisionForExport($sheet, 2),
                     ]));
                     continue;
                 }
@@ -802,7 +830,7 @@ class HourSheetController extends Controller
                 }
 
                 $leaveDate = CarbonImmutable::parse($dateKey);
-                $writer->addRow(Row::fromValues([
+                $writer->addRow($this->exportRow([
                     $leaveDate->format('d/m/Y'),
                     ucfirst((string) $leaveDate->locale('fr')->translatedFormat('l')),
                     $morningOnLeave ? 'Congé' : '',
@@ -810,31 +838,16 @@ class HourSheetController extends Controller
                     $afternoonOnLeave ? 'Congé' : '',
                     $afternoonOnLeave ? 'Congé' : '',
                     '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
+                    '', // heures supplémentaires
+                    '', '', '', '', '',
+                    '', '', // valideurs : aucune journée saisie ce jour-là
                 ]));
             }
         }
 
         if ($exportUserIds === []) {
             $writer->getCurrentSheet()->setName('Heures');
-            $writer->addRow(Row::fromValues([
-                'Date',
-                'Jour',
-                'Début matin',
-                'Fin matin',
-                'Début soir',
-                'Fin soir',
-                'Total heures travaillées',
-                'Description',
-                'Casse-croûte (Avant 5h)',
-                'Déjeuner',
-                'Dîner (Après 21h)',
-                'Nuit (Déplacement long)',
-            ]));
+            $writer->addRow($this->exportRow(self::EXPORT_COLUMNS));
         }
 
         $writer->close();
@@ -918,6 +931,65 @@ class HourSheetController extends Controller
         [$hours, $minutes] = explode(':', $value);
 
         return sprintf('%02d:%02d', (int) $hours, (int) $minutes);
+    }
+
+    /**
+     * Une ligne de l'export.
+     *
+     * Le retour à la ligne n'est activé que sur les deux colonnes de
+     * validation : elles seules peuvent porter un motif de refus long. Le reste
+     * de la feuille garde exactement l'aspect qu'il avait.
+     */
+    private function exportRow(array $values): Row
+    {
+        $wrapText = (new Style())->withShouldWrapText(true);
+
+        return Row::fromValuesWithStyles($values, [
+            self::EXPORT_COLUMN_VALIDATOR_1 => $wrapText,
+            self::EXPORT_COLUMN_VALIDATOR_2 => $wrapText,
+        ]);
+    }
+
+    /**
+     * Décision d'un valideur, telle qu'elle part dans l'export.
+     *
+     * L'ÉTAT, jamais l'identité : les écrans n'affichent aucun nom de valideur,
+     * l'export n'en affiche pas davantage. Les noms restent en base et dans
+     * validationTrail(), pour l'audit.
+     *
+     * Les états réels de chaque rang sont exportés tels quels, sans recomposer
+     * un statut global : une journée dont un seul valideur s'est prononcé
+     * montre « Validé » d'un côté et « En attente » de l'autre.
+     *
+     * « Non applicable » couvre deux cas distincts mais de même nature — il n'y
+     * a pas de décision à attendre : une journée antérieure à la date d'effet du
+     * système de validation, et le rang 2 d'un groupe qui n'a pas de second
+     * valideur. Une cellule vide se confondrait avec une donnée manquante.
+     */
+    private function validatorDecisionForExport(HourSheet $hourSheet, int $level): string
+    {
+        if ($hourSheet->isLegacyEntry()) {
+            return 'Non applicable';
+        }
+
+        if ($level === 2 && ! $hourSheet->hasSecondValidationLevel()) {
+            return 'Non applicable';
+        }
+
+        $decision = $hourSheet->decisionForLevel($level);
+        // Même vocabulaire que les écrans : « Validé » / « Refusé » /
+        // « En attente » viennent tous de ValidationStage.
+        $label = ValidationStage::decisionLabel($decision);
+
+        if ($decision !== ValidationStage::DECISION_REFUSED) {
+            return $label;
+        }
+
+        // `refusal_reason` est porté par la journée, pas par le rang : les deux
+        // valideurs qui refusent partagent donc le dernier motif enregistré.
+        $reason = trim((string) $hourSheet->refusal_reason);
+
+        return $reason !== '' ? $label.' - '.$reason : $label;
     }
 
     private function formatMinutesForExport(int $totalMinutes): string

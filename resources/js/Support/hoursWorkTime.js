@@ -5,7 +5,14 @@
  * pour qu'il n'existe qu'UNE seule manière de déterminer le total travaillé, la
  * durée normale d'une journée et l'écart entre les deux — la page et les tests
  * lisent désormais la même source.
+ *
+ * Les horaires par défaut, dont découle la durée normale d'une journée, vivent
+ * dans hoursReference.json : l'export Excel en a besoin côté serveur
+ * (app/Support/Hours/WorkTimeReference.php) et lit exactement le même fichier.
+ * Ni le front ni le back ne détient sa propre copie de ces valeurs.
  */
+
+import HOURS_REFERENCE from './hoursReference.json';
 
 export function normalizeTimeForSelect(value) {
     const source = String(value || '').trim();
@@ -97,10 +104,12 @@ export function formatWorkedDuration(totalMinutes) {
 
 export function defaultDayState({ isFriday = false } = {}) {
     return {
-        morning_start: '08:00',
-        morning_end: '12:00',
-        afternoon_start: '14:00',
-        afternoon_end: isFriday ? '17:00' : '18:00',
+        morning_start: HOURS_REFERENCE.morning_start,
+        morning_end: HOURS_REFERENCE.morning_end,
+        afternoon_start: HOURS_REFERENCE.afternoon_start,
+        afternoon_end: isFriday
+            ? HOURS_REFERENCE.afternoon_end_friday
+            : HOURS_REFERENCE.afternoon_end,
         description: '',
         is_not_worked: false,
         is_continuous_day: false,

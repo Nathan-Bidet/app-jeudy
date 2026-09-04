@@ -1,0 +1,8 @@
+{
+    "_comment": "Horaires par défaut d'une journée. SOURCE UNIQUE, lue par le front (resources/js/Support/hoursWorkTime.js) ET par le back (app/Support/Hours/WorkTimeReference.php). C'est d'eux que découle la durée normale d'une journée — 8 h du lundi au jeudi, 7 h le vendredi — et donc le calcul des heures supplémentaires, dans l'interface comme dans l'export Excel. Modifier ces horaires suffit à changer la référence partout ; aucune valeur n'est tenue à jour en double.",
+    "morning_start": "08:00",
+    "morning_end": "12:00",
+    "afternoon_start": "14:00",
+    "afternoon_end": "18:00",
+    "afternoon_end_friday": "17:00"
+}
