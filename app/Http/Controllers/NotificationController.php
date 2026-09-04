@@ -73,6 +73,9 @@ class NotificationController extends Controller
         $maintenanceTaskId = $notification?->data['maintenance_task_id'] ?? null;
         $destination = match ($type) {
             'hours_missing_entry_reminder', 'hours_attached_to_validation' => route('hours.index'),
+            'hour_sheet_refused', 'hour_sheet_approved' => isset($notification?->data['hour_sheet_id'])
+                ? route('hours.index', ['highlight' => (int) $notification->data['hour_sheet_id']])
+                : route('hours.index'),
             'pending_validations_reminder' => ($notification?->data['target'] ?? null) === 'hours'
                 ? route('hours.index')
                 : route('leaves.index'),
@@ -241,13 +244,7 @@ class NotificationController extends Controller
             'leave_request_id' => $leaveRequestId,
             'announcement_id' => $announcementId,
             'maintenance_task_id' => $maintenanceTaskId,
-            'url' => $this->notificationUrl(
-                $type,
-                $leaveRequestId,
-                $announcementId,
-                $maintenanceTaskId,
-                isset($notification->data['target']) ? (string) $notification->data['target'] : null,
-            ),
+            'url' => $this->notificationUrl($type, (array) $notification->data),
             'created_at' => $notification->created_at?->toIso8601String(),
             'read_at' => $notification->read_at?->toIso8601String(),
         ];
@@ -265,11 +262,22 @@ class NotificationController extends Controller
         return $name !== '' ? $name : (string) ($user->email ?? '');
     }
 
-    private function notificationUrl(string $type, mixed $leaveRequestId, mixed $announcementId = null, mixed $maintenanceTaskId = null, ?string $target = null): ?string
+    /**
+     * Destination d'une notification, déduite de son type et de sa charge utile.
+     *
+     * Prend le tableau `data` complet plutôt qu'une liste d'identifiants : chaque
+     * type y puise ce dont il a besoin, sans qu'ajouter un type oblige à
+     * rallonger la signature ni à corriger tous les appels.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function notificationUrl(string $type, array $data): ?string
     {
         $maintenanceTypes = ['maintenance_request_submitted', 'maintenance_task_assigned'];
 
         if (in_array($type, $maintenanceTypes, true) && Route::has('maintenance.index')) {
+            $maintenanceTaskId = $data['maintenance_task_id'] ?? null;
+
             return $maintenanceTaskId
                 ? route('maintenance.index', ['focus_task_id' => (int) $maintenanceTaskId])
                 : route('maintenance.index');
@@ -287,6 +295,8 @@ class NotificationController extends Controller
         ];
 
         if (in_array($type, $leaveTypes, true) && Route::has('leaves.index')) {
+            $leaveRequestId = $data['leave_request_id'] ?? null;
+
             return $leaveRequestId
                 ? route('leaves.index', ['highlight' => $leaveRequestId])
                 : route('leaves.index');
@@ -302,13 +312,27 @@ class NotificationController extends Controller
             return route('hours.index');
         }
 
+        // Décision sur une journée d'heures : le lien ouvre la journée
+        // concernée, et non le haut de la page — l'historique peut en compter
+        // des centaines. `hour_sheet_approved` n'est plus émis, mais les
+        // notifications déjà en base doivent rester cliquables.
+        if (in_array($type, ['hour_sheet_refused', 'hour_sheet_approved'], true) && Route::has('hours.index')) {
+            $hourSheetId = $data['hour_sheet_id'] ?? null;
+
+            return $hourSheetId
+                ? route('hours.index', ['highlight' => (int) $hourSheetId])
+                : route('hours.index');
+        }
+
         if ($type === 'pending_validations_reminder') {
-            $route = $target === 'hours' ? 'hours.index' : 'leaves.index';
+            $route = ($data['target'] ?? null) === 'hours' ? 'hours.index' : 'leaves.index';
 
             return Route::has($route) ? route($route) : null;
         }
 
         if ($type === 'announcement' && Route::has('annonces.index')) {
+            $announcementId = $data['announcement_id'] ?? null;
+
             return $announcementId
                 ? route('annonces.index', ['highlight' => $announcementId])
                 : route('annonces.index');

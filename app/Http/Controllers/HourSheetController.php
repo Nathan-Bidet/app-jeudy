@@ -115,6 +115,10 @@ class HourSheetController extends Controller
                 'morning_end' => $hourSheet->morning_end,
                 'afternoon_start' => $hourSheet->afternoon_start,
                 'afternoon_end' => $hourSheet->afternoon_end,
+                // Sans ce drapeau, une journée continue s'afficherait comme
+                // deux demi-journées vides chez le salarié, alors que la file
+                // de validation la rend correctement.
+                'is_continuous_day' => (bool) $hourSheet->is_continuous_day,
                 'total_minutes' => (int) $hourSheet->total_minutes,
                 'description' => $hourSheet->description,
                 'is_not_worked' => (bool) $hourSheet->is_not_worked,
@@ -148,8 +152,15 @@ class HourSheetController extends Controller
             now(config('app.timezone', 'Europe/Paris'))->toDateString()
         );
 
+        // `highlight` vient du lien d'une notification : la page ouvre le
+        // détail de cette journée. L'identifiant n'est pas vérifié ici — la
+        // liste servie ne contient que les journées du lecteur, une valeur
+        // étrangère n'y trouve donc simplement aucune correspondance.
+        $highlightId = $request->query('highlight') ? (int) $request->query('highlight') : null;
+
         return Inertia::render('Hours/Index', [
             'hourSheets' => $hourSheets,
+            'highlightId' => $highlightId,
             'canCreate' => $canCreate,
             'canExport' => $canExport,
             'approvedLeaveDays' => $approvedLeaveDays,
