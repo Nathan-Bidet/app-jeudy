@@ -23,6 +23,7 @@ use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use OpenSpout\Common\Entity\Row;
+use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\Exception\InvalidSheetNameException;
 use OpenSpout\Writer\XLSX\Options as XlsxOptions;
@@ -59,6 +60,15 @@ class HourSheetController extends Controller
     private const EXPORT_COLUMN_VALIDATOR_1 = 13;
 
     private const EXPORT_COLUMN_VALIDATOR_2 = 14;
+
+    /**
+     * Couleurs d'un refus dans l'export, reprises du badge « Refusée » de
+     * l'application (resources/js/Components/Hours/HourSheetBadges.jsx) et de
+     * l'encadré du détail d'une journée refusée.
+     */
+    private const EXPORT_REFUSAL_BACKGROUND_COLOR = 'FEF2F2';
+
+    private const EXPORT_REFUSAL_FONT_COLOR = 'B91C1C';
 
     public function __construct(
         private readonly ApprovedLeaveDayService $approvedLeaveDayService,
@@ -936,18 +946,81 @@ class HourSheetController extends Controller
     /**
      * Une ligne de l'export.
      *
-     * Le retour à la ligne n'est activé que sur les deux colonnes de
-     * validation : elles seules peuvent porter un motif de refus long. Le reste
-     * de la feuille garde exactement l'aspect qu'il avait.
+     * Seules les deux colonnes de validation reçoivent un style : elles seules
+     * peuvent porter un motif de refus long (retour à la ligne), et elles
+     * seules signalent un refus (fond rouge). Le reste de la feuille garde
+     * exactement l'aspect qu'il avait.
      */
     private function exportRow(array $values): Row
     {
-        $wrapText = (new Style())->withShouldWrapText(true);
-
         return Row::fromValuesWithStyles($values, [
-            self::EXPORT_COLUMN_VALIDATOR_1 => $wrapText,
-            self::EXPORT_COLUMN_VALIDATOR_2 => $wrapText,
+            self::EXPORT_COLUMN_VALIDATOR_1 => $this->validationCellStyle(
+                $values[self::EXPORT_COLUMN_VALIDATOR_1] ?? null
+            ),
+            self::EXPORT_COLUMN_VALIDATOR_2 => $this->validationCellStyle(
+                $values[self::EXPORT_COLUMN_VALIDATOR_2] ?? null
+            ),
         ]);
+    }
+
+    /**
+     * Style d'une cellule de validation : rouge lorsqu'elle porte un refus.
+     *
+     * Les couleurs sont celles du badge « Refusée » de l'application — fond
+     * #FEF2F2, texte #B91C1C — pour que le tableur et l'écran disent la même
+     * chose de la même façon.
+     *
+     * La police reprend explicitement celle du classeur (Calibri 12) : poser
+     * une couleur de texte suffit à faire appliquer TOUTE la police par
+     * OpenSpout, dont les valeurs par défaut de la classe Style (Arial 11)
+     * différeraient du reste de la feuille.
+     *
+     * Aucune bordure n'est posée ni retirée : `Style` en est dépourvu par
+     * défaut, comme le reste de l'export.
+     */
+    private function validationCellStyle(mixed $value): Style
+    {
+        $base = new Style(
+            fontSize: XlsxOptions::DEFAULT_FONT_SIZE,
+            fontName: XlsxOptions::DEFAULT_FONT_NAME,
+            shouldWrapText: true,
+        );
+
+        if (! $this->isRefusalLabel($value)) {
+            return $base;
+        }
+
+        return $base
+            ->withFontColor(self::EXPORT_REFUSAL_FONT_COLOR)
+            // ARGB explicite : OpenSpout convertit la couleur de police mais
+            // recopie celle du fond telle quelle, et l'attribut `rgb` d'OOXML
+            // attend huit caractères. Excel tolère la forme courte ; autant ne
+            // pas dépendre de cette tolérance.
+            ->withBackgroundColor(Color::toARGB(self::EXPORT_REFUSAL_BACKGROUND_COLOR));
+    }
+
+    /**
+     * Une cellule de validation porte-t-elle un refus ?
+     *
+     * La cellule vaut « Refusé » seul ou « Refusé - motif » : c'est donc le
+     * DÉBUT de la valeur qui est comparé, jamais l'égalité stricte, sans quoi
+     * tout refus motivé passerait au travers.
+     *
+     * Le mot comparé n'est pas écrit ici : il vient de ValidationStage, qui
+     * produit aussi le texte de la cellule. Renommer le libellé là-bas met donc
+     * automatiquement la détection à jour — une chaîne recopiée aurait fini par
+     * ne plus correspondre.
+     */
+    private function isRefusalLabel(mixed $value): bool
+    {
+        if (! is_string($value)) {
+            return false;
+        }
+
+        return str_starts_with(
+            trim($value),
+            ValidationStage::decisionLabel(ValidationStage::DECISION_REFUSED),
+        );
     }
 
     /**

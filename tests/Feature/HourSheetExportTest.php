@@ -64,6 +64,129 @@ function exportRowsFor(string $start = '2026-10-01', string $end = '2026-10-31')
     return exportedRows((string) file_get_contents($response->baseResponse->getFile()->getPathname()));
 }
 
+/**
+ * Style réellement appliqué à chaque cellule du fichier, ligne par ligne.
+ *
+ * OpenSpout ne relit pas les styles : on ouvre donc le XLSX comme l'archive ZIP
+ * qu'il est, et on résout, pour chaque cellule, l'index de style qu'elle porte
+ * vers la couleur de fond et la couleur de police déclarées dans styles.xml.
+ * C'est exactement ce que fera Excel à l'ouverture.
+ *
+ * La lecture passe par un vrai analyseur XML plutôt que par des expressions
+ * régulières : la résolution index de style → remplissage → couleur repose sur
+ * l'ORDRE des déclarations, qu'une regex approximative décale sans le dire.
+ *
+ * @return array<int, array<int, array{background:?string, font:?string, wrap:bool}>>
+ */
+function exportedCellStyles(string $path): array
+{
+    $zip = new ZipArchive();
+    $zip->open($path);
+    $stylesXml = (string) $zip->getFromName('xl/styles.xml');
+    $sheetXml = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+    $zip->close();
+
+    $ooxml = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+
+    $styleSheet = new DOMDocument();
+    $styleSheet->loadXML($stylesXml);
+
+    // Palette des remplissages et des polices, dans l'ordre de déclaration :
+    // c'est ce rang que les cellules référencent.
+    $colorOf = function (DOMElement $node, string $tag) use ($ooxml): ?string {
+        $color = $node->getElementsByTagNameNS($ooxml, $tag)->item(0);
+
+        return $color instanceof DOMElement && $color->hasAttribute('rgb')
+            ? $color->getAttribute('rgb')
+            : null;
+    };
+
+    $fills = [];
+    foreach ($styleSheet->getElementsByTagNameNS($ooxml, 'fills') as $block) {
+        foreach ($block->getElementsByTagNameNS($ooxml, 'fill') as $fill) {
+            $fills[] = $colorOf($fill, 'fgColor');
+        }
+    }
+
+    $fonts = [];
+    foreach ($styleSheet->getElementsByTagNameNS($ooxml, 'fonts') as $block) {
+        foreach ($block->getElementsByTagNameNS($ooxml, 'font') as $font) {
+            $fonts[] = $colorOf($font, 'color');
+        }
+    }
+
+    // cellXfs : chaque index de style pointe vers un remplissage et une police.
+    $formats = [];
+    foreach ($styleSheet->getElementsByTagNameNS($ooxml, 'cellXfs') as $block) {
+        foreach ($block->getElementsByTagNameNS($ooxml, 'xf') as $xf) {
+            $alignment = $xf->getElementsByTagNameNS($ooxml, 'alignment')->item(0);
+
+            $formats[] = [
+                'fill' => (int) $xf->getAttribute('fillId'),
+                'font' => (int) $xf->getAttribute('fontId'),
+                'wrap' => $alignment instanceof DOMElement && $alignment->getAttribute('wrapText') === '1',
+            ];
+        }
+    }
+
+    $worksheet = new DOMDocument();
+    $worksheet->loadXML($sheetXml);
+
+    $styles = [];
+
+    foreach ($worksheet->getElementsByTagNameNS($ooxml, 'row') as $row) {
+        $rowIndex = (int) $row->getAttribute('r') - 1;
+
+        foreach ($row->getElementsByTagNameNS($ooxml, 'c') as $cell) {
+            // La référence de la cellule (« N2 ») donne sa colonne : une cellule
+            // omise ne doit pas décaler celles qui suivent.
+            preg_match('/^([A-Z]+)/', $cell->getAttribute('r'), $reference);
+            $column = 0;
+            foreach (str_split($reference[1] ?? 'A') as $letter) {
+                $column = ($column * 26) + (ord($letter) - 64);
+            }
+            $column--;
+
+            $format = $formats[(int) $cell->getAttribute('s')] ?? ['fill' => 0, 'font' => 0, 'wrap' => false];
+
+            $styles[$rowIndex][$column] = [
+                'background' => $fills[$format['fill']] ?? null,
+                'font' => $fonts[$format['font']] ?? null,
+                'wrap' => $format['wrap'],
+            ];
+        }
+    }
+
+    return $styles;
+}
+
+/** Styles de l'export, indexés par ligne puis par colonne. */
+function exportStylesFor(string $start = '2026-10-01', string $end = '2026-10-31'): array
+{
+    $exporter = hoursUser(['heures.view', 'heures.create', 'heures.export']);
+
+    $response = test()->actingAs($exporter)
+        ->get(route('hours.export', ['start_date' => $start, 'end_date' => $end]));
+
+    $response->assertOk();
+
+    return exportedCellStyles($response->baseResponse->getFile()->getPathname());
+}
+
+/** Rang de la ligne portant une date donnée, en-tête compris. */
+function exportedRowIndexForDate(array $rows, string $isoDate): int
+{
+    $expected = date('d/m/Y', strtotime($isoDate));
+
+    foreach ($rows as $index => $row) {
+        if (($row[0] ?? null) === $expected) {
+            return $index;
+        }
+    }
+
+    return -1;
+}
+
 /** Ligne de l'export correspondant à une date, hors en-tête. */
 function exportedRowForDate(array $rows, string $isoDate): array
 {
@@ -421,4 +544,144 @@ it('résiste à une date absente ou illisible', function (): void {
     expect(WorkTimeReference::referenceMinutesForDate(null))->toBeNull()
         ->and(WorkTimeReference::referenceMinutesForDate(''))->toBeNull()
         ->and(WorkTimeReference::overtimeForDay(600, null))->toBe(0);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Mise en évidence des refus
+|--------------------------------------------------------------------------
+|
+| Les assertions portent sur le style RÉELLEMENT écrit dans le fichier, résolu
+| comme Excel le fera : index de style de la cellule → remplissage et police
+| déclarés dans styles.xml. Les couleurs sont en ARGB, préfixées de FF.
+*/
+
+const REFUSAL_BACKGROUND = 'FFFEF2F2';
+const REFUSAL_FONT = 'FFB91C1C';
+
+it('colore en rouge un refus sans motif', function (): void {
+    [$v1, , , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+
+    $rows = exportRowsFor();
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate($rows, '2026-10-05');
+
+    expect($rows[$line][COL_VALIDATOR_1])->toBe('Refusé')
+        ->and($styles[$line][COL_VALIDATOR_1]['background'])->toBe(REFUSAL_BACKGROUND)
+        ->and($styles[$line][COL_VALIDATOR_1]['font'])->toBe(REFUSAL_FONT);
+});
+
+it('colore en rouge un refus motivé', function (): void {
+    [$v1, , , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), [
+        'refusal_reason' => 'Horaires incorrects',
+    ]);
+
+    $rows = exportRowsFor();
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate($rows, '2026-10-05');
+
+    // Le motif suit le mot « Refusé » : c'est précisément le cas qu'une
+    // égalité stricte laisserait passer.
+    expect($rows[$line][COL_VALIDATOR_1])->toBe('Refusé - Horaires incorrects')
+        ->and($styles[$line][COL_VALIDATOR_1]['background'])->toBe(REFUSAL_BACKGROUND)
+        ->and($styles[$line][COL_VALIDATOR_1]['font'])->toBe(REFUSAL_FONT);
+});
+
+it('ne colore pas « Validé » ni « En attente »', function (): void {
+    [$v1, , , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+
+    $rows = exportRowsFor();
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate($rows, '2026-10-05');
+
+    expect($rows[$line][COL_VALIDATOR_1])->toBe('Validé')
+        ->and($rows[$line][COL_VALIDATOR_2])->toBe('En attente')
+        ->and($styles[$line][COL_VALIDATOR_1]['background'])->not->toBe(REFUSAL_BACKGROUND)
+        ->and($styles[$line][COL_VALIDATOR_2]['background'])->not->toBe(REFUSAL_BACKGROUND);
+});
+
+it('ne colore pas « Non applicable »', function (): void {
+    $employee = hoursUser();
+
+    // Aucun groupe : le rang 2 n'est pas attendu.
+    $this->actingAs($employee)->post(route('hours.store'), [
+        'work_date' => '2026-10-05',
+        'morning_start' => '08:00',
+        'morning_end' => '12:00',
+        'afternoon_start' => '14:00',
+        'afternoon_end' => '18:00',
+        'description' => 'Travaux réalisés',
+    ])->assertSessionHasNoErrors();
+
+    $rows = exportRowsFor();
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate($rows, '2026-10-05');
+
+    expect($rows[$line][COL_VALIDATOR_2])->toBe('Non applicable')
+        ->and($styles[$line][COL_VALIDATOR_2]['background'])->not->toBe(REFUSAL_BACKGROUND);
+});
+
+it('ne colore que la colonne du valideur qui a refusé', function (): void {
+    [$v1, $v2, , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), [
+        'refusal_reason' => 'Merci de corriger la feuille',
+    ]);
+
+    $rows = exportRowsFor();
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate($rows, '2026-10-05');
+
+    expect($styles[$line][COL_VALIDATOR_1]['background'])->not->toBe(REFUSAL_BACKGROUND)
+        ->and($styles[$line][COL_VALIDATOR_2]['background'])->toBe(REFUSAL_BACKGROUND);
+});
+
+it('ne déborde jamais sur les autres colonnes', function (): void {
+    [$v1, , , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), [
+        'refusal_reason' => 'Horaires incorrects',
+    ]);
+
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate(exportRowsFor(), '2026-10-05');
+
+    // Une seule colonne rouge sur toute la ligne : la mise en forme ne fuit ni
+    // sur la description, ni sur les horaires.
+    for ($column = 0; $column < COL_VALIDATOR_1; $column++) {
+        expect($styles[$line][$column]['background'] ?? null)->not->toBe(REFUSAL_BACKGROUND);
+    }
+});
+
+it('ne colore pas l\'en-tête', function (): void {
+    [$v1, , , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+
+    $styles = exportStylesFor();
+
+    expect($styles[0][COL_VALIDATOR_1]['background'])->not->toBe(REFUSAL_BACKGROUND)
+        ->and($styles[0][COL_VALIDATOR_2]['background'])->not->toBe(REFUSAL_BACKGROUND);
+});
+
+it('conserve le retour à la ligne sur les cellules colorées', function (): void {
+    [$v1, , , $sheet] = exportableDay('2026-10-05');
+
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), [
+        'refusal_reason' => 'Un motif suffisamment long pour que le retour à la ligne compte réellement dans la lisibilité de la cellule.',
+    ]);
+
+    $styles = exportStylesFor();
+    $line = exportedRowIndexForDate(exportRowsFor(), '2026-10-05');
+
+    // Colorer ne doit pas avoir remplacé le style de retour à la ligne.
+    expect($styles[$line][COL_VALIDATOR_1]['wrap'])->toBeTrue()
+        ->and($styles[$line][COL_VALIDATOR_1]['background'])->toBe(REFUSAL_BACKGROUND);
 });
