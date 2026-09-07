@@ -946,13 +946,7 @@ class HourSheetController extends Controller
 
     private function formatTimeForExport(?string $value): string
     {
-        if (! $value || ! str_contains($value, ':')) {
-            return '';
-        }
-
-        [$hours, $minutes] = explode(':', $value);
-
-        return sprintf('%02d:%02d', (int) $hours, (int) $minutes);
+        return WorkTimeReference::formatTimeOfDay($value) ?? '';
     }
 
     /**

@@ -91,22 +91,26 @@ class HourSheetSubmittedMail extends Mailable implements ShouldQueue
      */
     private static function scheduleLabel(HourSheet $hourSheet): ?string
     {
+        // Les heures passent toutes par WorkTimeReference : la base les renvoie
+        // avec les secondes, que l'application n'affiche jamais.
+        $at = fn (?string $value): ?string => WorkTimeReference::formatTimeOfDay($value);
+
         if ((bool) $hourSheet->is_continuous_day) {
             return sprintf(
                 '%s - %s (journée continue)',
-                $hourSheet->morning_start ?: '--:--',
-                $hourSheet->afternoon_end ?: '--:--',
+                $at($hourSheet->morning_start) ?? '--:--',
+                $at($hourSheet->afternoon_end) ?? '--:--',
             );
         }
 
         $ranges = [];
 
         if ($hourSheet->morning_start || $hourSheet->morning_end) {
-            $ranges[] = sprintf('%s - %s', $hourSheet->morning_start ?: '--:--', $hourSheet->morning_end ?: '--:--');
+            $ranges[] = sprintf('%s - %s', $at($hourSheet->morning_start) ?? '--:--', $at($hourSheet->morning_end) ?? '--:--');
         }
 
         if ($hourSheet->afternoon_start || $hourSheet->afternoon_end) {
-            $ranges[] = sprintf('%s - %s', $hourSheet->afternoon_start ?: '--:--', $hourSheet->afternoon_end ?: '--:--');
+            $ranges[] = sprintf('%s - %s', $at($hourSheet->afternoon_start) ?? '--:--', $at($hourSheet->afternoon_end) ?? '--:--');
         }
 
         return $ranges === [] ? null : implode(' / ', $ranges);

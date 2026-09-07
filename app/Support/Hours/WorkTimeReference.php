@@ -115,6 +115,23 @@ class WorkTimeReference
     }
 
     /**
+     * Heure de la journée ramenée à « HH:MM ».
+     *
+     * La base renvoie « 07:45:00 » là où l'application n'affiche jamais les
+     * secondes : sans ce passage, le même horaire s'écrit de deux façons selon
+     * qu'on le lit à l'écran ou dans un email. Renvoie null quand la valeur
+     * n'est pas exploitable, à charge de l'appelant de choisir son repli.
+     */
+    public static function formatTimeOfDay(?string $value): ?string
+    {
+        if (! is_string($value) || ! preg_match('/^(\d{1,2}):(\d{2})/', trim($value), $matches)) {
+            return null;
+        }
+
+        return sprintf('%02d:%02d', (int) $matches[1], (int) $matches[2]);
+    }
+
+    /**
      * Horaires par défaut, lus une fois par requête.
      *
      * @return array<string, string>

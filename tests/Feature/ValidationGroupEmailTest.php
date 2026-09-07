@@ -564,3 +564,48 @@ it('rend l\'email d\'une journée non travaillée', function (): void {
         // Ni horaires ni total sur une journée sans travail.
         ->and($html)->not->toContain('Total travaillé');
 });
+
+it('n\'affiche jamais les secondes dans les horaires', function (): void {
+    Mail::fake();
+
+    $v1 = hoursUser();
+    $v2 = hoursUser();
+    $employee = hoursUser();
+    groupWithEmails($v1, $v2, [$employee], ['rh@test.fr']);
+
+    $sheet = submitHourSheet($employee, '2026-10-05');
+
+    // MySQL restitue « 07:45:00 » là où SQLite rend « 07:45 » : sans mise en
+    // forme, le même horaire s'écrivait différemment dans l'email et à l'écran,
+    // et seule la production le montrait.
+    $sheet->forceFill([
+        'morning_start' => '07:45:00',
+        'morning_end' => '12:00:00',
+        'afternoon_start' => '14:00:00',
+        'afternoon_end' => '17:30:00',
+    ])->save();
+
+    $details = App\Mail\HourSheetSubmittedMail::detailsFor($sheet->fresh(), 'Nathan Bidet');
+
+    expect($details['schedule'])->toBe('07:45 - 12:00 / 14:00 - 17:30');
+});
+
+it('n\'affiche pas les secondes sur une journée continue', function (): void {
+    $v1 = hoursUser();
+    $v2 = hoursUser();
+    $employee = hoursUser();
+    groupWithEmails($v1, $v2, [$employee], ['rh@test.fr']);
+
+    $sheet = submitHourSheet($employee, '2026-10-05');
+    $sheet->forceFill([
+        'is_continuous_day' => true,
+        'morning_start' => '08:00:00',
+        'morning_end' => null,
+        'afternoon_start' => null,
+        'afternoon_end' => '16:00:00',
+    ])->save();
+
+    $details = App\Mail\HourSheetSubmittedMail::detailsFor($sheet->fresh(), 'Nathan Bidet');
+
+    expect($details['schedule'])->toBe('08:00 - 16:00 (journée continue)');
+});
