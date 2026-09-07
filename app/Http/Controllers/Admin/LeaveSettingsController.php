@@ -72,6 +72,12 @@ class LeaveSettingsController extends Controller
                     ->values()
                     ->all(),
                 'member_count' => $group->memberships->count(),
+
+                // La liste des adresses alimente le formulaire de modification.
+                // La carte, elle, n'en affiche que le nombre : afficher quatre
+                // adresses dans une vignette la rendrait illisible.
+                'notify_by_email' => (bool) $group->notify_by_email,
+                'notification_emails' => $group->emailRecipients(),
             ])
             ->values()
             ->all();

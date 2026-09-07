@@ -103,6 +103,18 @@ class WorkTimeReference
     }
 
     /**
+     * Durée en minutes rendue « 08h00 ».
+     *
+     * Format de l'export Excel, repris tel quel par l'email : les deux
+     * décrivent la même journée à un lecteur humain, ils ne peuvent pas
+     * l'écrire de deux façons.
+     */
+    public static function formatMinutes(int $minutes): string
+    {
+        return sprintf('%02dh%02d', intdiv(max(0, $minutes), 60), max(0, $minutes) % 60);
+    }
+
+    /**
      * Horaires par défaut, lus une fois par requête.
      *
      * @return array<string, string>

@@ -21,16 +21,12 @@ use Illuminate\Validation\ValidationException;
 class ValidationGroupService
 {
     /**
-     * @param  array{name:string,validator_1_id:int,validator_2_id:int,member_user_ids?:array<int,int>}  $attributes
+     * @param  array{name:string,validator_1_id:int,validator_2_id:int,member_user_ids?:array<int,int>,notify_by_email?:bool,notification_emails?:array<int,string>}  $attributes
      */
     public function create(array $attributes): ValidationGroup
     {
         return DB::transaction(function () use ($attributes): ValidationGroup {
-            $group = ValidationGroup::query()->create([
-                'name' => $this->normalizeName($attributes['name']),
-                'validator_1_id' => (int) $attributes['validator_1_id'],
-                'validator_2_id' => (int) $attributes['validator_2_id'],
-            ]);
+            $group = ValidationGroup::query()->create($this->groupColumns($attributes, null));
 
             $this->syncMembers($group, $attributes['member_user_ids'] ?? []);
 
@@ -39,21 +35,51 @@ class ValidationGroupService
     }
 
     /**
-     * @param  array{name:string,validator_1_id:int,validator_2_id:int,member_user_ids?:array<int,int>}  $attributes
+     * @param  array{name:string,validator_1_id:int,validator_2_id:int,member_user_ids?:array<int,int>,notify_by_email?:bool,notification_emails?:array<int,string>}  $attributes
      */
     public function update(ValidationGroup $group, array $attributes): ValidationGroup
     {
         return DB::transaction(function () use ($group, $attributes): ValidationGroup {
-            $group->update([
-                'name' => $this->normalizeName($attributes['name']),
-                'validator_1_id' => (int) $attributes['validator_1_id'],
-                'validator_2_id' => (int) $attributes['validator_2_id'],
-            ]);
+            $group->update($this->groupColumns($attributes, $group));
 
             $this->syncMembers($group, $attributes['member_user_ids'] ?? []);
 
             return $group->fresh(['validator1', 'validator2', 'members']);
         });
+    }
+
+    /**
+     * Colonnes du groupe lui-même, hors composition.
+     *
+     * Les adresses ne sont réécrites que lorsque l'envoi par email est activé.
+     * Décocher la case baisse le drapeau et laisse la liste intacte : la
+     * réactiver plus tard ne demande alors que de recocher, sans avoir à
+     * retrouver les adresses. Elles ne servent à rien entre-temps —
+     * emailRecipients() ne les lit pas tant que le drapeau est baissé.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function groupColumns(array $attributes, ?ValidationGroup $existing): array
+    {
+        $notifyByEmail = (bool) ($attributes['notify_by_email'] ?? false);
+
+        $columns = [
+            'name' => $this->normalizeName($attributes['name']),
+            'validator_1_id' => (int) $attributes['validator_1_id'],
+            'validator_2_id' => (int) $attributes['validator_2_id'],
+            'notify_by_email' => $notifyByEmail,
+        ];
+
+        if ($notifyByEmail) {
+            $columns['notification_emails'] = ValidationGroup::normalizeEmails(
+                $attributes['notification_emails'] ?? []
+            );
+        } elseif ($existing === null) {
+            $columns['notification_emails'] = null;
+        }
+
+        return $columns;
     }
 
     /**

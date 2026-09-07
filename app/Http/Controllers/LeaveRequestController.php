@@ -19,6 +19,7 @@ use App\Services\AuditLogService;
 use App\Services\Validation\TwoStepValidationService;
 use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
+use App\Services\Validation\ValidationGroupMailer;
 use App\Services\Validation\ValidationGroupService;
 use App\Support\Validation\ValidationStage;
 use Illuminate\Http\JsonResponse;
@@ -37,6 +38,7 @@ class LeaveRequestController extends Controller
         private readonly ValidationGroupService $validationGroups,
         private readonly TwoStepValidationService $twoStepValidation,
         private readonly ValidationRolloutService $validationRollout,
+        private readonly ValidationGroupMailer $validationGroupMailer,
     ) {
     }
 
@@ -501,6 +503,12 @@ class LeaveRequestController extends Controller
                     'action' => 'view',
                 ]);
             }
+
+            // EN PLUS des notifications ci-dessus, et seulement si le groupe a
+            // configuré des adresses. Le service ne fait rien dans tous les
+            // autres cas : demande hors du nouveau système (donc sans groupe),
+            // salarié sans groupe, ou option désactivée.
+            $this->validationGroupMailer->sendForLeaveRequest($leaveRequest, $requesterLabel);
 
             $this->auditLogService->log([
                 'action' => 'create_leave_request',

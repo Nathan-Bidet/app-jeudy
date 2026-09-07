@@ -18,6 +18,11 @@
         </include>
     </source>
     <php>
+        <!-- La suite dépasse les 128 Mo par défaut de PHP : elle compile les
+             vues, dont les gabarits d'email, et garde l'état de centaines de
+             tests. La limite ne vaut que pour les tests, l'application n'est
+             pas concernée. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

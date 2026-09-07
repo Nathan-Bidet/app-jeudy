@@ -211,6 +211,51 @@ export default function ValidationGroupModal({
 
                         <InputError message={form.errors.member_user_ids} className="mt-1" />
                     </div>
+
+                    {/* Envoi par email : le champ d'adresses n'apparaît que
+                        lorsque l'option est cochée. Il reste monté dans l'état
+                        du formulaire, si bien que décocher puis recocher ne
+                        perd pas la saisie en cours. */}
+                    <div className="rounded-xl border border-[var(--app-border)] p-3">
+                        <label className="flex cursor-pointer items-start gap-2">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(form.data.notify_by_email)}
+                                onChange={(event) => form.setData('notify_by_email', event.target.checked)}
+                                className="mt-0.5 h-4 w-4 rounded border-[var(--app-border)]"
+                            />
+                            <span className="text-sm font-medium text-[var(--app-text)]">
+                                Envoyer également les nouvelles demandes par email
+                            </span>
+                        </label>
+
+                        <p className="mt-1 pl-6 text-xs text-[var(--app-muted)]">
+                            En plus des notifications habituelles des deux valideurs, qui restent inchangées.
+                        </p>
+
+                        {form.data.notify_by_email ? (
+                            <div className="mt-3 pl-6">
+                                <label
+                                    className="block text-sm font-medium text-[var(--app-text)]"
+                                    htmlFor="validation-group-emails"
+                                >
+                                    Adresses email
+                                </label>
+                                <textarea
+                                    id="validation-group-emails"
+                                    rows={2}
+                                    value={form.data.notification_emails ?? ''}
+                                    onChange={(event) => form.setData('notification_emails', event.target.value)}
+                                    placeholder="rh@jeudy-sa.fr, comptabilite@jeudy-sa.fr"
+                                    className={`mt-1 ${FIELD_CLASS}`}
+                                />
+                                <p className="mt-1 text-xs text-[var(--app-muted)]">
+                                    Séparez plusieurs adresses par une virgule.
+                                </p>
+                                <InputError message={form.errors.notification_emails} className="mt-1" />
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 border-t border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">

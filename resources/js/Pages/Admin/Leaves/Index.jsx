@@ -9,6 +9,10 @@ const EMPTY_VALIDATION_GROUP = {
     validator_1_id: '',
     validator_2_id: '',
     member_user_ids: [],
+    notify_by_email: false,
+    // Une seule ligne, adresses séparées par des virgules : c'est le serveur
+    // qui la découpe, la nettoie et la dédoublonne.
+    notification_emails: '',
 };
 
 export default function AdminLeavesIndex({
@@ -119,6 +123,11 @@ export default function AdminLeavesIndex({
             validator_1_id: group.validator_1_id ?? '',
             validator_2_id: group.validator_2_id ?? '',
             member_user_ids: (group.member_user_ids ?? []).map((id) => Number(id)),
+            notify_by_email: Boolean(group.notify_by_email),
+            // Les adresses enregistrées reviennent telles quelles dans le champ,
+            // y compris lorsque l'option est désactivée : les conserver permet
+            // de la réactiver sans les ressaisir.
+            notification_emails: (group.notification_emails ?? []).join(', '),
         });
         setValidationGroupModal({ mode: 'edit', group });
     };
@@ -409,9 +418,19 @@ export default function AdminLeavesIndex({
                                 <div key={group.id} className="flex flex-col gap-3 rounded-xl border border-[var(--app-border)] p-3">
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                         <p className="text-sm font-semibold text-[var(--app-text)]">{group.name}</p>
-                                        <span className="shrink-0 rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs font-semibold text-[var(--app-muted)]">
-                                            {group.member_count} utilisateur{group.member_count > 1 ? 's' : ''}
-                                        </span>
+                                        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                                            {group.notify_by_email && (group.notification_emails ?? []).length > 0 ? (
+                                                <span
+                                                    title={`Emails envoyés à : ${(group.notification_emails ?? []).join(', ')}`}
+                                                    className="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--app-text)]"
+                                                >
+                                                    ✉ {group.notification_emails.length} destinataire{group.notification_emails.length > 1 ? 's' : ''}
+                                                </span>
+                                            ) : null}
+                                            <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs font-semibold text-[var(--app-muted)]">
+                                                {group.member_count} utilisateur{group.member_count > 1 ? 's' : ''}
+                                            </span>
+                                        </div>
                                     </div>
 
                                     <dl className="grid gap-1 text-sm">

@@ -9,6 +9,7 @@ use App\Notifications\HourSheetDecisionNotification;
 use App\Services\AuditLogService;
 use App\Services\Hours\ApprovedLeaveDayService;
 use App\Services\Validation\TwoStepValidationService;
+use App\Services\Validation\ValidationGroupMailer;
 use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
@@ -75,6 +76,7 @@ class HourSheetController extends Controller
         private readonly AuditLogService $auditLogService,
         private readonly TwoStepValidationService $twoStepValidation,
         private readonly ValidationRolloutService $validationRollout,
+        private readonly ValidationGroupMailer $validationGroupMailer,
     ) {
     }
 
@@ -431,6 +433,16 @@ class HourSheetController extends Controller
 
         if ($savedHourSheet->status !== null) {
             $this->warnWhenNoValidationGroup($savedHourSheet, $request->user());
+
+            // EN PLUS des notifications internes, et seulement si le groupe a
+            // configuré des adresses. La condition porte sur le statut : une
+            // journée antérieure à la date d'effet n'entre pas dans le circuit,
+            // n'a donc pas de groupe, et ne déclenche aucun email.
+            //
+            // Réenregistrer une journée relance son circuit — les deux
+            // valideurs la revoient dans leur file — et déclenche donc un
+            // nouvel email, exactement comme la première fois.
+            $this->validationGroupMailer->sendForHourSheet($savedHourSheet, $actorLabel);
         }
 
         $action = $isNotWorked
@@ -1067,10 +1079,7 @@ class HourSheetController extends Controller
 
     private function formatMinutesForExport(int $totalMinutes): string
     {
-        $hours = intdiv($totalMinutes, 60);
-        $minutes = $totalMinutes % 60;
-
-        return sprintf('%02dh%02d', $hours, $minutes);
+        return WorkTimeReference::formatMinutes($totalMinutes);
     }
 
     private function uniqueSheetTitle(?object $user, array $usedTitles): string
