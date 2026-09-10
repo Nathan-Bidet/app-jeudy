@@ -36,6 +36,22 @@ Schedule::command('cotations:refresh')
     ->withoutOverlapping()
     ->timezone(config('app.timezone', 'Europe/Paris'));
 
+// Compactage quotidien de l'historique des cotations. `cotations:refresh`
+// tourne toutes les minutes et ajoute ~36 000 lignes par jour : sans
+// compactage la table grossit d'environ 1,1 million de lignes par mois.
+//
+// L'heure d'exécution (03h30 par défaut) n'a rien à voir avec l'heure cible du
+// relevé conservé (15h00) : c'est simplement une heure creuse. Aucune
+// concurrence possible avec l'import, qui n'écrit que sur la journée en cours
+// alors que le compactage ne touche que des journées vieilles d'au moins huit
+// jours. withoutOverlapping empêche deux exécutions simultanées et onOneServer
+// garantit un seul passage si l'application tourne sur plusieurs instances.
+Schedule::command('cotations:compact-history')
+    ->dailyAt(config('cotations.compaction.schedule_time', '03:30'))
+    ->timezone(config('app.timezone', 'Europe/Paris'))
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('annonces:send-scheduled')
     ->everyMinute()
     ->withoutOverlapping()
