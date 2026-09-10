@@ -77,18 +77,20 @@ locales dans les deux cas.
 
 ## Ce que ça donne
 
-Estimation sur les données du 10/09/2026 (84 journées, 27 cotations distinctes) :
+Chiffres **mesurés** par `--dry-run` sur le serveur le 10/09/2026 (77 journées
+éligibles dont 76 non vides, 24 à 27 cotations distinctes selon les périodes) :
 
 | | Avant | Après |
 |---|---:|---:|
-| Lignes de prix | ~2 701 500 | **~263 000** |
-| dont fenêtre détaillée (8 j) | — | ~261 000 |
-| dont historique compacté (76 j) | ~2 440 000 | **~2 050** |
-| Lignes supprimées | — | **~2 438 000 (90 %)** |
-| Actualisations | ~106 000 | **~11 600** |
+| Lignes de prix | 2 701 531 | **~278 000** |
+| dont fenêtre détaillée (8 j) | — | ~276 000 |
+| dont historique compacté (76 j) | 2 425 226 | **1 990** |
+| Lignes supprimées | — | **2 423 236 (90 %)** |
+| Actualisations | ~106 000 | **~11 200** |
+| Actualisations supprimées | — | **94 801** |
 
-En régime permanent la table se stabilise autour de **250 000 lignes** et ne
-grossit plus que de **27 lignes par jour** au lieu de 36 000.
+En régime permanent la table se stabilise autour de **260 000 lignes** et ne
+grossit plus que de **~25 lignes par jour** au lieu de 36 000.
 
 ## Commande
 
@@ -172,9 +174,11 @@ Il couvre les trois accès du traitement : la borne de journée (préfixe
 (`ORDER BY id`) et la relecture des identifiants à supprimer, servie directement
 par l'index.
 
-MySQL 8 le crée en `ALGORITHM=INPLACE, LOCK=NONE` : les écritures de
-`cotations:refresh` continuent pendant la création, qui prend une dizaine de
-secondes sur 2,7 millions de lignes.
+MySQL 8 le crée en `ALGORITHM=INPLACE, LOCK=NONE`. Création **mesurée sur le
+serveur : 2 min 16 s** pour 2,7 millions de lignes. `cotations:refresh` a
+continué à écrire sans interruption pendant toute la durée (actualisations
+106 028 à 106 032, une par minute) : aucune coupure de service, mais prévoir
+que la migration bloque le déploiement pendant ces deux minutes.
 
 Les index existants sont conservés. `cot_price_quoted_idx` n'est utilisé par
 aucune requête et pourrait être supprimé pour récupérer une trentaine de Mo,
@@ -182,20 +186,29 @@ mais ce n'est pas nécessaire au compactage et cela sort du périmètre.
 
 ### Plans d'exécution
 
-Avant l'index :
+`EXPLAIN` mesuré sur le serveur, requête de lot de suppression sur une journée :
 
 ```sql
 EXPLAIN SELECT id FROM cotation_market_prices
  WHERE created_at >= '2026-08-01 00:00:00' AND created_at < '2026-08-02 00:00:00'
- ORDER BY id LIMIT 2000;
--- type=index, key=PRIMARY, rows≈2 700 000, Extra=Using where
+   AND id NOT IN (...) ORDER BY id LIMIT 2000;
 ```
 
-Après l'index :
+| | `type` | `key` | `rows` | `Extra` |
+|---|---|---|---:|---|
+| Avant | `range` | `PRIMARY` | **1 342 697** | Using where |
+| Après | `range` | `cot_price_created_idx` | **40 682** | Using where; Using index |
 
-```sql
--- type=range, key=cot_price_created_idx, rows≈36 000, Extra=Using where; Using index
-```
+Soit **33 fois moins de lignes examinées**, et un index couvrant (`Using
+index`) : les identifiants à supprimer sont lus sans toucher la table.
+
+Le `Using filesort` qui subsiste sur la passe de sélection porte sur les
+~40 000 identifiants de la journée, pas sur la table : il est négligeable.
+
+Les lectures applicatives (`MAX(id)` groupé) restent en `type=ALL` : elles
+n'utilisaient déjà aucun index et n'ont pas besoin de l'être ici, puisque la
+table passe de 2,7 millions à ~260 000 lignes — le balayage devient dix fois
+moins coûteux qu'avant, sans aucune modification de requête.
 
 ## Procédure de première exécution en production
 
@@ -226,6 +239,9 @@ Simulation complète, sans aucune écriture :
 php artisan cotations:compact-history --dry-run
 ```
 
+Comptez environ **4 minutes** (247 s mesurées) : la simulation relit les
+2,4 millions de lignes concernées.
+
 Vérification détaillée des relevés qui seront conservés et de leur écart à
 15 h, sur quelques journées :
 
@@ -233,9 +249,11 @@ Vérification détaillée des relevés qui seront conservés et de leur écart �
 php artisan cotations:compact-history --dry-run --show-kept --max-days=5
 ```
 
-La colonne « Écart à la cible » doit afficher des écarts de l'ordre de la
-minute (`+00:00:30`), et la ligne de journée doit porter la mention
-`[instantané cohérent]`. Une journée affichant `[relevés issus de plusieurs
+La colonne « Écart à la cible » doit afficher des écarts de quelques secondes —
+l'actualisation tournant toutes les minutes, le relevé le plus proche de 15 h
+tombe en pratique à `15:00:04` — et la ligne de journée doit porter la mention
+`[instantané cohérent]`, qui signifie que les 27 relevés retenus proviennent
+tous de la même actualisation. Une journée affichant `[relevés issus de plusieurs
 actualisations]` n'est pas un problème : cela signifie qu'une actualisation
 était incomplète et que la cotation manquante a été reprise ailleurs.
 
