@@ -10,7 +10,8 @@ use App\Support\Access\AccessManager;
  * Droits de l'annuaire. Deux permissions indépendantes, résolues par
  * l'AccessManager (rôle, défauts de secteur, exceptions utilisateur) :
  *  - directory.files.create : ajouter une pièce jointe à une fiche ;
- *  - directory.update       : éditer la fiche d'un autre utilisateur.
+ *  - directory.update       : éditer la fiche d'un autre utilisateur, ainsi
+ *    que les champs d'organisation, de validité et de liens de toute fiche.
  * Aucune des deux n'implique l'autre. Les administrateurs passent par le
  * Gate::before d'AppServiceProvider.
  */
@@ -52,6 +53,16 @@ class DirectoryPolicy
             return true;
         }
 
+        return app(AccessManager::class)->can($authUser, 'directory.update');
+    }
+
+    /**
+     * Champs « Organisation », « Dates de validité » et « Liens & infos
+     * diverses ». Réservés à directory.update : éditer sa propre fiche sans
+     * cette permission ne donne accès qu'aux coordonnées et à la photo.
+     */
+    public function updateManagedFields(User $authUser, User $targetUser): bool
+    {
         return app(AccessManager::class)->can($authUser, 'directory.update');
     }
 }

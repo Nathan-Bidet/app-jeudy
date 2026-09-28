@@ -1,13 +1,11 @@
 <?php
 
 use App\Http\Middleware\EnsureTwoFactorIsVerified;
-use App\Models\Sector;
 use App\Models\SectorPermission;
 use App\Models\User;
 use App\Models\UserFile;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Testing\TestResponse;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -19,51 +17,10 @@ beforeEach(function (): void {
     Storage::fake('local');
 });
 
-function directoryUser(array $abilities = []): User
-{
-    $sector = Sector::query()->create([
-        'name' => fake()->unique()->company(),
-        'slug' => fake()->unique()->slug(),
-    ]);
-
-    $role = Role::findOrCreate('directory-test-'.fake()->unique()->word(), 'web');
-
-    foreach (array_merge(['directory.view'], $abilities) as $ability) {
-        $role->givePermissionTo(Permission::findOrCreate($ability, 'web'));
-    }
-
-    $user = User::factory()->create([
-        'sector_id' => $sector->id,
-        'is_active' => true,
-    ]);
-    $user->assignRole($role);
-
-    return $user;
-}
-
-function directoryTarget(): User
-{
-    return User::factory()->create([
-        'is_active' => true,
-        'phone' => '0100000000',
-    ]);
-}
-
 function directoryPdf(): UploadedFile
 {
     return UploadedFile::fake()->create('contrat.pdf', 100, 'application/pdf');
 }
-
-/*
- * Refus d'autorisation tel que rendu par bootstrap/app.php : redirection
- * (tableau de bord en GET, page précédente sinon) avec un message flash.
- */
-TestResponse::macro('assertDenied', function (): TestResponse {
-    /** @var TestResponse $this */
-    $this->assertRedirect()->assertSessionHas('error');
-
-    return $this;
-});
 
 function assertShowPermissions($test, User $viewer, User $target, bool $canUpdate, bool $canAttach): void
 {

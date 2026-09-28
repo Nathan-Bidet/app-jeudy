@@ -185,3 +185,54 @@ function submitLeaveOn(App\Models\User $requester, string $startAt, string $endA
 
     return App\Models\LeaveRequest::query()->latest('id')->firstOrFail();
 }
+
+/*
+|--------------------------------------------------------------------------
+| Fabriques partagées — annuaire
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Utilisateur actif dans son propre secteur, avec directory.view et les
+ * permissions demandées portées par un rôle dédié.
+ */
+function directoryUser(array $abilities = []): User
+{
+    $sector = Sector::query()->create([
+        'name' => fake()->unique()->company(),
+        'slug' => fake()->unique()->slug(),
+    ]);
+
+    $role = Role::findOrCreate('directory-test-'.fake()->unique()->word(), 'web');
+
+    foreach (array_merge(['directory.view'], $abilities) as $ability) {
+        $role->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+
+    $user = User::factory()->create([
+        'sector_id' => $sector->id,
+        'is_active' => true,
+    ]);
+    $user->assignRole($role);
+
+    return $user;
+}
+
+function directoryTarget(array $overrides = []): User
+{
+    return User::factory()->create(array_merge([
+        'is_active' => true,
+        'phone' => '0100000000',
+    ], $overrides));
+}
+
+/*
+ * Refus d'autorisation tel que rendu par bootstrap/app.php : redirection
+ * (tableau de bord en GET, page précédente sinon) avec un message flash.
+ */
+Illuminate\Testing\TestResponse::macro('assertDenied', function (): Illuminate\Testing\TestResponse {
+    /** @var Illuminate\Testing\TestResponse $this */
+    $this->assertRedirect()->assertSessionHas('error');
+
+    return $this;
+});

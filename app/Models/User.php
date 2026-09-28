@@ -32,6 +32,7 @@ class User extends Authenticatable
         'mobile_phone',
         'directory_phones',
         'internal_number',
+        'job_title',
         'photo_path',
         'glpi_url',
         'depot_address',
@@ -51,6 +52,7 @@ class User extends Authenticatable
         'sst_valid_until',
         'password',
         'sector_id',
+        'sector_manager_id',
         'hours_tracking_starts_at',
         'is_active',
     ];
@@ -83,6 +85,7 @@ class User extends Authenticatable
             'birthday' => 'date',
             'directory_phones' => 'array',
             'depot_id' => 'integer',
+            'sector_manager_id' => 'integer',
             'driving_license_valid_until' => 'date',
             'fimo_valid_until' => 'date',
             'adr_valid_until' => 'date',
@@ -107,6 +110,11 @@ class User extends Authenticatable
     public function sector(): BelongsTo
     {
         return $this->belongsTo(Sector::class);
+    }
+
+    public function sectorManager(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'sector_manager_id');
     }
 
     public function depot(): BelongsTo

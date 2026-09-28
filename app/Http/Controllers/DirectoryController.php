@@ -6,6 +6,7 @@ use App\Models\Depot;
 use App\Models\Sector;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\AuditLogService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,26 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class DirectoryController extends Controller
 {
+    /**
+     * Dates de validité, dans l'ordre d'affichage. Les colonnes historiques
+     * fimo_valid_until et fco_valid_until portent respectivement « CACES
+     * GRUE » et « FIMO / FCO » ; le libellé suit l'usage, pas le nom de colonne.
+     *
+     * @var array<string, string>
+     */
+    private const VALIDITY_FIELDS = [
+        'driving_license_valid_until' => 'Permis',
+        'fco_valid_until' => 'FIMO / FCO',
+        'adr_valid_until' => 'ADR',
+        'eco_conduite_valid_until' => 'Éco-conduite',
+        'certiphyto_valid_until' => 'Certiphyto',
+        'caces_valid_until' => 'CACES',
+        'fimo_valid_until' => 'CACES GRUE',
+        'nacelle_valid_until' => 'Habilitation nacelle',
+        'occupational_health_valid_until' => 'Médecine du travail',
+        'sst_valid_until' => 'SST',
+    ];
+
     public function index(Request $request): Response
     {
         $this->authorize('viewAny', User::class);
@@ -144,6 +165,7 @@ class DirectoryController extends Controller
 
         $user->load([
             'sector:id,name',
+            'sectorManager:id,name,first_name,last_name,email',
             'depot:id,name,address_line1,address_line2,postal_code,city,country,phone,email,gps_lat,gps_lng',
             'directoryFiles' => fn ($query) => $query->latest()->with('uploader:id,name,first_name,last_name'),
         ]);
@@ -172,9 +194,14 @@ class DirectoryController extends Controller
                     'id' => $user->sector?->id,
                     'name' => $user->sector?->name,
                 ],
-                'job_title' => null,
-                'sector_manager' => null,
+                'job_title' => $user->job_title,
+                'sector_manager' => $user->sectorManager ? [
+                    'id' => $user->sectorManager->id,
+                    'name' => $this->userDisplayName($user->sectorManager),
+                    'url' => route('directory.show', $user->sectorManager),
+                ] : null,
                 'glpi_url' => $user->glpi_url,
+                'glpi_href' => $this->safeExternalUrl($user->glpi_url),
                 'depot' => $depotPayload,
                 'depot_address' => $depotAddress,
                 'gps_url' => $depotGpsUrl,
@@ -232,8 +259,9 @@ class DirectoryController extends Controller
 
         $viewer = $request->user();
         $isAdmin = (bool) $viewer?->hasRole('admin');
+        $canManageFields = (bool) $viewer?->can('updateManagedFields', $user);
 
-        $user->loadMissing('sector:id,name', 'depot:id,name');
+        $user->loadMissing('sector:id,name', 'depot:id,name', 'sectorManager:id,name,first_name,last_name');
 
         return Inertia::render('Directory/Edit', [
             'profile' => [
@@ -264,13 +292,16 @@ class DirectoryController extends Controller
                 'eco_conduite_valid_until' => $user->eco_conduite_valid_until?->toDateString(),
                 'occupational_health_valid_until' => $user->occupational_health_valid_until?->toDateString(),
                 'sst_valid_until' => $user->sst_valid_until?->toDateString(),
-                'job_title' => null,
-                'sector_manager' => null,
+                'job_title' => $user->job_title,
+                'sector_manager_id' => $user->sector_manager_id,
+                'sector_manager' => $this->userDisplayName($user->sectorManager),
             ],
             'sectors' => Sector::query()->orderBy('name')->get(['id', 'name']),
             'depots' => Depot::query()->orderBy('name')->get(['id', 'name', 'is_active']),
+            'managers' => $canManageFields ? $this->sectorManagerOptions($user) : [],
             'permissions' => [
                 'can_manage_all_fields' => $isAdmin,
+                'can_manage_directory_fields' => $canManageFields,
             ],
             'routes' => [
                 'show' => route('directory.show', $user),
@@ -286,14 +317,14 @@ class DirectoryController extends Controller
                     'internal_number' => true,
                 ],
                 'organization' => [
-                    'sector_id' => $isAdmin,
-                    'depot_id' => $isAdmin,
-                    'job_title' => false,
-                    'sector_manager' => false,
+                    'sector_id' => $canManageFields,
+                    'depot_id' => $canManageFields,
+                    'job_title' => $canManageFields,
+                    'sector_manager_id' => $canManageFields,
                 ],
-                'validities' => $isAdmin,
+                'validities' => $canManageFields,
                 'links' => [
-                    'glpi_url' => $isAdmin,
+                    'glpi_url' => $canManageFields,
                 ],
                 'photo' => true,
             ],
@@ -306,7 +337,9 @@ class DirectoryController extends Controller
 
         $actor = $request->user();
         $isAdmin = (bool) $actor?->hasRole('admin');
+        $canManageFields = (bool) $actor?->can('updateManagedFields', $user);
 
+        // Coordonnées : toute personne autorisée à éditer la fiche.
         $rules = [
             'phone' => ['nullable', 'string', 'max:50'],
             'mobile_phone' => ['nullable', 'string', 'max:50'],
@@ -317,61 +350,75 @@ class DirectoryController extends Controller
             'birthday' => ['nullable', 'date'],
             'photo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ];
+        $messages = [];
 
+        // Organisation, dates de validité, liens : permission directory.update.
+        if ($canManageFields) {
+            $rules = array_merge($rules, [
+                'sector_id' => ['nullable', 'integer', 'exists:sectors,id'],
+                'depot_id' => ['nullable', 'integer', 'exists:depots,id'],
+                'job_title' => ['nullable', 'string', 'max:120'],
+                'sector_manager_id' => [
+                    'nullable',
+                    'integer',
+                    Rule::notIn([$user->id]),
+                    // Un utilisateur actif, ou le responsable déjà enregistré même
+                    // s'il a été désactivé depuis (la fiche reste enregistrable).
+                    Rule::exists('users', 'id')->where(function ($query) use ($user): void {
+                        $query->where('is_active', true);
+
+                        if ($user->sector_manager_id) {
+                            $query->orWhere('id', $user->sector_manager_id);
+                        }
+                    }),
+                ],
+                'glpi_url' => ['nullable', 'string', 'max:2048', 'url:http,https'],
+            ]);
+
+            foreach (self::VALIDITY_FIELDS as $field => $label) {
+                $rules[$field] = ['nullable', 'date_format:Y-m-d', 'after_or_equal:1900-01-01', 'before_or_equal:2100-12-31'];
+                $messages[$field.'.date_format'] = "La date « {$label} » est invalide.";
+                $messages[$field.'.after_or_equal'] = "La date « {$label} » est invalide.";
+                $messages[$field.'.before_or_equal'] = "La date « {$label} » est invalide.";
+            }
+
+            $messages += [
+                'sector_id.exists' => 'Le secteur sélectionné est introuvable.',
+                'depot_id.exists' => 'Le dépôt sélectionné est introuvable.',
+                'sector_manager_id.exists' => 'Le responsable sélectionné est introuvable ou inactif.',
+                'sector_manager_id.not_in' => 'Une personne ne peut pas être son propre responsable.',
+                'job_title.max' => 'Le poste ne peut pas dépasser 120 caractères.',
+                'glpi_url.url' => 'Le lien GLPI doit être une adresse http:// ou https:// valide.',
+                'glpi_url.max' => 'Le lien GLPI est trop long.',
+            ];
+        }
+
+        // Identité : administrateurs uniquement.
         if ($isAdmin) {
             $rules = array_merge($rules, [
                 'first_name' => ['nullable', 'string', 'max:120'],
                 'last_name' => ['nullable', 'string', 'max:120'],
-                'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')->ignore($user->id)],
-                'sector_id' => ['nullable', 'integer', 'exists:sectors,id'],
-                'depot_id' => ['nullable', 'integer', 'exists:depots,id'],
-                'glpi_url' => ['nullable', 'url', 'max:2048'],
-                'driving_license_valid_until' => ['nullable', 'date'],
-                'fimo_valid_until' => ['nullable', 'date'],
-                'adr_valid_until' => ['nullable', 'date'],
-                'fco_valid_until' => ['nullable', 'date'],
-                'caces_valid_until' => ['nullable', 'date'],
-                'certiphyto_valid_until' => ['nullable', 'date'],
-                'nacelle_valid_until' => ['nullable', 'date'],
-                'eco_conduite_valid_until' => ['nullable', 'date'],
-                'occupational_health_valid_until' => ['nullable', 'date'],
-                'sst_valid_until' => ['nullable', 'date'],
+                'email' => ['sometimes', 'required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')->ignore($user->id)],
             ]);
         }
 
-        $validated = $request->validate($rules);
+        $validated = $request->validate($rules, $messages);
 
-        $fillable = $isAdmin
-            ? [
-                'first_name',
-                'last_name',
-                'email',
-                'phone',
-                'mobile_phone',
-                'directory_phones',
-                'internal_number',
-                'sector_id',
-                'depot_id',
-                'birthday',
-                'glpi_url',
-                'driving_license_valid_until',
-                'fimo_valid_until',
-                'adr_valid_until',
-                'fco_valid_until',
-                'caces_valid_until',
-                'certiphyto_valid_until',
-                'nacelle_valid_until',
-                'eco_conduite_valid_until',
-                'occupational_health_valid_until',
-                'sst_valid_until',
-            ]
-            : [
-                'phone',
-                'mobile_phone',
-                'directory_phones',
-                'internal_number',
-                'birthday',
-            ];
+        // Seuls les champs validés ci-dessus peuvent être écrits ; les clés
+        // absentes de la requête laissent la valeur existante intacte.
+        $fillable = ['phone', 'mobile_phone', 'directory_phones', 'internal_number', 'birthday'];
+
+        if ($canManageFields) {
+            $fillable = array_merge(
+                $fillable,
+                ['sector_id', 'depot_id', 'job_title', 'sector_manager_id', 'glpi_url'],
+                array_keys(self::VALIDITY_FIELDS)
+            );
+        }
+
+        if ($isAdmin) {
+            $fillable = array_merge($fillable, ['first_name', 'last_name', 'email']);
+        }
 
         $payload = [];
 
@@ -385,7 +432,11 @@ class DirectoryController extends Controller
             $payload['directory_phones'] = $this->normalizeDirectoryPhones($payload['directory_phones']);
         }
 
-        if ($isAdmin && array_key_exists('depot_id', $payload)) {
+        if (array_key_exists('job_title', $payload)) {
+            $payload['job_title'] = $this->normalizeText($payload['job_title']);
+        }
+
+        if (array_key_exists('depot_id', $payload)) {
             $selectedDepot = null;
 
             if (! empty($payload['depot_id'])) {
@@ -413,10 +464,27 @@ class DirectoryController extends Controller
         }
 
         $user->fill($payload);
+        $changes = $this->auditableChanges($user);
         $user->save();
 
         if ($oldManagedPhoto && $user->photo_path !== $oldManagedPhoto) {
             Storage::disk('public')->delete($oldManagedPhoto);
+        }
+
+        if ($changes !== []) {
+            app(AuditLogService::class)->log([
+                'action' => 'update_directory_entry',
+                'module' => 'directory',
+                'description' => sprintf(
+                    '%s a modifié la fiche annuaire de %s',
+                    $this->userDisplayName($actor) ?? 'Utilisateur inconnu',
+                    $this->userDisplayName($user) ?? '#'.$user->id
+                ),
+                'payload' => [
+                    'target_user_id' => (int) $user->id,
+                    'changes' => $changes,
+                ],
+            ]);
         }
 
         return redirect()
@@ -487,18 +555,88 @@ class DirectoryController extends Controller
      */
     private function validityRows(User $user): array
     {
-        return [
-            $this->validityRow('Permis', $user->driving_license_valid_until),
-            $this->validityRow('FIMO / FCO', $user->fco_valid_until),
-            $this->validityRow('ADR', $user->adr_valid_until),
-            $this->validityRow('Éco-conduite', $user->eco_conduite_valid_until),
-            $this->validityRow('Certiphyto', $user->certiphyto_valid_until),
-            $this->validityRow('CACES', $user->caces_valid_until),
-            $this->validityRow('CACES GRUE', $user->fimo_valid_until),
-            $this->validityRow('Habilitation nacelle', $user->nacelle_valid_until),
-            $this->validityRow('Médecine du travail', $user->occupational_health_valid_until),
-            $this->validityRow('SST', $user->sst_valid_until),
-        ];
+        $rows = [];
+
+        foreach (self::VALIDITY_FIELDS as $field => $label) {
+            $rows[] = $this->validityRow($label, $user->{$field});
+        }
+
+        return $rows;
+    }
+
+    private function userDisplayName(?User $user): ?string
+    {
+        if (! $user) {
+            return null;
+        }
+
+        $fullName = trim(($user->first_name ?? '').' '.($user->last_name ?? ''));
+
+        return $fullName !== '' ? $fullName : ($this->normalizeText($user->name) ?? $user->email);
+    }
+
+    /**
+     * Responsables possibles : utilisateurs actifs, hors la personne de la
+     * fiche, plus le responsable actuel s'il a été désactivé depuis.
+     *
+     * @return array<int, array{id:int, name:string, is_active:bool}>
+     */
+    private function sectorManagerOptions(User $target): array
+    {
+        return User::query()
+            ->select(['id', 'name', 'first_name', 'last_name', 'email', 'is_active'])
+            ->where('id', '!=', $target->id)
+            ->where(function ($query) use ($target): void {
+                $query->where('is_active', true);
+
+                if ($target->sector_manager_id) {
+                    $query->orWhere('id', $target->sector_manager_id);
+                }
+            })
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (User $candidate): array => [
+                'id' => (int) $candidate->id,
+                'name' => (string) $this->userDisplayName($candidate),
+                'is_active' => (bool) $candidate->is_active,
+            ])
+            ->all();
+    }
+
+    /**
+     * Anciennes et nouvelles valeurs des attributs modifiés, pour le journal.
+     *
+     * @return array<string, array{old:mixed, new:mixed}>
+     */
+    private function auditableChanges(User $user): array
+    {
+        $changes = [];
+
+        foreach (array_keys($user->getDirty()) as $field) {
+            $changes[$field] = [
+                'old' => $user->getRawOriginal($field),
+                'new' => $user->getAttributes()[$field] ?? null,
+            ];
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Seuls les liens http(s) sont rendus cliquables, pour neutraliser toute
+     * valeur héritée de type javascript: ou data:.
+     */
+    private function safeExternalUrl(?string $url): ?string
+    {
+        $candidate = $this->normalizeText($url);
+
+        if ($candidate === null || ! preg_match('#^https?://#i', $candidate)) {
+            return null;
+        }
+
+        return filter_var($candidate, FILTER_VALIDATE_URL) !== false ? $candidate : null;
     }
 
     private function validityRow(string $label, mixed $value): array

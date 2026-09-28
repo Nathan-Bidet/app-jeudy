@@ -87,8 +87,8 @@ const validityFields = [
     ['sst_valid_until', 'SST'],
 ];
 
-export default function DirectoryEdit({ profile, sectors, depots, permissions, routes, field_access }) {
-    const canManageAll = Boolean(permissions?.can_manage_all_fields);
+export default function DirectoryEdit({ profile, sectors, depots, managers, permissions, routes, field_access }) {
+    const canManageFields = Boolean(permissions?.can_manage_directory_fields);
     const fileInputRef = useRef(null);
     const photoEditorImageRef = useRef(null);
     const dragStateRef = useRef(null);
@@ -103,6 +103,8 @@ export default function DirectoryEdit({ profile, sectors, depots, permissions, r
         internal_number: profile?.internal_number ?? '',
         sector_id: profile?.sector_id ? String(profile.sector_id) : '',
         depot_id: profile?.depot_id ? String(profile.depot_id) : '',
+        job_title: profile?.job_title ?? '',
+        sector_manager_id: profile?.sector_manager_id ? String(profile.sector_manager_id) : '',
         birthday: profile?.birthday ?? '',
         glpi_url: profile?.glpi_url ?? '',
         driving_license_valid_until: profile?.driving_license_valid_until ?? '',
@@ -289,8 +291,10 @@ export default function DirectoryEdit({ profile, sectors, depots, permissions, r
 
         form.transform((data) => ({
             ...data,
-            sector_id: canManageAll && data.sector_id ? Number(data.sector_id) : data.sector_id,
-            depot_id: canManageAll && data.depot_id ? Number(data.depot_id) : data.depot_id,
+            sector_id: canManageFields && data.sector_id ? Number(data.sector_id) : data.sector_id,
+            depot_id: canManageFields && data.depot_id ? Number(data.depot_id) : data.depot_id,
+            sector_manager_id:
+                canManageFields && data.sector_manager_id ? Number(data.sector_manager_id) : data.sector_manager_id,
         }));
 
         form.put(routes.update, {
@@ -586,7 +590,10 @@ export default function DirectoryEdit({ profile, sectors, depots, permissions, r
                     </div>
                 </Section>
 
-                <Section title="Organisation" description="Certains champs sont en lecture seule pour le moment.">
+                <Section
+                    title="Organisation"
+                    description={canManageFields ? null : 'Modification réservée aux personnes autorisées à éditer les fiches.'}
+                >
                     <div className="grid gap-4 md:grid-cols-2">
                         <Field label="Secteur" error={form.errors.sector_id}>
                             {disabled('organization', 'sector_id') ? (
@@ -637,22 +644,40 @@ export default function DirectoryEdit({ profile, sectors, depots, permissions, r
                             )}
                         </Field>
 
-                        <Field label="Poste" hint="Placeholder (champ non géré en base pour l’instant).">
+                        <Field label="Poste" error={form.errors.job_title}>
                             <input
                                 type="text"
-                                value={profile?.job_title || ''}
-                                disabled
-                                className={inputClass(true)}
+                                value={form.data.job_title}
+                                onChange={(e) => form.setData('job_title', e.target.value)}
+                                disabled={disabled('organization', 'job_title')}
+                                maxLength={120}
+                                className={inputClass(disabled('organization', 'job_title'))}
                             />
                         </Field>
 
-                        <Field label="Responsable secteur" hint="Placeholder (champ non géré en base pour l’instant).">
-                            <input
-                                type="text"
-                                value={profile?.sector_manager || ''}
-                                disabled
-                                className={inputClass(true)}
-                            />
+                        <Field label="Responsable secteur" error={form.errors.sector_manager_id}>
+                            {disabled('organization', 'sector_manager_id') ? (
+                                <input
+                                    type="text"
+                                    value={profile?.sector_manager || 'Aucun'}
+                                    disabled
+                                    className={inputClass(true)}
+                                />
+                            ) : (
+                                <select
+                                    value={form.data.sector_manager_id}
+                                    onChange={(e) => form.setData('sector_manager_id', e.target.value)}
+                                    className={inputClass(false)}
+                                >
+                                    <option value="">Aucun</option>
+                                    {(managers ?? []).map((manager) => (
+                                        <option key={manager.id} value={manager.id}>
+                                            {manager.name}
+                                            {manager.is_active ? '' : ' (inactif)'}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
                         </Field>
                     </div>
                 </Section>
