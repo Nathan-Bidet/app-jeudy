@@ -49,6 +49,7 @@ class UserManagementController extends Controller
         'heures.view',
         'heures.create',
         'heures.export',
+        'conges_heures.validators_identity.view',
         'directory.update',
         'directory.files.create',
     ];

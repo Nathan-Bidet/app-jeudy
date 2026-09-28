@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Check, Ban, Pencil, ChevronDown } from 'lucide-react';
+import { ValidatorDecisionRow } from '@/Components/Validation/ValidatorDecisions';
 
 function getCsrfToken() {
     const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
@@ -234,7 +235,7 @@ export default function LeaveRequestDetailModal({ leaveRequestId, onClose }) {
                                         <Row
                                             key={entry.level}
                                             label={`Valideur ${entry.level}`}
-                                            value={entry.label}
+                                            value={<ValidatorDecisionRow entry={entry} showLevelLabel={false} />}
                                         />
                                     ))
                                     : null}

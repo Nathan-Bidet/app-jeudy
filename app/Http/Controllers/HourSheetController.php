@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Hours\RefuseHourSheetRequest;
 use App\Models\HourSheet;
 use App\Models\LeaveRequest;
 use App\Models\User;
-use App\Notifications\HourSheetDecisionNotification;
 use App\Services\AuditLogService;
 use App\Services\Hours\ApprovedLeaveDayService;
 use App\Services\Validation\TwoStepValidationService;
@@ -13,8 +13,10 @@ use App\Services\Validation\ValidationGroupMailer;
 use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
+use App\Support\Hours\HourSheetOwnerView;
 use App\Support\Hours\WorkTimeReference;
 use App\Support\Validation\ValidationStage;
+use App\Support\Validation\ValidatorIdentity;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -171,17 +173,12 @@ class HourSheetController extends Controller
                 'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
                 'has_long_night' => (bool) $hourSheet->has_long_night,
 
-                // `status` à null : journée saisie avant la mise en place de la
-                // validation. Elle n'est ni validée ni en attente, et le front
-                // l'affiche comme telle plutôt que d'inventer un état.
-                'status' => $hourSheet->status,
-                'status_label' => $hourSheet->isLegacyEntry()
-                    ? 'Saisie antérieure à la validation'
-                    : $hourSheet->validationStatusLabel(),
-                // Pas de détail rang par rang ici : ce sont les journées du
-                // salarié lui-même, et un badge global lui suffit. Le détail
-                // reste servi aux valideurs, dans leur file de validation.
-                'refusal_reason' => $hourSheet->refusal_reason,
+                // Vue du PROPRIÉTAIRE (HourSheetOwnerView) : « en validation »
+                // tant que le circuit est ouvert, puis « Traitée » — sans dire
+                // si la journée a été validée ou refusée, et sans motif. Pas
+                // de détail rang par rang non plus. `status` à null : journée
+                // antérieure au circuit de validation.
+                ...HourSheetOwnerView::status($hourSheet),
             ])
             ->values()
             ->all();
@@ -229,7 +226,12 @@ class HourSheetController extends Controller
     {
         $isAdmin = (bool) $user->hasRole('admin');
 
-        $query = HourSheet::query()->with('user:id,name,first_name,last_name,email');
+        $validatorIdentity = app(ValidatorIdentity::class);
+
+        $query = HourSheet::query()->with(array_merge(
+            ['user:id,name,first_name,last_name,email'],
+            $validatorIdentity->eagerLoadsFor($user),
+        ));
 
         if ($isAdmin) {
             $query->whereIn('status', ValidationStage::OPEN);
@@ -273,7 +275,8 @@ class HourSheetController extends Controller
 
                 'status' => $hourSheet->status,
                 'status_label' => $hourSheet->validationStatusLabel(),
-                'validation_summary' => $hourSheet->validationSummary(),
+                // Anonymisé, sauf permission conges_heures.validators_identity.view.
+                'validation_summary' => $validatorIdentity->summaryFor($hourSheet, $user),
             ])
             ->values()
             ->all();
@@ -487,13 +490,8 @@ class HourSheetController extends Controller
             return $this->staleValidationResponse($request);
         }
 
-        // Le salarié n'est prévenu qu'une fois les DEUX valideurs prononcés, et
-        // de l'issue réelle : elle n'est pas forcément celle que vient
-        // d'exprimer l'acteur, puisque le Valideur 2 tranche en cas de
-        // désaccord.
-        if ($transition->closesCircuit()) {
-            $this->notifyHourSheetOwner($hourSheet, $transition->completesApproval(), $request->user());
-        }
+        // Aucune notification au salarié, quelle que soit l'issue : voir
+        // refuse(). Le statut reste lisible sur sa page Heures.
 
         $this->auditLogService->log([
             'action' => $transition->closesCircuit()
@@ -544,34 +542,33 @@ class HourSheetController extends Controller
     }
 
     /**
-     * Refus d'une journée d'heures : le circuit s'arrête, quel que soit le
-     * niveau atteint.
+     * Refus d'une journée d'heures, motif obligatoire.
+     *
+     * Droit de trancher et motif sont contrôlés par RefuseHourSheetRequest
+     * AVANT tout traitement : un motif absent ou vide renvoie une erreur de
+     * validation (422 en JSON) sans rien écrire, journaliser ni notifier.
      */
-    public function refuse(Request $request, HourSheet $hourSheet): RedirectResponse|JsonResponse
+    public function refuse(RefuseHourSheetRequest $request, HourSheet $hourSheet): RedirectResponse|JsonResponse
     {
-        abort_unless($this->twoStepValidation->canDecide($hourSheet, $request->user()), 403);
-
-        $validated = $request->validate([
-            'refusal_reason' => ['nullable', 'string', 'max:2000'],
-        ]);
-
         $before = $this->hourSheetAuditSnapshot($hourSheet);
-        $transition = $this->twoStepValidation->refuse($hourSheet, $request->user());
+
+        // Le motif est écrit dans la même transaction que la décision. Il est
+        // conservé même si l'issue finit par être une validation : c'est la
+        // trace de la position de ce valideur.
+        $transition = $this->twoStepValidation->refuse($hourSheet, $request->user(), [
+            'refusal_reason' => $request->reason(),
+        ]);
 
         if (! $transition->wasApplied) {
             return $this->staleValidationResponse($request);
         }
 
-        // Le motif est conservé même si l'issue finit par être une validation :
-        // c'est la trace de la position de ce valideur. L'écran ne l'affiche
-        // que sur une journée effectivement refusée.
-        $reason = trim((string) ($validated['refusal_reason'] ?? ''));
-        $hourSheet->refusal_reason = $reason !== '' ? $reason : null;
-        $hourSheet->save();
-
-        if ($transition->closesCircuit()) {
-            $this->notifyHourSheetOwner($hourSheet, $transition->completesApproval(), $request->user());
-        }
+        // Le salarié n'est pas notifié d'un refus d'heures (ni d'une
+        // validation) : le refus, son motif et ses auteurs restent enregistrés
+        // et journalisés ; le salarié, lui, ne voit que « Traitée ».
+        // Les Congés ne sont pas concernés : leurs notifications, refus
+        // compris, sont émises par LeaveRequestController avec leurs propres
+        // classes.
 
         $this->auditLogService->log([
             'action' => $transition->closesCircuit()
@@ -602,44 +599,6 @@ class HourSheetController extends Controller
         }
 
         return back()->with('success', $this->hourSheetOutcomeMessage($transition));
-    }
-
-    /**
-     * Le salarié n'est prévenu QUE d'un refus.
-     *
-     * Une journée validée est le cas normal — une par personne et par jour
-     * ouvré : la notifier reviendrait à annoncer que tout s'est passé comme
-     * prévu, plusieurs fois par semaine et par salarié. Le statut reste lisible
-     * sur la page Heures, qui porte déjà le badge de chaque journée. Seul le
-     * refus appelle une action, et lui seul est notifié.
-     *
-     * C'est bien l'ISSUE du circuit qui décide, pas le bouton qui vient d'être
-     * pressé : un refus du Valideur 1 rattrapé par un accord du Valideur 2 est
-     * une validation, et ne notifie donc rien.
-     *
-     * Le passage du premier accord au second ne concerne pas non plus le
-     * salarié : l'appelant ne notifie qu'une fois le circuit clos.
-     *
-     * Les Congés ne sont pas concernés : ils gardent leurs deux notifications.
-     */
-    private function notifyHourSheetOwner(HourSheet $hourSheet, bool $isApproved, ?User $actor): void
-    {
-        if ($isApproved) {
-            return;
-        }
-
-        $owner = $hourSheet->user;
-
-        if (! $owner) {
-            return;
-        }
-
-        $owner->notify(new HourSheetDecisionNotification(
-            $hourSheet,
-            $isApproved,
-            $this->userLabel($actor),
-            $hourSheet->refusal_reason,
-        ));
     }
 
     private function staleValidationResponse(Request $request): RedirectResponse|JsonResponse

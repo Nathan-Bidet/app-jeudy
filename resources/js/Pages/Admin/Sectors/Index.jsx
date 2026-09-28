@@ -19,6 +19,7 @@ const ABILITY_GROUP_ORDER = [
     'task.tiers',
     'task.formatting',
     'heures',
+    'conges_heures',
     'admin.users',
     'admin.sectors',
     'admin.access',
@@ -39,6 +40,7 @@ const ABILITY_GROUP_LABELS = {
     'task.tiers': 'Tâches - Tiers',
     'task.formatting': 'Mise en forme',
     heures: 'Heures',
+    conges_heures: 'Congés / Heures',
     'admin.users': 'Administration - Utilisateurs',
     'admin.sectors': 'Administration - Secteurs',
     'admin.access': 'Administration - Accès',
@@ -53,6 +55,7 @@ function abilityGroupKey(ability) {
     if (ability.startsWith('task.fuel.')) return 'task.fuel';
     if (ability.startsWith('task.tiers.')) return 'task.tiers';
     if (ability.startsWith('heures.')) return 'heures';
+    if (ability.startsWith('conges_heures.')) return 'conges_heures';
     if (ability.startsWith('admin.users.')) return 'admin.users';
     if (ability.startsWith('admin.sectors.')) return 'admin.sectors';
     if (ability.startsWith('admin.access.')) return 'admin.access';

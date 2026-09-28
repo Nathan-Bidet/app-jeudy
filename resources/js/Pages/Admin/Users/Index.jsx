@@ -23,6 +23,7 @@ const ABILITY_GROUP_ORDER = [
     'task.formatting',
     'task.archive',
     'heures',
+    'conges_heures',
     'calendar',
     'cotations',
     'annonces',
@@ -47,6 +48,7 @@ const ABILITY_GROUP_LABELS = {
     'task.formatting': 'Mise en forme',
     'task.archive': 'Tâches - Archive',
     heures: 'Heures',
+    conges_heures: 'Congés / Heures',
     calendar: 'Calendrier',
     cotations: 'Cotations',
     annonces: 'Annonces',
@@ -72,7 +74,7 @@ function abilityGroupKey(ability) {
 
     const [prefix] = ability.split('.');
 
-    if (['dashboard', 'directory', 'a_prevoir', 'engrais', 'ldt', 'maintenance', 'heures', 'calendar', 'cotations', 'annonces'].includes(prefix)) {
+    if (['dashboard', 'directory', 'a_prevoir', 'engrais', 'ldt', 'maintenance', 'heures', 'conges_heures', 'calendar', 'cotations', 'annonces'].includes(prefix)) {
         return prefix;
     }
 

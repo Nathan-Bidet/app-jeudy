@@ -8,7 +8,6 @@ use App\Models\LeaveUserValidator;
 use App\Models\Sector;
 use App\Models\User;
 use App\Models\ValidationGroup;
-use App\Notifications\HourSheetDecisionNotification;
 use App\Notifications\LeaveRequestApprovedNotification;
 use App\Notifications\LeaveRequestRefusedNotification;
 use App\Notifications\LeaveRequestSubmittedNotification;
@@ -751,14 +750,14 @@ it('ne notifie jamais le salarié quand ses heures sont validées', function ():
     $sheet = submitHourSheet($employee);
 
     $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
-    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
+    Notification::assertNothingSentTo($employee);
 
     // Ni au premier accord, ni à la clôture du circuit : une journée validée
     // est le cas normal et ne vaut pas notification.
     $this->actingAs($v2)->post(route('hours.approve', $sheet->id));
 
     expect($sheet->fresh()->status)->toBe(ValidationStage::APPROVED);
-    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
+    Notification::assertNothingSentTo($employee);
 });
 
 it('ne notifie pas le salarié quand le Valideur 2 rattrape un refus du Valideur 1', function (): void {
@@ -776,10 +775,10 @@ it('ne notifie pas le salarié quand le Valideur 2 rattrape un refus du Valideur
     // C'est l'issue qui décide, pas le bouton pressé en dernier : le Valideur 2
     // tranche, la journée est validée, donc rien n'est notifié.
     expect($sheet->fresh()->status)->toBe(ValidationStage::APPROVED);
-    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
+    Notification::assertNothingSentTo($employee);
 });
 
-it('notifie encore le salarié quand ses heures sont refusées', function (): void {
+it('ne notifie plus le salarié quand ses heures sont refusées', function (): void {
     Notification::fake();
 
     $v1 = twoStepUser();
@@ -789,21 +788,17 @@ it('notifie encore le salarié quand ses heures sont refusées', function (): vo
     $sheet = submitHourSheet($employee);
 
     $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires incohérents']);
-    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
-
     $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires incohérents']);
 
-    expect($sheet->fresh()->status)->toBe(ValidationStage::REFUSED);
-    Notification::assertSentTo(
-        $employee,
-        HourSheetDecisionNotification::class,
-        function (HourSheetDecisionNotification $notification) use ($employee): bool {
-            $data = $notification->toArray($employee);
+    // Le refus est bien enregistré, lui : décisions, motif, auteurs.
+    $sheet->refresh();
+    expect($sheet->status)->toBe(ValidationStage::REFUSED)
+        ->and($sheet->validator_1_decision)->toBe(ValidationStage::DECISION_REFUSED)
+        ->and($sheet->validator_2_decision)->toBe(ValidationStage::DECISION_REFUSED)
+        ->and((int) $sheet->validator_2_decided_by_id)->toBe((int) $v2->id)
+        ->and($sheet->refusal_reason)->toBe('Horaires incohérents');
 
-            return $data['type'] === 'hour_sheet_refused'
-                && $data['refusal_reason'] === 'Horaires incohérents';
-        },
-    );
+    Notification::assertNothingSentTo($employee);
 });
 
 it('rend les heures visibles aux deux valideurs dès la saisie', function (): void {
@@ -1087,7 +1082,8 @@ function playHourMatrix(string $decision1, string $decision2, string $order = 'v
 
     $act = function (User $validator, string $decision) use ($sheet): void {
         $route = $decision === 'approve' ? 'hours.approve' : 'hours.refuse';
-        test()->actingAs($validator)->post(route($route, $sheet->id))->assertSessionHasNoErrors();
+        $payload = $decision === 'approve' ? [] : ['refusal_reason' => 'Horaires à revoir'];
+        test()->actingAs($validator)->post(route($route, $sheet->id), $payload)->assertSessionHasNoErrors();
     };
 
     if ($order === 'v1-first') {
@@ -1257,7 +1253,7 @@ it('notifie l\'issue réelle et non la décision qui vient d\'être prise', func
     Notification::assertNotSentTo($requester, LeaveRequestRefusedNotification::class);
 });
 
-it('notifie le salarié de l\'issue réelle de ses heures', function (): void {
+it('ne notifie pas le salarié quand le Valideur 2 refuse ce que le Valideur 1 a validé', function (): void {
     Notification::fake();
 
     $v1 = twoStepUser();
@@ -1267,15 +1263,13 @@ it('notifie le salarié de l\'issue réelle de ses heures', function (): void {
 
     $sheet = submitHourSheet($employee);
     $this->actingAs($v1)->post(route('hours.approve', $sheet->id));
-    Notification::assertNotSentTo($employee, HourSheetDecisionNotification::class);
-
     $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires incohérents']);
 
     $sheet->refresh();
     expect($sheet->status)->toBe(ValidationStage::REFUSED)
         ->and($sheet->refusal_reason)->toBe('Horaires incohérents');
 
-    Notification::assertSentTo($employee, HourSheetDecisionNotification::class);
+    Notification::assertNothingSentTo($employee);
 });
 
 it('retire la journée de la file du valideur qui a refusé, pas de celle de l\'autre', function (): void {
@@ -1285,7 +1279,7 @@ it('retire la journée de la file du valideur qui a refusé, pas de celle de l\'
     groupWith($v1, $v2, [$employee]);
     $sheet = submitHourSheet($employee);
 
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires à revoir']);
 
     $this->actingAs($v2)->get(route('hours.index'))
         ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));

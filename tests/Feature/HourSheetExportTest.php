@@ -394,10 +394,13 @@ it('exporte les états réels des deux rangs, sans recomposer un statut global',
         ->and($row[COL_VALIDATOR_2])->toBe('En attente');
 });
 
-it('exporte « Refusé » sans motif quand aucun n\'a été saisi', function (): void {
+it('exporte « Refusé » sans motif pour une ancienne journée refusée sans motif', function (): void {
     [$v1, , , $sheet] = exportableDay('2026-10-05');
 
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+    // Le motif est désormais obligatoire ; les refus antérieurs peuvent
+    // pourtant en être dépourvus.
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Temporaire']);
+    HourSheet::query()->whereKey($sheet->id)->update(['refusal_reason' => null]);
 
     $row = exportedRowForDate(exportRowsFor(), '2026-10-05');
 
@@ -559,10 +562,11 @@ it('résiste à une date absente ou illisible', function (): void {
 const REFUSAL_BACKGROUND = 'FFFEF2F2';
 const REFUSAL_FONT = 'FFB91C1C';
 
-it('colore en rouge un refus sans motif', function (): void {
+it('colore en rouge un ancien refus sans motif', function (): void {
     [$v1, , , $sheet] = exportableDay('2026-10-05');
 
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Temporaire']);
+    HourSheet::query()->whereKey($sheet->id)->update(['refusal_reason' => null]);
 
     $rows = exportRowsFor();
     $styles = exportStylesFor();
@@ -663,7 +667,7 @@ it('ne déborde jamais sur les autres colonnes', function (): void {
 it('ne colore pas l\'en-tête', function (): void {
     [$v1, , , $sheet] = exportableDay('2026-10-05');
 
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires incorrects']);
 
     $styles = exportStylesFor();
 

@@ -3,6 +3,7 @@ import AppLayout from '@/Layouts/AppLayout';
 import LeaveRequestForm from '@/Pages/Leaves/Components/LeaveRequestForm';
 import { router } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
+import ValidatorDecisions from '@/Components/Validation/ValidatorDecisions';
 
 export default function LeavesIndex({
     users = [],
@@ -71,7 +72,9 @@ export default function LeavesIndex({
     };
 
     /**
-     * État des deux valideurs, ANONYMISÉ.
+     * État des deux valideurs, ANONYMISÉ — sauf permission
+     * conges_heures.validators_identity.view, qui fait ajouter leur nom par le
+     * serveur (voir Support/validationSummary).
      *
      * Réservé aux valideurs et à l'administration : le serveur ne renvoie
      * `validation_summary` que dans la file de validation, jamais dans « Mes
@@ -86,15 +89,7 @@ export default function LeavesIndex({
             return null;
         }
 
-        return (
-            <div className="mt-2 space-y-0.5 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
-                {summary.map((entry) => (
-                    <p key={entry.level}>
-                        <span className="font-semibold">Valideur {entry.level} :</span> {entry.label}
-                    </p>
-                ))}
-            </div>
-        );
+        return <ValidatorDecisions summary={summary} className="mt-2 border-t border-[var(--app-border)] pt-2" />;
     };
 
     /**

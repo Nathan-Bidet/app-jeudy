@@ -14,19 +14,19 @@ import {
 } from '@/Support/hoursWorkTime';
 
 /**
- * Détail d'une journée d'heures, ouvert depuis la notification de refus.
+ * Détail d'une journée d'heures, ouvert depuis le lien d'une notification
+ * (`highlight`).
  *
- * Le motif du refus est mis en tête : c'est la raison d'être de cet écran, et
- * la seule information que le salarié ne peut pas déduire de sa propre saisie.
- * Le reste rappelle la journée telle qu'il l'a déclarée, avec les mêmes
+ * Il rappelle la journée telle que le salarié l'a déclarée, avec les mêmes
  * helpers que la carte de l'historique et que la file du valideur — les trois
- * vues doivent dire exactement la même chose.
+ * vues doivent dire exactement la même chose. L'issue de la validation n'y
+ * figure pas : le salarié ne voit que « En validation » ou « Traitée », et le
+ * motif d'un refus ne lui est pas transmis.
  *
- * La modale ne propose aucune action : corriger une journée refusée se fait
- * depuis sa carte, avec le bouton « Modifier » déjà en place.
+ * La modale ne propose aucune action : corriger une journée se fait depuis sa
+ * carte, avec le bouton « Modifier » déjà en place.
  */
 export default function HourSheetDetailModal({ sheet = null, leave = null, onClose = () => {} }) {
-    const isRefused = String(sheet?.status || '').toLowerCase() === 'refused';
     const coverage = leaveCoverage(leave);
     const isContinuousDay = Boolean(sheet?.is_continuous_day) && !coverage.morning && !coverage.afternoon;
     const normalizedSheet = sheet ? { ...sheet, is_continuous_day: isContinuousDay } : null;
@@ -49,15 +49,6 @@ export default function HourSheetDetailModal({ sheet = null, leave = null, onClo
                         <HourSheetStatusBadge sheet={sheet} />
                     </span>
                 </div>
-
-                {isRefused && (
-                    <div className="rounded-xl border border-[#ef4444] bg-[#fef2f2] p-3">
-                        <p className="font-semibold text-[#b91c1c]">Motif du refus</p>
-                        <p className="mt-1 whitespace-pre-line text-[#7f1d1d]">
-                            {String(sheet?.refusal_reason || '').trim() || 'Aucun motif n’a été indiqué.'}
-                        </p>
-                    </div>
-                )}
 
                 {sheet?.is_not_worked ? (
                     <dl className="grid gap-2">
