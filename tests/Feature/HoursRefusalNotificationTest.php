@@ -85,16 +85,16 @@ it('refus par le Valideur 1 puis le Valideur 2 : refus enregistré, aucune notif
     assertEmployeeNotNotified($employee);
 });
 
-it('refus par le Valideur 2 en premier, sans motif : aucune notification', function (): void {
+it('refus par le Valideur 2 en premier : motif nettoyé, aucune notification', function (): void {
     [$v1, $v2, $employee] = refusalCircuit();
     $sheet = submitHourSheet($employee);
 
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => "  Pause absente\n"]);
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => "\tHoraires à revoir  "]);
 
     $sheet->refresh();
     expect($sheet->status)->toBe(ValidationStage::REFUSED)
-        ->and($sheet->refusal_reason)->toBeNull();
+        ->and($sheet->refusal_reason)->toBe('Horaires à revoir');
 
     assertEmployeeNotNotified($employee);
 });
@@ -133,11 +133,11 @@ it('validation par l\'un, l\'autre en attente : statuts individuels exposés tel
             ->where('hourSheetsToValidate.0.validation_summary.1.decision', null)
             ->where('hourSheetsToValidate.0.validation_summary.1.label', 'En attente'));
 
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Non']);
 
     // Vue administrateur : le détail reflète les deux décisions réelles.
     $sheet2 = submitHourSheet($employee, '2026-10-07');
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet2->id));
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet2->id), ['refusal_reason' => 'Non']);
     $this->actingAs(twoStepAdmin())
         ->get(route('hours.index'))
         ->assertInertia(fn (Assert $page) => $page
@@ -186,8 +186,8 @@ it('salarié désactivé : refus enregistré, aucune notification', function ():
     $sheet = submitHourSheet($employee);
     $employee->update(['is_active' => false]);
 
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Non']);
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Non']);
 
     expect($sheet->fresh()->status)->toBe(ValidationStage::REFUSED);
     assertEmployeeNotNotified($employee);
@@ -203,8 +203,8 @@ it('les notifications de refus déjà en base sont conservées', function (): vo
     ]);
 
     $sheet = submitHourSheet($employee);
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Non']);
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Non']);
 
     expect(DB::table('notifications')->where('notifiable_id', $employee->id)->pluck('id')->all())->toBe([$legacyId]);
 });
@@ -218,7 +218,7 @@ it('compteurs de validation inchangés après un refus', function (): void {
         ->get(route('hours.index'))
         ->assertInertia(fn (Assert $page) => $page->where('pendingValidationCount', 2));
 
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Non']);
 
     $this->actingAs($v1)
         ->get(route('hours.index'))

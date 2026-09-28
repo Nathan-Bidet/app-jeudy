@@ -1082,7 +1082,8 @@ function playHourMatrix(string $decision1, string $decision2, string $order = 'v
 
     $act = function (User $validator, string $decision) use ($sheet): void {
         $route = $decision === 'approve' ? 'hours.approve' : 'hours.refuse';
-        test()->actingAs($validator)->post(route($route, $sheet->id))->assertSessionHasNoErrors();
+        $payload = $decision === 'approve' ? [] : ['refusal_reason' => 'Horaires à revoir'];
+        test()->actingAs($validator)->post(route($route, $sheet->id), $payload)->assertSessionHasNoErrors();
     };
 
     if ($order === 'v1-first') {
@@ -1278,7 +1279,7 @@ it('retire la journée de la file du valideur qui a refusé, pas de celle de l\'
     groupWith($v1, $v2, [$employee]);
     $sheet = submitHourSheet($employee);
 
-    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v2)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => 'Horaires à revoir']);
 
     $this->actingAs($v2)->get(route('hours.index'))
         ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page->where('pendingValidationCount', 0));

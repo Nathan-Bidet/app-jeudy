@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Hours\RefuseHourSheetRequest;
 use App\Models\HourSheet;
 use App\Models\LeaveRequest;
 use App\Models\User;
@@ -541,34 +542,30 @@ class HourSheetController extends Controller
     }
 
     /**
-     * Refus d'une journée d'heures : le circuit s'arrête, quel que soit le
-     * niveau atteint.
+     * Refus d'une journée d'heures, motif obligatoire.
+     *
+     * Droit de trancher et motif sont contrôlés par RefuseHourSheetRequest
+     * AVANT tout traitement : un motif absent ou vide renvoie une erreur de
+     * validation (422 en JSON) sans rien écrire, journaliser ni notifier.
      */
-    public function refuse(Request $request, HourSheet $hourSheet): RedirectResponse|JsonResponse
+    public function refuse(RefuseHourSheetRequest $request, HourSheet $hourSheet): RedirectResponse|JsonResponse
     {
-        abort_unless($this->twoStepValidation->canDecide($hourSheet, $request->user()), 403);
-
-        $validated = $request->validate([
-            'refusal_reason' => ['nullable', 'string', 'max:2000'],
-        ]);
-
         $before = $this->hourSheetAuditSnapshot($hourSheet);
-        $transition = $this->twoStepValidation->refuse($hourSheet, $request->user());
+
+        // Le motif est écrit dans la même transaction que la décision. Il est
+        // conservé même si l'issue finit par être une validation : c'est la
+        // trace de la position de ce valideur.
+        $transition = $this->twoStepValidation->refuse($hourSheet, $request->user(), [
+            'refusal_reason' => $request->reason(),
+        ]);
 
         if (! $transition->wasApplied) {
             return $this->staleValidationResponse($request);
         }
 
-        // Le motif est conservé même si l'issue finit par être une validation :
-        // c'est la trace de la position de ce valideur. L'écran ne l'affiche
-        // que sur une journée effectivement refusée.
-        $reason = trim((string) ($validated['refusal_reason'] ?? ''));
-        $hourSheet->refusal_reason = $reason !== '' ? $reason : null;
-        $hourSheet->save();
-
-        // Le salarié n'est plus notifié d'un refus d'heures (ni d'une
-        // validation, déjà silencieuse) : le refus, son motif et ses auteurs
-        // restent enregistrés, journalisés et visibles sur sa page Heures.
+        // Le salarié n'est pas notifié d'un refus d'heures (ni d'une
+        // validation) : le refus, son motif et ses auteurs restent enregistrés
+        // et journalisés ; le salarié, lui, ne voit que « Traitée ».
         // Les Congés ne sont pas concernés : leurs notifications, refus
         // compris, sont émises par LeaveRequestController avec leurs propres
         // classes.

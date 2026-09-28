@@ -114,7 +114,7 @@ it('circuit à un seul valideur : « Traitée » dès sa décision', function ()
     $group->update(['validator_2_id' => null]);
 
     $sheet = submitHourSheet($employee);
-    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id));
+    $this->actingAs($v1)->post(route('hours.refuse', $sheet->id), ['refusal_reason' => OWNER_REASON]);
 
     expect(ownerSheetPayload($this, $employee, $sheet)['status'])->toBe('processed');
 });

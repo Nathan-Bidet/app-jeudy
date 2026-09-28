@@ -1,6 +1,11 @@
 import { router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
+import InputError from '@/Components/InputError';
 import ValidatorDecisions from '@/Components/Validation/ValidatorDecisions';
+
+// Mêmes règle et message que RefuseHourSheetRequest côté serveur.
+const REFUSAL_REASON_REQUIRED = 'Le motif du refus est obligatoire.';
+const REFUSAL_REASON_MAX_LENGTH = 2000;
 
 import {
     checkedExtraLabels,
@@ -61,6 +66,7 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
     const [openUser, setOpenUser] = useState(null);
     const [refusing, setRefusing] = useState(null);
     const [refusalReason, setRefusalReason] = useState('');
+    const [refusalError, setRefusalError] = useState(null);
     const [processingId, setProcessingId] = useState(null);
 
     // Regroupement par personne : un valideur traite « les heures de X », pas
@@ -95,19 +101,42 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
         });
     };
 
+    const openRefusal = (day) => {
+        setRefusing(day);
+        setRefusalReason('');
+        setRefusalError(null);
+    };
+
+    const closeRefusal = () => {
+        setRefusing(null);
+        setRefusalReason('');
+        setRefusalError(null);
+    };
+
+    // Le motif est obligatoire : une valeur faite uniquement d'espaces, de
+    // tabulations ou de retours à la ligne compte comme vide. Le serveur
+    // applique la même règle (RefuseHourSheetRequest) ; ce contrôle ne fait
+    // qu'éviter un aller-retour.
     const confirmRefusal = () => {
         if (!refusing) {
             return;
         }
 
+        if (refusalReason.trim() === '') {
+            setRefusalError(REFUSAL_REASON_REQUIRED);
+            return;
+        }
+
+        setRefusalError(null);
         setProcessingId(refusing.id);
         router.post(route('hours.refuse', refusing.id), { refusal_reason: refusalReason }, {
             preserveScroll: true,
-            onFinish: () => {
-                setProcessingId(null);
-                setRefusing(null);
-                setRefusalReason('');
-            },
+            // Refus enregistré (ou journée déjà traitée entre-temps) : le
+            // formulaire se referme.
+            onSuccess: closeRefusal,
+            // Erreur de validation : le formulaire reste ouvert, texte compris.
+            onError: (errors) => setRefusalError(errors?.refusal_reason || REFUSAL_REASON_REQUIRED),
+            onFinish: () => setProcessingId(null),
         });
     };
 
@@ -223,10 +252,7 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                         <button
                                                             type="button"
                                                             disabled={processingId === day.id}
-                                                            onClick={() => {
-                                                                setRefusing(day);
-                                                                setRefusalReason('');
-                                                            }}
+                                                            onClick={() => openRefusal(day)}
                                                             className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-60 sm:w-auto"
                                                         >
                                                             Refuser
@@ -239,15 +265,35 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                                 className="block text-sm font-medium text-[var(--app-text)]"
                                                                 htmlFor={`refusal-${day.id}`}
                                                             >
-                                                                Motif du refus (facultatif)
+                                                                Motif du refus
+                                                                <span className="ml-1 text-[var(--brand-yellow-dark)]" aria-hidden="true">*</span>
                                                             </label>
                                                             <textarea
                                                                 id={`refusal-${day.id}`}
                                                                 rows={2}
                                                                 value={refusalReason}
-                                                                onChange={(event) => setRefusalReason(event.target.value)}
-                                                                placeholder="Ce qui doit être corrigé…"
-                                                                className="mt-1 w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)]"
+                                                                onChange={(event) => {
+                                                                    setRefusalReason(event.target.value);
+                                                                    if (refusalError && event.target.value.trim() !== '') {
+                                                                        setRefusalError(null);
+                                                                    }
+                                                                }}
+                                                                placeholder="Indiquez la raison du refus…"
+                                                                required
+                                                                aria-required="true"
+                                                                aria-invalid={refusalError ? 'true' : 'false'}
+                                                                aria-describedby={refusalError ? `refusal-error-${day.id}` : undefined}
+                                                                maxLength={REFUSAL_REASON_MAX_LENGTH}
+                                                                autoFocus
+                                                                className={`mt-1 w-full rounded-lg border bg-[var(--app-surface)] px-3 py-2 text-sm text-[var(--app-text)] ${
+                                                                    refusalError ? 'border-red-600' : 'border-[var(--app-border)]'
+                                                                }`}
+                                                            />
+                                                            <InputError
+                                                                id={`refusal-error-${day.id}`}
+                                                                role="alert"
+                                                                message={refusalError}
+                                                                className="mt-1"
                                                             />
                                                             <div className="mt-2 flex flex-wrap gap-2">
                                                                 <button
@@ -260,7 +306,8 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                                 </button>
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => setRefusing(null)}
+                                                                    disabled={processingId === day.id}
+                                                                    onClick={closeRefusal}
                                                                     className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
                                                                 >
                                                                     Annuler

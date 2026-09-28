@@ -154,9 +154,11 @@ class TwoStepValidationService
      * Enregistre le refus de cet utilisateur : le circuit s'arrête là, sans
      * attendre l'autre valideur.
      */
-    public function refuse(Model $subject, User $actor): ValidationTransition
+    public function refuse(Model $subject, User $actor, array $attributes = []): ValidationTransition
     {
-        return $this->decide($subject, $actor, ValidationStage::DECISION_REFUSED);
+        // $attributes (le motif, pour les heures) est écrit dans la MÊME
+        // transaction que la décision : jamais de refus sans son motif.
+        return $this->decide($subject, $actor, ValidationStage::DECISION_REFUSED, $attributes);
     }
 
     /**
@@ -184,9 +186,9 @@ class TwoStepValidationService
      * valideur a entre-temps refusé, la décision est abandonnée proprement au
      * lieu d'être rejouée.
      */
-    private function decide(Model $subject, User $actor, string $decision): ValidationTransition
+    private function decide(Model $subject, User $actor, string $decision, array $attributes = []): ValidationTransition
     {
-        return DB::transaction(function () use ($subject, $actor, $decision): ValidationTransition {
+        return DB::transaction(function () use ($subject, $actor, $decision, $attributes): ValidationTransition {
             /** @var Model|null $locked */
             $locked = $subject->newQuery()
                 ->whereKey($subject->getKey())
@@ -216,6 +218,7 @@ class TwoStepValidationService
 
             $to = $locked->resolveGlobalStatus();
             $locked->status = $to;
+            $locked->forceFill($attributes);
             $locked->save();
 
             $subject->setRawAttributes($locked->getAttributes(), true);
