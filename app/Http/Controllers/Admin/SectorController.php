@@ -64,6 +64,8 @@ class SectorController extends Controller
         'maintenance.request',
         'maintenance.comment_hidden.view',
         'maintenance.point',
+        'directory.update',
+        'directory.files.create',
     ];
 
     public function __construct(private readonly AuditLogService $auditLogService)

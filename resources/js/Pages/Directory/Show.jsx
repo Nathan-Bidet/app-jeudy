@@ -325,7 +325,13 @@ export default function DirectoryShow({ profile, files, permissions, routes }) {
                                         : null
                                 }
                             />
-                            <InfoRow label="Lien GLPI" value={profile?.glpi_url} href={profile?.glpi_url} />
+                            <InfoRow label="Poste" value={profile?.job_title} />
+                            <InfoRow
+                                label="Responsable secteur"
+                                value={profile?.sector_manager?.name}
+                                href={profile?.sector_manager?.url}
+                            />
+                            <InfoRow label="Lien GLPI" value={profile?.glpi_url} href={profile?.glpi_href} />
                             {depot ? (
                                 <div className="grid gap-1 py-2 sm:grid-cols-[180px_1fr] sm:gap-3">
                                     <div className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--app-muted)]">
@@ -412,7 +418,9 @@ export default function DirectoryShow({ profile, files, permissions, routes }) {
                             </div>
                         </section>
 
-                        <FileUploader uploadUrl={routes.upload} canUpload={permissions?.can_attach_file} />
+                        {permissions?.can_attach_file ? (
+                            <FileUploader uploadUrl={routes.upload} canUpload />
+                        ) : null}
                     </div>
                 </div>
 

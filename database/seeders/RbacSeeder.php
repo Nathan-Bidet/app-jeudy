@@ -22,6 +22,8 @@ class RbacSeeder extends Seeder
         $permissions = [
             'dashboard.view',
             'directory.view',
+            'directory.update',
+            'directory.files.create',
             'a_prevoir.view',
             'a_prevoir.view.current_week_only',
             'a_prevoir.create',
