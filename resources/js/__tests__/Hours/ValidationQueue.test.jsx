@@ -169,4 +169,21 @@ describe('HoursValidationQueue — informations de la journée', () => {
         expect(container.textContent).not.toMatch(/Alice|Floriane/);
         expect(within(container).getAllByText(/En attente/).length).toBeGreaterThan(0);
     });
+
+    it('rend la décision de chaque valideur en badge, noms compris quand ils sont transmis', () => {
+        renderQueue([queueRow({
+            validation_summary: [
+                { level: 1, decision: null, label: 'En attente', validator: { name: 'Alice Blanchet', state: 'active' } },
+                { level: 2, decision: 'approved', label: 'Validé', validator: { name: 'Floriane Blanchet', state: 'active' } },
+            ],
+        })]);
+
+        const first = screen.getByTestId('validator-1');
+        const second = screen.getByTestId('validator-2');
+
+        expect(first).toHaveTextContent('Alice Blanchet');
+        expect(within(first).getByText('En attente')).toHaveAttribute('data-decision', 'pending');
+        expect(second).toHaveTextContent('Floriane Blanchet');
+        expect(within(second).getByText('Validé')).toHaveAttribute('data-decision', 'approved');
+    });
 });

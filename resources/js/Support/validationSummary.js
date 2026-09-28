@@ -21,10 +21,3 @@ export function validatorIdentityLabel(entry) {
 
     return `${name}${STATE_SUFFIXES[validator?.state] ?? ''}`;
 }
-
-export function validationEntryText(entry) {
-    const identity = validatorIdentityLabel(entry);
-    const decision = entry?.label ?? '';
-
-    return identity ? `${identity} — ${decision}` : decision;
-}

@@ -314,8 +314,9 @@ class HandleInertiaRequests extends Middleware
 
         // Décision sur une journée d'heures : le lien ouvre la journée
         // concernée, et non le haut de la page — l'historique peut en compter
-        // des centaines. `hour_sheet_approved` n'est plus émis, mais les
-        // notifications déjà en base doivent rester cliquables.
+        // des centaines. Ni `hour_sheet_approved` ni `hour_sheet_refused` ne
+        // sont plus émis, mais les notifications déjà en base doivent rester
+        // cliquables.
         if (in_array($type, ['hour_sheet_refused', 'hour_sheet_approved'], true) && Route::has('hours.index')) {
             $hourSheetId = $data['hour_sheet_id'] ?? null;
 

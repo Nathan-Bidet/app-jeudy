@@ -1,6 +1,6 @@
 import { router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
-import { validationEntryText } from '@/Support/validationSummary';
+import ValidatorDecisions from '@/Components/Validation/ValidatorDecisions';
 
 import {
     checkedExtraLabels,
@@ -204,16 +204,12 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                         </p>
                                                     )}
 
-                                                    {/* Chaque valideur voit où en est l'autre, sans le nommer. */}
-                                                    {summary.length > 0 ? (
-                                                        <div className="mt-2 space-y-0.5 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
-                                                            {summary.map((entry) => (
-                                                                <p key={entry.level}>
-                                                                    <span className="font-semibold">Valideur {entry.level} :</span> {validationEntryText(entry)}
-                                                                </p>
-                                                            ))}
-                                                        </div>
-                                                    ) : null}
+                                                    {/* Chaque valideur voit où en est l'autre ; le nom
+                                                        n'apparaît qu'avec la permission dédiée. */}
+                                                    <ValidatorDecisions
+                                                        summary={summary}
+                                                        className="mt-2 border-t border-[var(--app-border)] pt-2"
+                                                    />
 
                                                     <div className="mt-3 flex flex-wrap gap-2">
                                                         <button
