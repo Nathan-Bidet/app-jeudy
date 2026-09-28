@@ -67,7 +67,9 @@ it('renvoie le salarié sur la journée refusée depuis le centre de notificatio
     $this->actingAs($employee)
         ->getJson(route('notifications.latest'))
         ->assertOk()
-        ->assertJsonPath('notifications.0.type', 'hour_sheet_refused')
+        // Forme neutre : ni le type réel, ni « refusées », ni le motif.
+        ->assertJsonPath('notifications.0.type', 'hour_sheet_processed')
+        ->assertJsonPath('notifications.0.message', 'Vos heures du 05-10-2026 ont été traitées.')
         ->assertJsonPath('notifications.0.url', route('hours.index', ['highlight' => $sheet->id]));
 });
 
@@ -77,7 +79,8 @@ it('sert le même lien au chargement d\'une page', function (): void {
     $this->actingAs($employee)
         ->get(route('hours.index'))
         ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
-            ->where('notifications.items.0.type', 'hour_sheet_refused')
+            ->where('notifications.items.0.type', 'hour_sheet_processed')
+            ->where('notifications.items.0.message', 'Vos heures du 05-10-2026 ont été traitées.')
             ->where('notifications.items.0.url', route('hours.index', ['highlight' => $sheet->id]))
         );
 });
@@ -101,9 +104,13 @@ it('expose la journée à ouvrir à la page Heures', function (): void {
         ->get(route('hours.index', ['highlight' => $sheet->id]))
         ->assertInertia(fn (Inertia\Testing\AssertableInertia $page) => $page
             ->where('highlightId', (int) $sheet->id)
-            ->where('hourSheets.0.refusal_reason', 'Horaires incohérents')
-            ->where('hourSheets.0.status', ValidationStage::REFUSED)
+            ->where('hourSheets.0.status', 'processed')
+            ->where('hourSheets.0.status_label', 'Traitée')
+            ->missing('hourSheets.0.refusal_reason')
         );
+
+    expect($sheet->fresh()->status)->toBe(ValidationStage::REFUSED)
+        ->and($sheet->fresh()->refusal_reason)->toBe('Horaires incohérents');
 
     $this->actingAs($employee)
         ->get(route('hours.index'))

@@ -562,7 +562,7 @@ export default function HoursIndex({
     /**
      * Journée dont le détail est ouvert en modal.
      *
-     * `highlightId` vient du lien de la notification de refus. La recherche se
+     * `highlightId` vient du lien d'une notification. La recherche se
      * fait dans les journées du lecteur : un identifiant qui ne lui appartient
      * pas — ou qui a été supprimé depuis — n'ouvre simplement rien.
      */
@@ -830,19 +830,6 @@ export default function HoursIndex({
                             <HourSheetStatusBadge sheet={sheet} />
                         </span>
                     </div>
-                    {sheet.status === 'refused' ? (
-                        <p className="text-red-700">
-                            Motif du refus : {String(sheet.refusal_reason || '').trim() || 'non indiqué'}
-                            {' '}
-                            <button
-                                type="button"
-                                onClick={() => setDetailSheetId(Number(sheet.id))}
-                                className="font-semibold underline underline-offset-2"
-                            >
-                                Voir le détail
-                            </button>
-                        </p>
-                    ) : null}
                     {sheet.is_not_worked ? (
                         <>
                             <p>Statut : Non travaillé</p>

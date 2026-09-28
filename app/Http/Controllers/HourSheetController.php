@@ -12,6 +12,7 @@ use App\Services\Validation\ValidationGroupMailer;
 use App\Services\Validation\ValidationRolloutService;
 use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
+use App\Support\Hours\HourSheetOwnerView;
 use App\Support\Hours\WorkTimeReference;
 use App\Support\Validation\ValidationStage;
 use App\Support\Validation\ValidatorIdentity;
@@ -171,17 +172,12 @@ class HourSheetController extends Controller
                 'has_dinner_after_21' => (bool) $hourSheet->has_dinner_after_21,
                 'has_long_night' => (bool) $hourSheet->has_long_night,
 
-                // `status` à null : journée saisie avant la mise en place de la
-                // validation. Elle n'est ni validée ni en attente, et le front
-                // l'affiche comme telle plutôt que d'inventer un état.
-                'status' => $hourSheet->status,
-                'status_label' => $hourSheet->isLegacyEntry()
-                    ? 'Saisie antérieure à la validation'
-                    : $hourSheet->validationStatusLabel(),
-                // Pas de détail rang par rang ici : ce sont les journées du
-                // salarié lui-même, et un badge global lui suffit. Le détail
-                // reste servi aux valideurs, dans leur file de validation.
-                'refusal_reason' => $hourSheet->refusal_reason,
+                // Vue du PROPRIÉTAIRE (HourSheetOwnerView) : « en validation »
+                // tant que le circuit est ouvert, puis « Traitée » — sans dire
+                // si la journée a été validée ou refusée, et sans motif. Pas
+                // de détail rang par rang non plus. `status` à null : journée
+                // antérieure au circuit de validation.
+                ...HourSheetOwnerView::status($hourSheet),
             ])
             ->values()
             ->all();

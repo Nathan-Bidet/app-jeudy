@@ -54,27 +54,22 @@ export function OvertimeBadge({ label }) {
  * Badge d'état d'une journée, destiné au salarié.
  *
  * Il résume le circuit sans dire lequel des deux valideurs manque : « En
- * validation » tant que les deux accords ne sont pas réunis. Une journée
- * saisie avant la mise en place de la validation n'a pas d'état de circuit et
- * le dit telle quelle.
+ * validation » tant que les deux accords ne sont pas réunis, puis « Traitée »
+ * — le serveur ne transmet au salarié ni l'issue (validée ou refusée) ni le
+ * motif (HourSheetOwnerView). Une journée saisie avant la mise en place de la
+ * validation n'a pas d'état de circuit et le dit telle quelle.
  */
 export function HourSheetStatusBadge({ sheet }) {
     const status = String(sheet?.status || '').toLowerCase();
 
     const { label, dot, className } = (() => {
-        if (status === 'approved') {
+        if (status === 'processed') {
+            // Même famille jaune que « En validation », mais pleine et en texte
+            // noir : lisible, et distincte d'une journée encore en attente.
             return {
-                label: 'Validée',
-                dot: '#22c55e',
-                className: 'border-[#22c55e] text-[#15803d]',
-            };
-        }
-
-        if (status === 'refused') {
-            return {
-                label: 'Refusée',
-                dot: '#ef4444',
-                className: 'border-[#ef4444] text-[#b91c1c]',
+                label: sheet?.status_label || 'Traitée',
+                dot: '#a16207',
+                className: 'border-[#eab308] bg-[#fde047] text-black',
             };
         }
 
@@ -94,7 +89,10 @@ export function HourSheetStatusBadge({ sheet }) {
     })();
 
     return (
-        <span className={`inline-flex items-center gap-1.5 rounded-full border bg-white px-2.5 py-0.5 text-xs font-semibold ${className}`}>
+        <span
+            data-status={status || 'legacy'}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${status === 'processed' ? '' : 'bg-white'} ${className}`}
+        >
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dot }} aria-hidden="true" />
             {label}
         </span>

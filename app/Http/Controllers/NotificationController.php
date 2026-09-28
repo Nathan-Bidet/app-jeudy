@@ -6,6 +6,7 @@ use App\Models\Announcement;
 use App\Services\Announcements\AnnouncementPollPresenter;
 use App\Services\AuditLogService;
 use App\Support\Access\AccessManager;
+use App\Support\Hours\HourSheetOwnerView;
 use App\Support\RichText\SimpleHtmlSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -227,11 +228,18 @@ class NotificationController extends Controller
             }
         }
 
+        // Anciennes décisions sur des heures : servies sous forme neutre, sans
+        // révéler validation, refus ni motif (voir HourSheetOwnerView). Le lien,
+        // lui, est calculé sur le type réel.
+        $display = HourSheetOwnerView::isDecisionNotification($type)
+            ? HourSheetOwnerView::neutralDecisionNotification((array) $notification->data)
+            : ['type' => $type, 'message' => (string) ($notification->data['message'] ?? 'Notification')];
+
         return [
             'id' => (string) $notification->id,
-            'type' => $type,
+            'type' => $display['type'],
             'title' => $title,
-            'message' => (string) ($notification->data['message'] ?? 'Notification'),
+            'message' => $display['message'],
             'full_message' => $fullMessage,
             'body_html' => $bodyHtml,
             'announcement_author' => $announcementAuthor,
