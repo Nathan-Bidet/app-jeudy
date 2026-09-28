@@ -412,7 +412,9 @@ export default function DirectoryShow({ profile, files, permissions, routes }) {
                             </div>
                         </section>
 
-                        <FileUploader uploadUrl={routes.upload} canUpload={permissions?.can_attach_file} />
+                        {permissions?.can_attach_file ? (
+                            <FileUploader uploadUrl={routes.upload} canUpload />
+                        ) : null}
                     </div>
                 </div>
 

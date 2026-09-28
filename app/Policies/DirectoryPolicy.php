@@ -4,7 +4,16 @@ namespace App\Policies;
 
 use App\Models\User;
 use App\Models\UserFile;
+use App\Support\Access\AccessManager;
 
+/**
+ * Droits de l'annuaire. Deux permissions indépendantes, résolues par
+ * l'AccessManager (rôle, défauts de secteur, exceptions utilisateur) :
+ *  - directory.files.create : ajouter une pièce jointe à une fiche ;
+ *  - directory.update       : éditer la fiche d'un autre utilisateur.
+ * Aucune des deux n'implique l'autre. Les administrateurs passent par le
+ * Gate::before d'AppServiceProvider.
+ */
 class DirectoryPolicy
 {
     public function viewAny(User $authUser): bool
@@ -19,7 +28,7 @@ class DirectoryPolicy
 
     public function attachFile(User $authUser, User $targetUser): bool
     {
-        return $authUser->hasRole('admin');
+        return app(AccessManager::class)->can($authUser, 'directory.files.create');
     }
 
     public function deleteFile(User $authUser, UserFile $userFile): bool
@@ -38,10 +47,11 @@ class DirectoryPolicy
 
     public function update(User $authUser, User $targetUser): bool
     {
-        if ($authUser->hasRole('admin')) {
+        // Chacun conserve l'édition (champs limités) de sa propre fiche.
+        if ((int) $authUser->id === (int) $targetUser->id) {
             return true;
         }
 
-        return (int) $authUser->id === (int) $targetUser->id;
+        return app(AccessManager::class)->can($authUser, 'directory.update');
     }
 }

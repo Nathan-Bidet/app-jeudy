@@ -49,6 +49,8 @@ class UserManagementController extends Controller
         'heures.view',
         'heures.create',
         'heures.export',
+        'directory.update',
+        'directory.files.create',
     ];
 
     public function __construct(

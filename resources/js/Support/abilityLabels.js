@@ -1,6 +1,8 @@
 const ABILITY_LABELS = {
     'dashboard.view': 'Dashboard - Voir',
     'directory.view': 'Annuaire - Voir',
+    'directory.update': 'Annuaire - Modifier les fiches',
+    'directory.files.create': 'Annuaire - Ajouter des pièces jointes',
     'a_prevoir.view': 'À Prévoir - Voir',
     'a_prevoir.view.current_week_only': 'À Prévoir - Voir uniquement semaine',
     'a_prevoir.create': 'À Prévoir - Créer',
