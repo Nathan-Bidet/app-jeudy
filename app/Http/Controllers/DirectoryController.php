@@ -8,14 +8,17 @@ use App\Models\User;
 use App\Models\Vehicle;
 use App\Services\AuditLogService;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
+use Throwable;
 
 class DirectoryController extends Controller
 {
@@ -344,13 +347,32 @@ class DirectoryController extends Controller
             'phone' => ['nullable', 'string', 'max:50'],
             'mobile_phone' => ['nullable', 'string', 'max:50'],
             'internal_number' => ['nullable', 'string', 'max:50'],
+            // Téléphones supplémentaires : liste complète remplaçant l'existante.
+            // Clé absente = inchangée ; clé présente vide (null) = tout supprimer.
             'directory_phones' => ['nullable', 'array', 'max:10'],
-            'directory_phones.*.label' => ['nullable', 'string', 'max:40'],
-            'directory_phones.*.number' => ['nullable', 'string', 'max:50'],
+            'directory_phones.*' => ['array:label,number'],
+            'directory_phones.*.label' => ['nullable', 'string', 'max:40', 'not_regex:/\p{Cc}/u'],
+            'directory_phones.*.number' => [
+                'nullable',
+                'required_with:directory_phones.*.label',
+                'string',
+                'max:50',
+                'not_regex:/\p{Cc}/u',
+                $this->distinctDirectoryPhoneRule($request),
+            ],
             'birthday' => ['nullable', 'date'],
             'photo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ];
-        $messages = [];
+        $messages = [
+            'directory_phones.array' => 'La liste des téléphones est invalide.',
+            'directory_phones.max' => 'Dix téléphones au maximum.',
+            'directory_phones.*.array' => 'Ce téléphone est invalide.',
+            'directory_phones.*.label.max' => 'Le libellé ne peut pas dépasser 40 caractères.',
+            'directory_phones.*.label.not_regex' => 'Le libellé contient des caractères interdits.',
+            'directory_phones.*.number.required_with' => 'Le numéro est obligatoire.',
+            'directory_phones.*.number.max' => 'Le numéro ne peut pas dépasser 50 caractères.',
+            'directory_phones.*.number.not_regex' => 'Le numéro contient des caractères interdits.',
+        ];
 
         // Organisation, dates de validité, liens : permission directory.update.
         if ($canManageFields) {
@@ -429,7 +451,10 @@ class DirectoryController extends Controller
         }
 
         if (array_key_exists('directory_phones', $payload)) {
-            $payload['directory_phones'] = $this->normalizeDirectoryPhones($payload['directory_phones']);
+            // En FormData, un tableau vide n'est pas transmis : le formulaire
+            // envoie alors une valeur vide (null ici), qui vaut « aucun téléphone ».
+            $phones = $this->normalizeDirectoryPhones($payload['directory_phones']);
+            $payload['directory_phones'] = $phones !== [] ? $phones : null;
         }
 
         if (array_key_exists('job_title', $payload)) {
@@ -450,10 +475,12 @@ class DirectoryController extends Controller
         }
 
         $oldManagedPhoto = null;
+        $newPhotoPath = null;
 
         if ($request->hasFile('photo')) {
             $oldManagedPhoto = $this->managedPhotoPath($user->photo_path);
-            $payload['photo_path'] = $request->file('photo')->store('user-photos', 'public');
+            $newPhotoPath = $request->file('photo')->store('user-photos', 'public');
+            $payload['photo_path'] = $newPhotoPath;
         }
 
         if ($isAdmin && (array_key_exists('first_name', $payload) || array_key_exists('last_name', $payload))) {
@@ -465,7 +492,19 @@ class DirectoryController extends Controller
 
         $user->fill($payload);
         $changes = $this->auditableChanges($user);
-        $user->save();
+
+        try {
+            DB::transaction(fn () => $user->save());
+        } catch (Throwable $exception) {
+            // Journalisée par le gestionnaire d'exceptions (AuditLogService).
+            report($exception);
+
+            if ($newPhotoPath) {
+                Storage::disk('public')->delete($newPhotoPath);
+            }
+
+            return back()->with('error', 'La fiche n’a pas pu être enregistrée. Aucune modification n’a été appliquée.');
+        }
 
         if ($oldManagedPhoto && $user->photo_path !== $oldManagedPhoto) {
             Storage::disk('public')->delete($oldManagedPhoto);
@@ -876,6 +915,42 @@ class DirectoryController extends Controller
     /**
      * @return array<int, array{label:string,number:string}>
      */
+    /**
+     * Refuse un numéro déjà saisi plus haut dans la liste, espaces, points et
+     * tirets ignorés (« 06 29 07 37 60 » = « 06.29.07.37.60 »).
+     */
+    private function distinctDirectoryPhoneRule(Request $request): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($request): void {
+            $key = $this->directoryPhoneKey($value);
+
+            if ($key === '' || ! preg_match('/^directory_phones\.([^.]+)\.number$/', $attribute, $matches)) {
+                return;
+            }
+
+            $rows = $request->input('directory_phones');
+
+            foreach (is_array($rows) ? $rows : [] as $index => $row) {
+                if ((string) $index === $matches[1]) {
+                    return;
+                }
+
+                if (is_array($row) && $this->directoryPhoneKey($row['number'] ?? null) === $key) {
+                    $fail('Ce numéro figure déjà dans la liste.');
+
+                    return;
+                }
+            }
+        };
+    }
+
+    private function directoryPhoneKey(mixed $number): string
+    {
+        return is_string($number)
+            ? mb_strtolower(preg_replace('/[\s.\-]+/u', '', $number) ?? '')
+            : '';
+    }
+
     private function normalizeDirectoryPhones(mixed $phones): array
     {
         if (! is_array($phones)) {

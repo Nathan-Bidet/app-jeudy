@@ -295,6 +295,13 @@ export default function DirectoryEdit({ profile, sectors, depots, managers, perm
             depot_id: canManageFields && data.depot_id ? Number(data.depot_id) : data.depot_id,
             sector_manager_id:
                 canManageFields && data.sector_manager_id ? Number(data.sector_manager_id) : data.sector_manager_id,
+            // En FormData, un tableau vide ne produit aucune entrée : le serveur
+            // croirait la liste inchangée. null est transmis comme valeur vide,
+            // que le serveur interprète comme « supprimer tous les téléphones ».
+            directory_phones:
+                Array.isArray(data.directory_phones) && data.directory_phones.length > 0
+                    ? data.directory_phones
+                    : null,
         }));
 
         form.put(routes.update, {
