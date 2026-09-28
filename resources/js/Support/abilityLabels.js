@@ -64,6 +64,7 @@ const ABILITY_LABELS = {
     'heures.view': 'Heures - Voir',
     'heures.create': 'Heures - Créer ses heures',
     'heures.export': 'Heures - Exporter',
+    'conges_heures.validators_identity.view': 'Congés / Heures - Voir l’identité des valideurs',
     'admin.users.view': 'Administration Utilisateurs - Voir',
     'admin.users.manage': 'Administration Utilisateurs - Gérer',
     'admin.sectors.view': 'Administration Secteurs - Voir',

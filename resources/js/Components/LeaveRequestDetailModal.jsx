@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Check, Ban, Pencil, ChevronDown } from 'lucide-react';
+import { validationEntryText } from '@/Support/validationSummary';
 
 function getCsrfToken() {
     const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
@@ -234,7 +235,7 @@ export default function LeaveRequestDetailModal({ leaveRequestId, onClose }) {
                                         <Row
                                             key={entry.level}
                                             label={`Valideur ${entry.level}`}
-                                            value={entry.label}
+                                            value={validationEntryText(entry)}
                                         />
                                     ))
                                     : null}

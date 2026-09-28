@@ -1,5 +1,6 @@
 import { router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
+import { validationEntryText } from '@/Support/validationSummary';
 
 import {
     checkedExtraLabels,
@@ -208,7 +209,7 @@ export default function HoursValidationQueue({ rows = [], pendingCount = 0 }) {
                                                         <div className="mt-2 space-y-0.5 border-t border-[var(--app-border)] pt-2 text-xs text-[var(--app-muted)]">
                                                             {summary.map((entry) => (
                                                                 <p key={entry.level}>
-                                                                    <span className="font-semibold">Valideur {entry.level} :</span> {entry.label}
+                                                                    <span className="font-semibold">Valideur {entry.level} :</span> {validationEntryText(entry)}
                                                                 </p>
                                                             ))}
                                                         </div>

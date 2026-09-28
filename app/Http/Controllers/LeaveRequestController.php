@@ -22,6 +22,7 @@ use App\Services\Validation\ValidationTransition;
 use App\Services\Validation\ValidationGroupMailer;
 use App\Services\Validation\ValidationGroupService;
 use App\Support\Validation\ValidationStage;
+use App\Support\Validation\ValidatorIdentity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -188,7 +189,9 @@ class LeaveRequestController extends Controller
          * valideurs manque, un badge global lui suffit — et rien de ce qu'il
          * ne doit pas voir ne descend jusqu'au navigateur.
          */
-        $formatLeaveRequest = static function (LeaveRequest $leaveRequest, bool $includeValidationDetail = true) use ($viewerId, $isAdmin): array {
+        $validatorIdentity = app(ValidatorIdentity::class);
+
+        $formatLeaveRequest = static function (LeaveRequest $leaveRequest, bool $includeValidationDetail = true) use ($viewerId, $isAdmin, $user, $validatorIdentity): array {
             $target = $leaveRequest->target;
             $proposedBy = $leaveRequest->proposedBy;
             $leaveType = $leaveRequest->leaveType;
@@ -226,11 +229,11 @@ class LeaveRequestController extends Controller
                 'has_second_level' => $leaveRequest->hasSecondValidationLevel(),
 
                 // État des deux valideurs, ANONYMISÉ : « Validé », « Refusé »
-                // ou « En attente ». Aucun nom n'est transmis au navigateur —
-                // l'identité reste en base et dans le journal d'audit. Absent
-                // du payload du demandeur.
+                // ou « En attente ». Le nom n'est ajouté qu'avec la permission
+                // conges_heures.validators_identity.view (ValidatorIdentity).
+                // Absent du payload du demandeur.
                 'validation_summary' => $includeValidationDetail
-                    ? $leaveRequest->validationSummary()
+                    ? $validatorIdentity->summaryFor($leaveRequest, $user)
                     : null,
 
                 // Vrai tant que CE lecteur peut encore se prononcer. Il devient
@@ -255,11 +258,11 @@ class LeaveRequestController extends Controller
             ->all();
 
         $leaveRequestsToValidateQuery = LeaveRequest::query()
-            ->with([
+            ->with(array_merge([
                 'target:id,name,first_name,last_name,email',
                 'leaveType:id,name',
                 'proposedBy:id,name,first_name,last_name,email',
-            ]);
+            ], $validatorIdentity->eagerLoadsFor($user)));
 
         if (! $isAdmin) {
             // Un valideur voit les demandes des groupes dont il est valideur,
@@ -1126,7 +1129,7 @@ class LeaveRequestController extends Controller
             'status_label' => $leaveRequest->validationStatusLabel(),
             'can_see_validation_detail' => $canSeeValidationDetail,
             'validation_summary' => $canSeeValidationDetail
-                ? $leaveRequest->validationSummary()
+                ? app(ValidatorIdentity::class)->summaryFor($leaveRequest, $user)
                 : null,
 
             'permissions' => [

@@ -15,6 +15,7 @@ use App\Services\Validation\ValidationTransition;
 use App\Support\Access\AccessManager;
 use App\Support\Hours\WorkTimeReference;
 use App\Support\Validation\ValidationStage;
+use App\Support\Validation\ValidatorIdentity;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -229,7 +230,12 @@ class HourSheetController extends Controller
     {
         $isAdmin = (bool) $user->hasRole('admin');
 
-        $query = HourSheet::query()->with('user:id,name,first_name,last_name,email');
+        $validatorIdentity = app(ValidatorIdentity::class);
+
+        $query = HourSheet::query()->with(array_merge(
+            ['user:id,name,first_name,last_name,email'],
+            $validatorIdentity->eagerLoadsFor($user),
+        ));
 
         if ($isAdmin) {
             $query->whereIn('status', ValidationStage::OPEN);
@@ -273,7 +279,8 @@ class HourSheetController extends Controller
 
                 'status' => $hourSheet->status,
                 'status_label' => $hourSheet->validationStatusLabel(),
-                'validation_summary' => $hourSheet->validationSummary(),
+                // Anonymisé, sauf permission conges_heures.validators_identity.view.
+                'validation_summary' => $validatorIdentity->summaryFor($hourSheet, $user),
             ])
             ->values()
             ->all();
