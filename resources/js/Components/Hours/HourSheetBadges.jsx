@@ -59,17 +59,24 @@ export function OvertimeBadge({ label }) {
  * motif (HourSheetOwnerView). Une journée saisie avant la mise en place de la
  * validation n'a pas d'état de circuit et le dit telle quelle.
  */
+/**
+ * Jaune du circuit de validation : contour et pastille partagés par « En
+ * validation » et « Traitée », qui ne diffèrent que par la couleur du texte.
+ */
+const VALIDATION_DOT = '#eab308';
+const VALIDATION_BORDER = 'border-[#eab308]';
+
 export function HourSheetStatusBadge({ sheet }) {
     const status = String(sheet?.status || '').toLowerCase();
 
     const { label, dot, className } = (() => {
         if (status === 'processed') {
-            // Même famille jaune que « En validation », mais pleine et en texte
-            // noir : lisible, et distincte d'une journée encore en attente.
+            // Même badge que « En validation », texte noir : le salarié
+            // distingue une journée close d'une journée encore en attente.
             return {
                 label: sheet?.status_label || 'Traitée',
-                dot: '#a16207',
-                className: 'border-[#eab308] bg-[#fde047] text-black',
+                dot: VALIDATION_DOT,
+                className: `${VALIDATION_BORDER} text-black`,
             };
         }
 
@@ -83,15 +90,15 @@ export function HourSheetStatusBadge({ sheet }) {
 
         return {
             label: 'En validation',
-            dot: '#eab308',
-            className: 'border-[#eab308] text-[#a16207]',
+            dot: VALIDATION_DOT,
+            className: `${VALIDATION_BORDER} text-[#a16207]`,
         };
     })();
 
     return (
         <span
             data-status={status || 'legacy'}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${status === 'processed' ? '' : 'bg-white'} ${className}`}
+            className={`inline-flex items-center gap-1.5 rounded-full border bg-white px-2.5 py-0.5 text-xs font-semibold ${className}`}
         >
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dot }} aria-hidden="true" />
             {label}

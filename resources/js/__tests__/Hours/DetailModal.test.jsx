@@ -65,14 +65,35 @@ function processedSheet(overrides = {}) {
 describe('HourSheetStatusBadge', () => {
     afterEach(cleanup);
 
-    it('affiche « Traitée » en jaune plein, texte noir', () => {
-        render(<HourSheetStatusBadge sheet={processedSheet()} />);
-        const badge = screen.getByText('Traitée');
+    /** Badge rendu seul, avec sa pastille. */
+    function renderBadge(overrides) {
+        const { unmount } = render(<HourSheetStatusBadge sheet={processedSheet(overrides)} />);
+        const badge = document.querySelector('[data-status]');
+        const dot = badge.querySelector('[aria-hidden="true"]');
+        const result = {
+            classes: badge.className.split(/\s+/).filter(Boolean),
+            dotColor: dot.style.backgroundColor,
+        };
+        unmount();
 
-        expect(badge).toHaveAttribute('data-status', 'processed');
-        expect(badge.className).toContain('bg-[#fde047]');
-        expect(badge.className).toContain('text-black');
-        expect(badge.className).toContain('border-[#eab308]');
+        return result;
+    }
+
+    it('affiche « Traitée » comme « En validation » : sans fond jaune, même contour, même pastille, texte noir', () => {
+        const processed = renderBadge();
+        const pending = renderBadge({ status: 'pending', status_label: 'En attente de validation' });
+
+        expect(processed.classes).not.toContain('bg-[#fde047]');
+        expect(processed.classes).toContain('bg-white');
+        expect(processed.classes).toContain('text-black');
+        expect(processed.dotColor).toBe(pending.dotColor);
+
+        // Seule la couleur du texte diffère : contour, fond, dimensions,
+        // espacements, arrondi et alignement sont identiques.
+        const withoutText = (classes) => classes.filter((name) => !name.startsWith('text-['));
+        expect(withoutText(processed.classes).filter((name) => name !== 'text-black'))
+            .toEqual(withoutText(pending.classes));
+        expect(processed.classes.some((name) => /^(sm|md|lg|xl):/.test(name))).toBe(false);
     });
 
     it('garde « En validation » distinct tant que le circuit est ouvert', () => {
@@ -109,6 +130,9 @@ describe('HourSheetDetailModal', () => {
         expect(screen.getByText('Entretien du matériel')).toBeInTheDocument();
         expect(screen.getByText('Déjeuner')).toBeInTheDocument();
         expect(screen.getByText('Traitée')).toBeInTheDocument();
+        // Même badge que dans l'historique : pas de fond jaune.
+        expect(screen.getByText('Traitée').className).not.toContain('bg-[#fde047]');
+        expect(screen.getByText('Traitée').className).toContain('border-[#eab308]');
         expect(document.body.textContent).not.toMatch(/Motif|Refus|Validée/);
     });
 
@@ -224,6 +248,8 @@ describe('Hours/Index — vue du salarié', () => {
 
         const badge = screen.getByText('Traitée');
         expect(badge).toHaveAttribute('data-status', 'processed');
+        expect(badge.className).not.toContain('bg-[#fde047]');
+        expect(badge.className).toContain('border-[#eab308]');
         expect(screen.queryByText(/Motif du refus/)).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Voir le détail' })).not.toBeInTheDocument();
         expect(screen.queryByText(/Refusée|Validée/)).not.toBeInTheDocument();
