@@ -255,6 +255,31 @@ describe('Hours/Index — vue du salarié', () => {
         expect(screen.queryByText(/Refusée|Validée/)).not.toBeInTheDocument();
     });
 
+    it('range dans l\'historique toutes les journées traitées, même antérieures à la date de début, et laisse l\'attente à part', () => {
+        // Régression : date de début au 3 septembre, journées traitées les 1er
+        // et 2 — l'historique affichait « Aucune journée terminée ».
+        renderPage({
+            hourSheets: [
+                processedSheet({ id: 11, work_date: '2026-09-01', description: 'Journée du 1er' }),
+                processedSheet({ id: 12, work_date: '2026-09-02', description: 'Journée du 2' }),
+                processedSheet({ id: 13, work_date: '2026-08-31', description: 'Journée en attente', status: 'pending', status_label: 'En attente de validation' }),
+            ],
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Afficher l\'historique' }));
+
+        const history = screen.getByRole('heading', { name: 'Historique' }).closest('section');
+        const pending = screen.getByRole('heading', { name: 'Mes heures en validation' }).closest('section');
+
+        expect(within(history).queryByText('Aucune journée terminée.')).not.toBeInTheDocument();
+        expect(within(history).getAllByText('Traitée')).toHaveLength(2);
+        expect(within(history).getByText(/Journée du 1er/)).toBeInTheDocument();
+        expect(within(history).getByText(/Journée du 2/)).toBeInTheDocument();
+        expect(within(history).queryByText(/Journée en attente/)).not.toBeInTheDocument();
+        expect(within(pending).getByText(/Journée en attente/)).toBeInTheDocument();
+        expect(within(pending).queryByText('Traitée')).not.toBeInTheDocument();
+    });
+
     it('garde « En validation » pour une journée encore ouverte', () => {
         renderPage({ hourSheets: [processedSheet({ status: 'pending', status_label: 'En attente de validation' })] });
 
