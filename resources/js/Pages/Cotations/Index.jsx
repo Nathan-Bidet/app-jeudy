@@ -758,7 +758,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage ? (
-                    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-0.5">
+                    <div className="grid grid-cols-[auto_minmax(4rem,1fr)] items-center gap-0.5">
                         <button
                             type="button"
                             onClick={() => setManualPrice(row, {
@@ -779,7 +779,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                             inputMode="numeric"
                             value={marginValue}
                             onChange={(event) => setManualPrice(row, 'margin', normalizeMarginInput(event.target.value))}
-                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1.5 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none ${COTATION_VALUE_CLASS}`}
                         />
                     </div>
                 ) : (
@@ -839,10 +839,10 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                 <div className="w-full max-w-full overflow-hidden">
                     <table className={COTATION_TABLE_CLASS}>
                         <colgroup>
-                            <col className={canManage ? 'w-[24%]' : 'w-[24%]'} />
-                            <col className={canManage ? 'w-[24%]' : 'w-[22%]'} />
+                            <col className={canManage ? 'w-[20%]' : 'w-[24%]'} />
+                            <col className={canManage ? 'w-[20%]' : 'w-[22%]'} />
                             <col className={canManage ? 'w-[18%]' : 'w-[20%]'} />
-                            <col className={canManage ? 'w-[14%]' : 'w-[16%]'} />
+                            <col className={canManage ? 'w-[22%]' : 'w-[16%]'} />
                             <col className={canManage ? 'w-[14%]' : 'w-[18%]'} />
                             {canManage ? <col className="w-[6%]" /> : null}
                         </colgroup>
