@@ -367,11 +367,27 @@ function formatRoundedPrice(value) {
     }).format(Math.round(number))} €`;
 }
 
-function formatMargin(value) {
+function normalizeMarginOperation(operation) {
+    return operation === 'add' ? 'add' : 'subtract';
+}
+
+function marginSign(operation) {
+    return normalizeMarginOperation(operation) === 'add' ? '+' : '-';
+}
+
+// Mirrors CotationManualPrice::applyMargin() côté serveur : la base reste
+// positive, le signe vit uniquement dans l'opération (MATIF − base / MATIF + base).
+function applyMargin(matif, margin, operation) {
+    const base = Math.abs(parseDecimal(margin) ?? 0);
+
+    return normalizeMarginOperation(operation) === 'add' ? matif + base : matif - base;
+}
+
+function formatMargin(value, operation) {
     const number = parseDecimal(value);
     if (number === null) return '—';
 
-    return `-${new Intl.NumberFormat('fr-FR', {
+    return `${marginSign(operation)}${new Intl.NumberFormat('fr-FR', {
         maximumFractionDigits: 0,
     }).format(Math.abs(number))} €`;
 }
@@ -449,8 +465,7 @@ function resolveFinalPriceFromRows(rowsByKey, referenceKey, stack = [], resolved
         return null;
     }
 
-    const margin = Math.abs(parseDecimal(row.margin) ?? 0);
-    const finalPrice = matif - margin;
+    const finalPrice = applyMargin(matif, row.margin, row.margin_operation);
     resolved.set(referenceKey, finalPrice);
 
     return finalPrice;
@@ -613,8 +628,8 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
         ? ''
         : String(Math.abs(parseDecimal(rawMarginValue) ?? 0));
     const matifNumber = parseDecimal(matifValue);
-    const marginNumber = Math.abs(parseDecimal(marginValue) ?? 0);
-    const finalPrice = matifNumber !== null ? matifNumber - marginNumber : null;
+    const marginOperation = normalizeMarginOperation(draft.margin_operation ?? row.margin_operation);
+    const finalPrice = matifNumber !== null ? applyMargin(matifNumber, marginValue, marginOperation) : null;
 
     return (
         <tr className="border-t border-[var(--app-border)]">
@@ -744,7 +759,19 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage ? (
                     <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-0.5">
-                        <span className={`${COTATION_VALUE_CLASS} text-[var(--app-muted)]`}>-</span>
+                        <button
+                            type="button"
+                            onClick={() => setManualPrice(row, {
+                                margin_operation: marginOperation === 'add' ? 'subtract' : 'add',
+                            })}
+                            aria-label={marginOperation === 'add'
+                                ? 'Base ajoutée au MATIF : passer en soustraction'
+                                : 'Base soustraite du MATIF : passer en addition'}
+                            title={marginOperation === 'add' ? 'La base est ajoutée au MATIF' : 'La base est soustraite du MATIF'}
+                            className={`${COTATION_VALUE_CLASS} inline-flex h-7 w-5 items-center justify-center rounded-md text-[var(--app-muted)] hover:bg-[var(--app-surface)] hover:text-[var(--app-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary,currentColor)]`}
+                        >
+                            {marginSign(marginOperation)}
+                        </button>
                         <input
                             type="number"
                             step="1"
@@ -756,7 +783,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                         />
                     </div>
                 ) : (
-                    <span className={COTATION_VALUE_CLASS}>{formatMargin(marginValue)}</span>
+                    <span className={COTATION_VALUE_CLASS}>{formatMargin(marginValue, marginOperation)}</span>
                 )}
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-right`}>
@@ -1913,6 +1940,7 @@ function flattenMarketRows(groups = []) {
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
             final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
+            margin_operation: normalizeMarginOperation(row.margin_operation),
             sort_order: row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
         }))
@@ -2141,6 +2169,7 @@ export default function CotationsIndex({
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
             final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
+            margin_operation: normalizeMarginOperation(row.margin_operation),
             sort_order: row.sort_order ?? row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
             is_new: Boolean(row.is_new),
@@ -2182,6 +2211,7 @@ export default function CotationsIndex({
                 manual_matif: '',
                 final_price_reference_key: '',
                 margin: '',
+                margin_operation: 'subtract',
                 sort_order: form.data.manual_prices?.length || 0,
                 has_euronext: false,
                 is_new: true,

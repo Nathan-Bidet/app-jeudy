@@ -2,6 +2,7 @@
 
 namespace App\Support\Cotations;
 
+use App\Models\CotationManualPrice;
 use DOMDocument;
 use DOMText;
 
@@ -90,14 +91,16 @@ class CotationPdfFormatter
         return number_format(round($number), 0, ',', ' ').' €';
     }
 
-    public static function margin(mixed $value): string
+    public static function margin(mixed $value, mixed $operation = null): string
     {
         $number = self::toFloat($value);
         if ($number === null) {
             return '—';
         }
 
-        return '-'.number_format(round(abs($number)), 0, ',', ' ').' €';
+        $sign = $operation === CotationManualPrice::MARGIN_ADD ? '+' : '-';
+
+        return $sign.number_format(round(abs($number)), 0, ',', ' ').' €';
     }
 
     /**

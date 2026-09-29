@@ -180,6 +180,7 @@ class CotationController extends Controller
             'manual_prices.*.manual_matif' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'manual_prices.*.final_price_reference_key' => ['nullable', 'string', 'max:180'],
             'manual_prices.*.margin' => ['nullable', 'integer', 'min:0', 'max:9999999'],
+            'manual_prices.*.margin_operation' => ['nullable', Rule::in(CotationManualPrice::MARGIN_OPERATIONS)],
             'manual_prices.*.sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
             'deleted_manual_price_ids' => ['nullable', 'array'],
             'deleted_manual_price_ids.*' => ['integer', 'min:1'],
@@ -511,7 +512,7 @@ class CotationController extends Controller
                         'free_text' => (string) ($row['display_label'] ?? ''),
                         'label' => $this->maturityShortLabel((string) ($row['maturity_label'] ?: ($row['label'] ?: 'Échéance'))),
                         'matif' => CotationPdfFormatter::price($row['matif'] ?? null),
-                        'margin' => CotationPdfFormatter::margin($row['margin'] ?? null),
+                        'margin' => CotationPdfFormatter::margin($row['margin'] ?? null, $row['margin_operation'] ?? null),
                         'final_price' => CotationPdfFormatter::price($row['final_price'] ?? null),
                     ];
                 }
@@ -1523,6 +1524,10 @@ class CotationController extends Controller
                 'harvest_year' => (int) $row['harvest_year'],
                 'manual_matif' => $lineType === 'custom' ? $this->nullableDecimal($row['manual_matif'] ?? null) : null,
                 'margin' => $this->nullablePositiveInteger($row['margin'] ?? null),
+                // Champ absent (ancien client) : on conserve le signe déjà enregistré.
+                'margin_operation' => CotationManualPrice::normalizeMarginOperation(
+                    $row['margin_operation'] ?? $manual->margin_operation,
+                ),
                 'sort_order' => (int) ($row['sort_order'] ?? 0),
                 'updated_by' => $request->user()?->id,
             ];
@@ -1698,6 +1703,7 @@ class CotationController extends Controller
             'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
             'final_price_reference_key' => Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key') ? $manual->final_price_reference_key : null,
             'margin' => $manual->margin !== null ? (float) $manual->margin : null,
+            'margin_operation' => CotationManualPrice::normalizeMarginOperation($manual->margin_operation),
             'sort_order' => $manual->sort_order,
         ];
     }
