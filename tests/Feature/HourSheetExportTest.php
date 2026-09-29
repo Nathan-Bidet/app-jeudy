@@ -689,3 +689,16 @@ it('conserve le retour à la ligne sur les cellules colorées', function (): voi
     expect($styles[$line][COL_VALIDATOR_1]['wrap'])->toBeTrue()
         ->and($styles[$line][COL_VALIDATOR_1]['background'])->toBe(REFUSAL_BACKGROUND);
 });
+
+it('exporte les journées antérieures à la date de début de saisie du salarié', function (): void {
+    [, , $employee] = exportableDay('2026-10-05');
+
+    // La date de début avancée après coup ne retire rien de l'export : elle
+    // encadre les nouvelles saisies, pas les journées déjà enregistrées.
+    $employee->forceFill(['hours_tracking_starts_at' => '2026-10-20'])->save();
+
+    $row = exportedRowForDate(exportRowsFor(), '2026-10-05');
+
+    expect($row[COL_TOTAL] ?? null)->toBe('08h00')
+        ->and($row[COL_DESCRIPTION] ?? null)->toBe('Travaux réalisés');
+});

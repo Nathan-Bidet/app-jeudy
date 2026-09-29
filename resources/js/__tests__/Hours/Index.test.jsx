@@ -137,7 +137,8 @@ describe('Hours/Index — rendu de la page', () => {
     });
 
     it('rend le formulaire d\'édition en ligne sans erreur', () => {
-        renderPage();
+        // Journée du jour, donc postérieure à la date de début : modifiable.
+        renderPage({ hourSheets: [hourSheet({ work_date: TODAY })] });
 
         // « Modifier » ouvre le formulaire d'édition : c'est l'autre bloc où le
         // badge était branché sur la mauvaise variable.
@@ -164,6 +165,17 @@ describe('Hours/Index — rendu de la page', () => {
         });
 
         expect(screen.queryByTitle(/Heures supplémentaires/)).not.toBeInTheDocument();
+    });
+
+    it('affiche une journée antérieure à la date de début, sans proposer de la modifier', () => {
+        // Date de début avancée après la saisie : la journée du 2 septembre
+        // reste consultable, mais le serveur refuserait toute écriture.
+        renderPage({ hourSheets: [hourSheet({ status: 'processed', status_label: 'Traitée' })] });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Afficher l\'historique' }));
+
+        expect(screen.getAllByText('Description : Entretien du matériel').length).toBeGreaterThan(0);
+        expect(screen.queryByRole('button', { name: 'Modifier' })).not.toBeInTheDocument();
     });
 
     it('se rend sans erreur lorsqu\'aucune journée n\'est enregistrée', () => {

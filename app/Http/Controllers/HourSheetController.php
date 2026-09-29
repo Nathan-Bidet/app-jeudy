@@ -21,6 +21,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -149,11 +150,16 @@ class HourSheetController extends Controller
         $userId = (int) $user->id;
         $effectiveStartDate = $this->resolveHoursTrackingStartDate($user);
 
-        $hourSheets = HourSheet::query()
+        // Toutes les journées du salarié, sans borne basse : la date de début
+        // de saisie encadre les NOUVELLES saisies (voir `store`), elle ne doit
+        // pas masquer celles enregistrées avant qu'un administrateur ne
+        // l'avance.
+        $hourSheetModels = HourSheet::query()
             ->where('user_id', $userId)
-            ->whereDate('work_date', '>=', $effectiveStartDate)
             ->orderByDesc('work_date')
-            ->get()
+            ->get();
+
+        $hourSheets = $hourSheetModels
             ->map(fn (HourSheet $hourSheet): array => [
                 'id' => (int) $hourSheet->id,
                 'work_date' => $hourSheet->work_date?->toDateString(),
@@ -187,11 +193,7 @@ class HourSheetController extends Controller
         $canExport = app(AccessManager::class)->can($request->user(), 'heures.export');
 
         [$hourSheetsToValidate, $pendingValidationCount] = $this->validationQueueFor($user);
-        $approvedLeaveDays = $this->approvedLeaveDayService->approvedLeaveMapForUser(
-            $userId,
-            $effectiveStartDate,
-            now(config('app.timezone', 'Europe/Paris'))->toDateString()
-        );
+        $approvedLeaveDays = $this->approvedLeaveDaysForHistory($userId, $effectiveStartDate, $hourSheetModels);
 
         // `highlight` vient du lien d'une notification : la page ouvre le
         // détail de cette journée. L'identifiant n'est pas vérifié ici — la
@@ -1067,6 +1069,44 @@ class HourSheetController extends Controller
         }
 
         return rtrim(mb_substr($clean, 0, 31));
+    }
+
+    /**
+     * Congés approuvés servis à la page Heures.
+     *
+     * À partir de la date de début de saisie : tous les congés, qui alimentent
+     * la grille de saisie et l'historique. Avant cette date : uniquement ceux
+     * qui tombent sur une journée déjà saisie, pour que ces journées
+     * historiques s'affichent comme avant (demi-journée de congé, journée
+     * entière masquée derrière le congé) sans faire apparaître des congés
+     * sur une période où le salarié ne saisissait pas encore ses heures.
+     *
+     * @param  Collection<int, HourSheet>  $hourSheets
+     * @return array<string, array<string, mixed>>
+     */
+    private function approvedLeaveDaysForHistory(int $userId, string $effectiveStartDate, Collection $hourSheets): array
+    {
+        $today = now(config('app.timezone', 'Europe/Paris'))->toDateString();
+        $earlierSheetDates = $hourSheets
+            ->map(fn (HourSheet $hourSheet): ?string => $hourSheet->work_date?->toDateString())
+            ->filter(fn (?string $date): bool => $date !== null && $date < $effectiveStartDate)
+            ->flip();
+
+        if ($earlierSheetDates->isEmpty()) {
+            return $this->approvedLeaveDayService->approvedLeaveMapForUser($userId, $effectiveStartDate, $today);
+        }
+
+        $leaveDays = $this->approvedLeaveDayService->approvedLeaveMapForUser(
+            $userId,
+            (string) $earlierSheetDates->keys()->min(),
+            $today
+        );
+
+        return array_filter(
+            $leaveDays,
+            fn (string $date): bool => $date >= $effectiveStartDate ? $date <= $today : $earlierSheetDates->has($date),
+            ARRAY_FILTER_USE_KEY
+        );
     }
 
     private function resolveHoursTrackingStartDate(User $user): string
