@@ -1,11 +1,11 @@
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
+import PdfExportButton from '@/Components/Cotations/PdfExportButton';
 import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, useForm } from '@inertiajs/react';
 import {
     ChevronLeft,
     ChevronRight,
-    FileDown,
     Fuel,
     GripVertical,
     History,
@@ -1211,6 +1211,7 @@ function FuelGridSection({
     onShowNewerHistory,
     canExportPdf = false,
     exportPdfUrl = '',
+    onExportError = undefined,
 }) {
     const sections = grid.sections || [];
     const vatRate = parseDecimal(grid.vat_rate) ?? 20;
@@ -1671,13 +1672,7 @@ function FuelGridSection({
                 </button>
             ) : null}
             {canExportPdf ? (
-                <a
-                    href={exportPdfUrl}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
-                >
-                    <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
-                    Export PDF
-                </a>
+                <PdfExportButton url={exportPdfUrl} onError={onExportError} fallbackName="prix-carburant.pdf" />
             ) : null}
         </div>
     );
@@ -2391,13 +2386,7 @@ export default function CotationsIndex({
                     </button>
                 ) : null}
                 {canManage && routes.export_pdf ? (
-                    <a
-                        href={routes.export_pdf}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
-                    >
-                        <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
-                        Export PDF
-                    </a>
+                    <PdfExportButton url={routes.export_pdf} onError={setError} />
                 ) : null}
                 {canManage && routes.send_mail && !isEditing && !isFuelEditing ? (
                     <button
@@ -2596,6 +2585,7 @@ export default function CotationsIndex({
                             onShowNewerHistory={showNewerFuelVersion}
                             canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
                             exportPdfUrl={routes.export_fuel_pdf}
+                            onExportError={setError}
                         />
                     </div>
                 ) : null}
