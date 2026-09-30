@@ -172,6 +172,7 @@ class CotationMarketService
                     'harvest_year',
                     'manual_matif',
                     'margin',
+                    'margin_operation',
                     'sort_order',
             ];
 
@@ -219,6 +220,7 @@ class CotationMarketService
                         'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
                         'final_price_reference_key' => $finalPriceReferenceKey,
                         'margin' => $manual->margin !== null ? abs((float) $manual->margin) : null,
+                        'margin_operation' => CotationManualPrice::normalizeMarginOperation($manual->margin_operation),
                         'sort' => (int) $manual->sort_order,
                         'last_seen_at' => $market['last_seen_at'] ?? null,
                         'has_euronext' => $lineType === 'matif' && $market !== null,
@@ -260,6 +262,7 @@ class CotationMarketService
             $bucket = (int) $row['harvest_year'] === $leftHarvestYear ? 'left' : 'right';
             $matif = $row['matif'];
             $margin = $row['margin'] !== null ? abs((float) $row['margin']) : null;
+            $marginOperation = CotationManualPrice::normalizeMarginOperation($row['margin_operation'] ?? null);
             $groups[$productKey]['harvests'][$bucket]['rows'][] = [
                 'identity_hash' => $row['identity_hash'],
                 'market_identity_hash' => $row['market_identity_hash'],
@@ -281,7 +284,8 @@ class CotationMarketService
                 'manual_matif' => $row['manual_matif'],
                 'final_price_reference_key' => $row['final_price_reference_key'] ?? null,
                 'margin' => $margin,
-                'final_price' => $matif !== null ? (float) $matif - (float) ($margin ?? 0) : null,
+                'margin_operation' => $marginOperation,
+                'final_price' => $matif !== null ? CotationManualPrice::applyMargin((float) $matif, $margin, $marginOperation) : null,
                 'sort' => $row['sort'],
                 'last_seen_at' => $row['last_seen_at'],
                 'has_euronext' => (bool) $row['has_euronext'],
@@ -456,6 +460,7 @@ class CotationMarketService
         foreach ($marketRows as $row) {
             $rowsByReference[$this->finalPriceReferenceKey($row)] = $row + [
                 'margin' => null,
+                'margin_operation' => CotationManualPrice::MARGIN_SUBTRACT,
                 'final_price_reference_key' => null,
             ];
         }
@@ -486,9 +491,11 @@ class CotationMarketService
                 return $resolvedFinalPrices[$referenceKey] = null;
             }
 
-            $margin = $row['margin'] !== null ? abs((float) $row['margin']) : 0.0;
-
-            return $resolvedFinalPrices[$referenceKey] = (float) $matif - $margin;
+            return $resolvedFinalPrices[$referenceKey] = CotationManualPrice::applyMargin(
+                (float) $matif,
+                $row['margin'] ?? null,
+                $row['margin_operation'] ?? null,
+            );
         };
 
         foreach ($configuredRows as &$row) {

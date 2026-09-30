@@ -213,6 +213,14 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
+        // Téléversements et régénérations de pièces jointes du courriel des cotations :
+        // un envoi de plusieurs fichiers déclenche une requête par fichier.
+        RateLimiter::for('cotation-mail-files', function (Request $request) {
+            return Limit::perMinute(60)->by(
+                ($request->user()?->id ?? 'guest').'|'.$request->ip()
+            );
+        });
+
         RateLimiter::for('admin-sensitive', function (Request $request) {
             return Limit::perMinute(20)->by(
                 ($request->user()?->id ?? 'guest').'|'.$request->ip()

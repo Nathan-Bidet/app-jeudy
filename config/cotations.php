@@ -41,4 +41,53 @@ return [
         // Heure d'exécution quotidienne planifiée (cf. routes/console.php).
         'schedule_time' => env('COTATIONS_COMPACT_SCHEDULE_TIME', '03:30'),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pièces jointes du message d'information (modale « Envoyer »)
+    |--------------------------------------------------------------------------
+    |
+    | Fichiers temporaires stockés sur le disque privé (storage/app/private,
+    | jamais public), le temps de la rédaction du courriel. Les limites restent
+    | sous celles de l'infrastructure : nginx client_max_body_size 25M, PHP
+    | upload_max_filesize 20M, et environ 25 Mo par message chez la plupart des
+    | fournisseurs de messagerie (les pièces jointes gonflent d'environ 37 %
+    | en base64 : 15 Mo bruts restent donc sous 25 Mo une fois encodés).
+    |
+    */
+    'mail' => [
+        // Destinataire prérempli dans le champ « À » de la modale d'envoi (modifiable
+        // par l'utilisateur ; vide pour ne rien préremplir).
+        'default_recipient' => env('COTATIONS_MAIL_DEFAULT_RECIPIENT', 'cotation@jeudy-sa.fr'),
+
+        'disk' => env('COTATIONS_MAIL_DISK', 'local'),
+
+        // Fichiers ajoutés manuellement (le PDF généré n'entre pas dans ce compte).
+        'max_files' => (int) env('COTATIONS_MAIL_MAX_FILES', 5),
+
+        // Taille maximale d'un fichier ajouté, en Ko.
+        'max_file_kb' => (int) env('COTATIONS_MAIL_MAX_FILE_KB', 5120),
+
+        // Taille totale maximale de toutes les pièces jointes (PDF inclus), en Ko.
+        'max_total_kb' => (int) env('COTATIONS_MAIL_MAX_TOTAL_KB', 15360),
+
+        // Durée de conservation d'un brouillon abandonné, en heures.
+        'expire_hours' => (int) env('COTATIONS_MAIL_EXPIRE_HOURS', 6),
+
+        // extension => types MIME réels acceptés (détectés sur le contenu).
+        'allowed' => [
+            'pdf' => ['application/pdf'],
+            'jpg' => ['image/jpeg'],
+            'jpeg' => ['image/jpeg'],
+            'png' => ['image/png'],
+            'gif' => ['image/gif'],
+            'webp' => ['image/webp'],
+            'txt' => ['text/plain'],
+            'csv' => ['text/csv', 'text/plain', 'application/csv'],
+            'doc' => ['application/msword', 'application/x-ole-storage', 'application/CDFV2'],
+            'xls' => ['application/vnd.ms-excel', 'application/msword', 'application/x-ole-storage', 'application/CDFV2'],
+            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
+        ],
+    ],
 ];

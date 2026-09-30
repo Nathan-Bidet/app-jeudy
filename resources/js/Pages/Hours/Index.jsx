@@ -877,7 +877,12 @@ export default function HoursIndex({
                             );
                         })()
                     )}
-                    {canCreate && !leaveCoverage(approvedLeavesByDate[sheet.work_date]).fullDay && (
+                    {/* Une journée antérieure à la date de début de saisie reste
+                        consultable, mais le serveur refuse d'y écrire : pas de
+                        bouton qui mènerait à une erreur. */}
+                    {canCreate
+                        && sheet.work_date >= minVisibleDate
+                        && !leaveCoverage(approvedLeavesByDate[sheet.work_date]).fullDay && (
                         <button
                             type="button"
                             onClick={() => startInlineEdit(sheet.work_date)}

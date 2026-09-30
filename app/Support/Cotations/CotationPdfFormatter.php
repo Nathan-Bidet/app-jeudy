@@ -2,6 +2,8 @@
 
 namespace App\Support\Cotations;
 
+use App\Models\CotationManualPrice;
+use Carbon\CarbonInterface;
 use DOMDocument;
 use DOMText;
 
@@ -90,14 +92,28 @@ class CotationPdfFormatter
         return number_format(round($number), 0, ',', ' ').' €';
     }
 
-    public static function margin(mixed $value): string
+    /**
+     * Nom unique du PDF des cotations, pour l'export manuel comme pour la
+     * pièce jointe du courriel : « COTATIONS JJ.MM.AAAA.pdf », date du jour
+     * dans le fuseau configuré de l'application (et non celui du serveur).
+     */
+    public static function exportFilename(?CarbonInterface $now = null): string
+    {
+        $date = ($now ?? now())->copy()->setTimezone((string) config('app.timezone'));
+
+        return 'COTATIONS '.$date->format('d.m.Y').'.pdf';
+    }
+
+    public static function margin(mixed $value, mixed $operation = null): string
     {
         $number = self::toFloat($value);
         if ($number === null) {
             return '—';
         }
 
-        return '-'.number_format(round(abs($number)), 0, ',', ' ').' €';
+        $sign = $operation === CotationManualPrice::MARGIN_ADD ? '+' : '-';
+
+        return $sign.number_format(round(abs($number)), 0, ',', ' ').' €';
     }
 
     /**

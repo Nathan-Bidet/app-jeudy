@@ -1,31 +1,26 @@
+import CotationMailModal from '@/Components/Cotations/CotationMailModal';
+import PdfExportButton from '@/Components/Cotations/PdfExportButton';
+import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, useForm } from '@inertiajs/react';
 import {
-    AlignCenter,
-    AlignJustify,
-    AlignLeft,
-    AlignRight,
-    Bold,
     ChevronLeft,
     ChevronRight,
-    FileDown,
     Fuel,
     GripVertical,
     History,
     Info,
-    Italic,
     Pencil,
     RefreshCw,
     RotateCcw,
     Save,
+    Send,
     Settings2,
-    Strikethrough,
     Trash2,
     Truck,
-    Underline,
     X,
 } from 'lucide-react';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 
 const BASE_CEREALS = [
     { code: 'ECO', name: 'Colza' },
@@ -158,150 +153,6 @@ function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, a
     );
 }
 
-const RICH_TEXT_FONT_SIZES = [
-    { label: 'Petit', px: 12 },
-    { label: 'Normal', px: 14 },
-    { label: 'Moyen', px: 18 },
-    { label: 'Grand', px: 24 },
-    { label: 'Très grand', px: 32 },
-];
-
-function ToolbarButton({ icon: Icon, label, onClick }) {
-    return (
-        <button
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={onClick}
-            aria-label={label}
-            title={label}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-soft)]"
-        >
-            <Icon className="h-4 w-4" strokeWidth={2.3} />
-        </button>
-    );
-}
-
-function RichTextEditor({ value, onChange }) {
-    const editorRef = useRef(null);
-    const selectionRangeRef = useRef(null);
-    const initializedRef = useRef(false);
-
-    useEffect(() => {
-        if (!initializedRef.current && editorRef.current) {
-            editorRef.current.innerHTML = value || '';
-            initializedRef.current = true;
-        }
-    }, [value]);
-
-    const saveSelection = () => {
-        const selection = window.getSelection();
-        if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) {
-            selectionRangeRef.current = selection.getRangeAt(0).cloneRange();
-        }
-    };
-
-    const restoreSelection = () => {
-        editorRef.current?.focus();
-        const selection = window.getSelection();
-        if (!selection || !selectionRangeRef.current) return;
-        selection.removeAllRanges();
-        selection.addRange(selectionRangeRef.current);
-    };
-
-    const emitChange = () => {
-        onChange(editorRef.current?.innerHTML || '');
-    };
-
-    const runCommand = (command, arg = null) => {
-        restoreSelection();
-        document.execCommand(command, false, arg);
-        saveSelection();
-        emitChange();
-    };
-
-    const applyFontSize = (px) => {
-        restoreSelection();
-        document.execCommand('fontSize', false, '7');
-        editorRef.current?.querySelectorAll('font[size="7"]').forEach((node) => {
-            const span = document.createElement('span');
-            span.style.fontSize = `${px}px`;
-            span.innerHTML = node.innerHTML;
-            node.replaceWith(span);
-        });
-        saveSelection();
-        emitChange();
-    };
-
-    const applyColor = (command, color) => {
-        restoreSelection();
-        document.execCommand('styleWithCSS', false, true);
-        const applied = document.execCommand(command, false, color);
-        if (!applied && command === 'hiliteColor') {
-            document.execCommand('backColor', false, color);
-        }
-        saveSelection();
-        emitChange();
-    };
-
-    return (
-        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)]">
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--app-border)] p-2">
-                <ToolbarButton icon={Bold} label="Gras" onClick={() => runCommand('bold')} />
-                <ToolbarButton icon={Italic} label="Italique" onClick={() => runCommand('italic')} />
-                <ToolbarButton icon={Underline} label="Souligné" onClick={() => runCommand('underline')} />
-                <ToolbarButton icon={Strikethrough} label="Barré" onClick={() => runCommand('strikeThrough')} />
-                <span className="mx-1 h-6 w-px bg-[var(--app-border)]" />
-                <ToolbarButton icon={AlignLeft} label="Aligner à gauche" onClick={() => runCommand('justifyLeft')} />
-                <ToolbarButton icon={AlignCenter} label="Centrer" onClick={() => runCommand('justifyCenter')} />
-                <ToolbarButton icon={AlignRight} label="Aligner à droite" onClick={() => runCommand('justifyRight')} />
-                <ToolbarButton icon={AlignJustify} label="Justifier" onClick={() => runCommand('justifyFull')} />
-                <span className="mx-1 h-6 w-px bg-[var(--app-border)]" />
-                <select
-                    onMouseDown={saveSelection}
-                    onChange={(event) => applyFontSize(Number(event.target.value))}
-                    defaultValue=""
-                    aria-label="Taille du texte"
-                    className="h-9 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-sm font-semibold"
-                >
-                    <option value="" disabled>Taille</option>
-                    {RICH_TEXT_FONT_SIZES.map((size) => (
-                        <option key={size.px} value={size.px}>{size.label}</option>
-                    ))}
-                </select>
-                <label className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-xs font-semibold" title="Couleur du texte">
-                    Texte
-                    <input
-                        type="color"
-                        onMouseDown={saveSelection}
-                        onChange={(event) => applyColor('foreColor', event.target.value)}
-                        className="h-6 w-6 cursor-pointer border-0 bg-transparent p-0"
-                        aria-label="Couleur du texte"
-                    />
-                </label>
-                <label className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-xs font-semibold" title="Couleur de surlignage">
-                    Surlignage
-                    <input
-                        type="color"
-                        onMouseDown={saveSelection}
-                        onChange={(event) => applyColor('hiliteColor', event.target.value)}
-                        className="h-6 w-6 cursor-pointer border-0 bg-transparent p-0"
-                        aria-label="Couleur de surlignage"
-                    />
-                </label>
-            </div>
-            <div
-                ref={editorRef}
-                contentEditable
-                suppressContentEditableWarning
-                onInput={emitChange}
-                onMouseUp={saveSelection}
-                onKeyUp={saveSelection}
-                className="min-h-[120px] w-full max-w-full min-w-0 p-3 text-sm leading-relaxed outline-none [overflow-wrap:anywhere]"
-            />
-        </div>
-    );
-}
-
 function CerealInfoSection({ canView, isEditing, html, onChange }) {
     if (!canView) return null;
 
@@ -367,11 +218,27 @@ function formatRoundedPrice(value) {
     }).format(Math.round(number))} €`;
 }
 
-function formatMargin(value) {
+function normalizeMarginOperation(operation) {
+    return operation === 'add' ? 'add' : 'subtract';
+}
+
+function marginSign(operation) {
+    return normalizeMarginOperation(operation) === 'add' ? '+' : '-';
+}
+
+// Mirrors CotationManualPrice::applyMargin() côté serveur : la base reste
+// positive, le signe vit uniquement dans l'opération (MATIF − base / MATIF + base).
+function applyMargin(matif, margin, operation) {
+    const base = Math.abs(parseDecimal(margin) ?? 0);
+
+    return normalizeMarginOperation(operation) === 'add' ? matif + base : matif - base;
+}
+
+function formatMargin(value, operation) {
     const number = parseDecimal(value);
     if (number === null) return '—';
 
-    return `-${new Intl.NumberFormat('fr-FR', {
+    return `${marginSign(operation)}${new Intl.NumberFormat('fr-FR', {
         maximumFractionDigits: 0,
     }).format(Math.abs(number))} €`;
 }
@@ -449,8 +316,7 @@ function resolveFinalPriceFromRows(rowsByKey, referenceKey, stack = [], resolved
         return null;
     }
 
-    const margin = Math.abs(parseDecimal(row.margin) ?? 0);
-    const finalPrice = matif - margin;
+    const finalPrice = applyMargin(matif, row.margin, row.margin_operation);
     resolved.set(referenceKey, finalPrice);
 
     return finalPrice;
@@ -613,8 +479,8 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
         ? ''
         : String(Math.abs(parseDecimal(rawMarginValue) ?? 0));
     const matifNumber = parseDecimal(matifValue);
-    const marginNumber = Math.abs(parseDecimal(marginValue) ?? 0);
-    const finalPrice = matifNumber !== null ? matifNumber - marginNumber : null;
+    const marginOperation = normalizeMarginOperation(draft.margin_operation ?? row.margin_operation);
+    const finalPrice = matifNumber !== null ? applyMargin(matifNumber, marginValue, marginOperation) : null;
 
     return (
         <tr className="border-t border-[var(--app-border)]">
@@ -743,8 +609,20 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage ? (
-                    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-0.5">
-                        <span className={`${COTATION_VALUE_CLASS} text-[var(--app-muted)]`}>-</span>
+                    <div className="grid grid-cols-[auto_minmax(4rem,1fr)] items-center gap-0.5">
+                        <button
+                            type="button"
+                            onClick={() => setManualPrice(row, {
+                                margin_operation: marginOperation === 'add' ? 'subtract' : 'add',
+                            })}
+                            aria-label={marginOperation === 'add'
+                                ? 'Base ajoutée au MATIF : passer en soustraction'
+                                : 'Base soustraite du MATIF : passer en addition'}
+                            title={marginOperation === 'add' ? 'La base est ajoutée au MATIF' : 'La base est soustraite du MATIF'}
+                            className={`${COTATION_VALUE_CLASS} inline-flex h-7 w-5 items-center justify-center rounded-md text-[var(--app-muted)] hover:bg-[var(--app-surface)] hover:text-[var(--app-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary,currentColor)]`}
+                        >
+                            {marginSign(marginOperation)}
+                        </button>
                         <input
                             type="number"
                             step="1"
@@ -752,11 +630,11 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                             inputMode="numeric"
                             value={marginValue}
                             onChange={(event) => setManualPrice(row, 'margin', normalizeMarginInput(event.target.value))}
-                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1.5 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1.5 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none ${COTATION_VALUE_CLASS}`}
                         />
                     </div>
                 ) : (
-                    <span className={COTATION_VALUE_CLASS}>{formatMargin(marginValue)}</span>
+                    <span className={COTATION_VALUE_CLASS}>{formatMargin(marginValue, marginOperation)}</span>
                 )}
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-right`}>
@@ -812,10 +690,10 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                 <div className="w-full max-w-full overflow-hidden">
                     <table className={COTATION_TABLE_CLASS}>
                         <colgroup>
-                            <col className={canManage ? 'w-[24%]' : 'w-[24%]'} />
-                            <col className={canManage ? 'w-[24%]' : 'w-[22%]'} />
+                            <col className={canManage ? 'w-[20%]' : 'w-[24%]'} />
+                            <col className={canManage ? 'w-[20%]' : 'w-[22%]'} />
                             <col className={canManage ? 'w-[18%]' : 'w-[20%]'} />
-                            <col className={canManage ? 'w-[14%]' : 'w-[16%]'} />
+                            <col className={canManage ? 'w-[22%]' : 'w-[16%]'} />
                             <col className={canManage ? 'w-[14%]' : 'w-[18%]'} />
                             {canManage ? <col className="w-[6%]" /> : null}
                         </colgroup>
@@ -1333,6 +1211,7 @@ function FuelGridSection({
     onShowNewerHistory,
     canExportPdf = false,
     exportPdfUrl = '',
+    onExportError = undefined,
 }) {
     const sections = grid.sections || [];
     const vatRate = parseDecimal(grid.vat_rate) ?? 20;
@@ -1793,13 +1672,7 @@ function FuelGridSection({
                 </button>
             ) : null}
             {canExportPdf ? (
-                <a
-                    href={exportPdfUrl}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
-                >
-                    <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
-                    Export PDF
-                </a>
+                <PdfExportButton url={exportPdfUrl} onError={onExportError} fallbackName="prix-carburant.pdf" />
             ) : null}
         </div>
     );
@@ -1913,6 +1786,7 @@ function flattenMarketRows(groups = []) {
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
             final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
+            margin_operation: normalizeMarginOperation(row.margin_operation),
             sort_order: row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
         }))
@@ -1980,6 +1854,8 @@ export default function CotationsIndex({
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
+    const [mailOpen, setMailOpen] = useState(false);
+    const [mailNotice, setMailNotice] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
     const [isFuelEditing, setIsFuelEditing] = useState(false);
     const [draggedCerealCode, setDraggedCerealCode] = useState(null);
@@ -2141,6 +2017,7 @@ export default function CotationsIndex({
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
             final_price_reference_key: row.final_price_reference_key ?? '',
             margin: row.margin ?? '',
+            margin_operation: normalizeMarginOperation(row.margin_operation),
             sort_order: row.sort_order ?? row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
             is_new: Boolean(row.is_new),
@@ -2182,6 +2059,7 @@ export default function CotationsIndex({
                 manual_matif: '',
                 final_price_reference_key: '',
                 margin: '',
+                margin_operation: 'subtract',
                 sort_order: form.data.manual_prices?.length || 0,
                 has_euronext: false,
                 is_new: true,
@@ -2508,13 +2386,22 @@ export default function CotationsIndex({
                     </button>
                 ) : null}
                 {canManage && routes.export_pdf ? (
-                    <a
-                        href={routes.export_pdf}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em]"
+                    <PdfExportButton url={routes.export_pdf} onError={setError} />
+                ) : null}
+                {canManage && routes.send_mail && !isEditing && !isFuelEditing ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setMailNotice(null);
+                            setMailOpen(true);
+                        }}
+                        disabled={mailOpen}
+                        aria-label="Envoyer le message d'information des cotations par e-mail"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
                     >
-                        <FileDown className="h-3.5 w-3.5" strokeWidth={2.3} />
-                        Export PDF
-                    </a>
+                        <Send className="h-3.5 w-3.5" strokeWidth={2.3} />
+                        Envoyer
+                    </button>
                 ) : null}
                 {canManage && !isEditing && !isFuelEditing ? (
                     <button
@@ -2539,6 +2426,32 @@ export default function CotationsIndex({
                     <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                         {error}
                     </div>
+                ) : null}
+
+                {mailNotice ? (
+                    <div
+                        role="status"
+                        className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${mailNotice.type === 'success'
+                            ? 'border-green-200 bg-green-50 text-green-800'
+                            : 'border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)]'}`}
+                    >
+                        {mailNotice.text}
+                    </div>
+                ) : null}
+
+                {canManage && routes.send_mail ? (
+                    <CotationMailModal
+                        show={mailOpen}
+                        draftUrl={routes.mail_draft}
+                        sendUrl={routes.send_mail}
+                        filesBaseUrl={routes.mail_base}
+                        onClose={() => setMailOpen(false)}
+                        onSent={(count) => setMailNotice({
+                            type: 'success',
+                            text: count > 1 ? `Message envoyé à ${count} destinataires.` : 'Message envoyé.',
+                        })}
+                        onCancel={() => setMailNotice({ type: 'info', text: "Envoi annulé : aucun e-mail n'a été envoyé." })}
+                    />
                 ) : null}
 
                 {!canViewCereals && !canViewFuel ? (
@@ -2672,6 +2585,7 @@ export default function CotationsIndex({
                             onShowNewerHistory={showNewerFuelVersion}
                             canExportPdf={canManageFuel && Boolean(routes.export_fuel_pdf)}
                             exportPdfUrl={routes.export_fuel_pdf}
+                            onExportError={setError}
                         />
                     </div>
                 ) : null}
