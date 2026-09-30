@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
@@ -9,6 +9,7 @@ const DRAFT = {
     body_html: '<p><span style="color: #b91c1c">Marché haussier</span></p><p><br></p><p><em>Lundi</em></p>',
     is_empty: false,
     draft_id: 'draft-1',
+    default_recipient: 'cotation@jeudy-sa.fr',
     limits: { max_files: 5, max_file_bytes: 5 * 1024 * 1024, max_total_bytes: 15 * 1024 * 1024, extensions: ['pdf', 'png', 'txt'] },
 };
 
@@ -65,7 +66,7 @@ describe('CotationMailModal', () => {
         const colored = await screen.findByText('Marché haussier');
         expect(colored).toHaveStyle({ color: '#b91c1c' });
         expect(screen.getByText('Lundi').tagName).toBe('EM');
-        expect(screen.getByLabelText('Destinataires')).toHaveValue('');
+        expect(screen.getByLabelText('Destinataires')).toHaveValue('cotation@jeudy-sa.fr');
     });
 
     it('ferme sans envoyer avec Annuler et avec la croix', async () => {
@@ -83,6 +84,7 @@ describe('CotationMailModal', () => {
     it('exige au moins un destinataire avant d\'appeler le serveur', async () => {
         mount();
         await screen.findByText('Marché haussier');
+        fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: '' } });
 
         pointerClick(sendButton());
 
@@ -261,6 +263,88 @@ describe('CotationMailModal', () => {
             pointerClick(sendButton());
             await waitFor(() => expect(onSent).toHaveBeenCalled());
             expect(fetchMock.mock.calls.filter(([url]) => url === '/send')).toHaveLength(1);
+        });
+    });
+
+    describe('destinataire par défaut', () => {
+        const sentBody = () => JSON.parse(sendRequest(fetchMock)[1].body);
+
+        it('préremplit « À » avec l\'adresse configurée, comme un destinataire ordinaire', async () => {
+            mount();
+            await screen.findByText('Marché haussier');
+
+            expect(screen.getByLabelText('Destinataires')).toHaveValue('cotation@jeudy-sa.fr');
+
+            pointerClick(sendButton());
+            await waitFor(() => expect(sendRequest(fetchMock)).toBeDefined());
+            expect(sentBody().to).toEqual(['cotation@jeudy-sa.fr']);
+        });
+
+        it('permet de le remplacer ou de le supprimer', async () => {
+            mount();
+            await screen.findByText('Marché haussier');
+            const input = screen.getByLabelText('Destinataires');
+
+            fireEvent.change(input, { target: { value: 'autre@ex.fr' } });
+            expect(input).toHaveValue('autre@ex.fr');
+
+            fireEvent.change(input, { target: { value: '' } });
+            pointerClick(sendButton());
+            expect(await screen.findByRole('alert')).toHaveTextContent('Renseignez au moins un destinataire.');
+            expect(sendRequest(fetchMock)).toBeUndefined();
+        });
+
+        it('permet d\'ajouter d\'autres destinataires, envoyés avec l\'adresse affichée', async () => {
+            mount();
+            await screen.findByText('Marché haussier');
+            const input = screen.getByLabelText('Destinataires');
+
+            fireEvent.change(input, { target: { value: `${input.value}, a@ex.fr; b@ex.fr` } });
+            pointerClick(sendButton());
+
+            await waitFor(() => expect(sendRequest(fetchMock)).toBeDefined());
+            expect(sentBody().to).toEqual(['cotation@jeudy-sa.fr', 'a@ex.fr', 'b@ex.fr']);
+        });
+
+        it('ne s\'ajoute pas en double à la réouverture et repart d\'un brouillon vierge', async () => {
+            const handlers = { onClose: vi.fn(), onSent: vi.fn(), onCancel: vi.fn() };
+            const modal = (show) => <CotationMailModal show={show} draftUrl="/draft" sendUrl="/send" filesBaseUrl="/mail" {...handlers} />;
+            const { rerender } = render(modal(true));
+            await screen.findByText('Marché haussier');
+            fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: 'cotation@jeudy-sa.fr, a@ex.fr' } });
+
+            rerender(modal(false));
+            rerender(modal(true));
+
+            await waitFor(() => expect(screen.getByLabelText('Destinataires')).toHaveValue('cotation@jeudy-sa.fr'));
+        });
+
+        it('n\'écrase pas la saisie de l\'utilisateur ni lors d\'un nouveau rendu', async () => {
+            let release;
+            fetchMock.mockImplementation((url) => (url === '/draft'
+                ? new Promise((resolve) => { release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(DRAFT) }); })
+                : route()(url)));
+            const { rerender } = render(<CotationMailModal show draftUrl="/draft" sendUrl="/send" filesBaseUrl="/mail" onClose={() => {}} onSent={() => {}} onCancel={() => {}} />);
+
+            // Saisie pendant le chargement du brouillon : conservée.
+            fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: 'saisi@ex.fr' } });
+            await act(async () => { release(); });
+            await screen.findByText('Marché haussier');
+            expect(screen.getByLabelText('Destinataires')).toHaveValue('saisi@ex.fr');
+
+            // Nouveau rendu (mêmes props) : pas de réinitialisation.
+            rerender(<CotationMailModal show draftUrl="/draft" sendUrl="/send" filesBaseUrl="/mail" onClose={() => {}} onSent={() => {}} onCancel={() => {}} />);
+            fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: 'saisi@ex.fr, autre@ex.fr' } });
+            rerender(<CotationMailModal show draftUrl="/draft" sendUrl="/send" filesBaseUrl="/mail" onClose={() => {}} onSent={() => {}} onCancel={() => {}} />);
+            expect(screen.getByLabelText('Destinataires')).toHaveValue('saisi@ex.fr, autre@ex.fr');
+        });
+
+        it('ne préremplit rien quand aucune adresse n\'est configurée', async () => {
+            fetchMock.mockImplementation(route({ '/draft': () => json({ ...DRAFT, default_recipient: '' }) }));
+            mount();
+            await screen.findByText('Marché haussier');
+
+            expect(screen.getByLabelText('Destinataires')).toHaveValue('');
         });
     });
 });

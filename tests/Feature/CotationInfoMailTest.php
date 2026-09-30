@@ -206,3 +206,31 @@ it('ne modifie pas l\'export PDF', function (): void {
         ->assertOk()
         ->assertHeader('content-type', 'application/pdf');
 });
+
+it('propose l\'adresse configurée comme destinataire par défaut, sans la contourner à l\'envoi', function (): void {
+    Mail::fake();
+    setCotationInfo(RICH_INFO);
+    $editor = mailUser(['cotations.cereals.edit']);
+
+    $this->actingAs($editor)->getJson(route('cotations.mail-draft'))
+        ->assertOk()
+        ->assertJsonPath('default_recipient', 'cotation@jeudy-sa.fr');
+
+    config(['cotations.mail.default_recipient' => 'autre@example.fr']);
+    $this->actingAs($editor)->getJson(route('cotations.mail-draft'))->assertJsonPath('default_recipient', 'autre@example.fr');
+
+    // Destinataire ordinaire : même validation qu'une saisie manuelle, dans « À » uniquement.
+    $payload = ['draft_id' => (string) Str::uuid(), 'body_html' => RICH_INFO, 'subject' => ''];
+    $this->actingAs($editor)->postJson(route('cotations.send-mail'), $payload + ['to' => ['pas-une-adresse']])->assertUnprocessable();
+    $this->actingAs($editor)->postJson(route('cotations.send-mail'), ['draft_id' => (string) Str::uuid()] + $payload + ['to' => ['cotation@jeudy-sa.fr', 'autre@example.fr']])->assertOk();
+
+    Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
+        return $mail->hasTo('cotation@jeudy-sa.fr') && $mail->hasTo('autre@example.fr')
+            && ! $mail->hasCc('cotation@jeudy-sa.fr') && ! $mail->hasBcc('cotation@jeudy-sa.fr')
+            && $mail->from === [] && ! $mail->hasReplyTo('cotation@jeudy-sa.fr');
+    });
+});
+
+it('ne donne pas l\'adresse par défaut sans la permission d\'export', function (): void {
+    $this->actingAs(mailUser(['cotations.cereals.view']))->getJson(route('cotations.mail-draft'))->assertForbidden();
+});

@@ -53,6 +53,8 @@ class CotationMailController extends Controller
             // à cette rédaction (et à l'utilisateur qui la mène).
             'draft_id' => (string) Str::uuid(),
             'limits' => $this->attachments->limits(),
+            // Adresse préremplie dans « À » : un destinataire ordinaire, revalidé à l'envoi.
+            'default_recipient' => (string) config('cotations.mail.default_recipient', ''),
         ]);
     }
 

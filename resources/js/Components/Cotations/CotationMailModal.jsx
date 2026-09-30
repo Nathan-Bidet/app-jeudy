@@ -62,6 +62,8 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, filesBaseUr
                 setBodyHtml(data.body_html || '');
                 setEditorKey((key) => key + 1);
                 setSubject(data.subject || '');
+                // Une seule fois par ouverture, et seulement si rien n'a déjà été saisi.
+                setRecipients((current) => (current.trim() === '' ? (data.default_recipient || '') : current));
                 window.setTimeout(() => recipientsRef.current?.focus(), 50);
             })
             .catch((exception) => {

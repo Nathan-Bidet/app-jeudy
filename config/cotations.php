@@ -56,6 +56,10 @@ return [
     |
     */
     'mail' => [
+        // Destinataire prérempli dans le champ « À » de la modale d'envoi (modifiable
+        // par l'utilisateur ; vide pour ne rien préremplir).
+        'default_recipient' => env('COTATIONS_MAIL_DEFAULT_RECIPIENT', 'cotation@jeudy-sa.fr'),
+
         'disk' => env('COTATIONS_MAIL_DISK', 'local'),
 
         // Fichiers ajoutés manuellement (le PDF généré n'entre pas dans ce compte).
