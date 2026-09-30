@@ -8,6 +8,7 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\CalendarEventController;
 use App\Http\Controllers\CalendarFeedController;
 use App\Http\Controllers\CotationController;
+use App\Http\Controllers\CotationMailController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DirectoryController;
 use App\Http\Controllers\EngraisController;
@@ -343,6 +344,14 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/cotations/export-pdf', [CotationController::class, 'exportPdf'])
         ->middleware('sector.access:cotations.cereals.edit')
         ->name('cotations.export-pdf');
+    Route::get('/cotations/mail-draft', [CotationMailController::class, 'draft'])
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.mail-draft');
+    Route::post('/cotations/send-mail', [CotationMailController::class, 'send'])
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.send-mail');
     Route::get('/cotations/export-fuel-pdf', [CotationController::class, 'exportFuelPdf'])
         ->middleware('sector.access:cotations.fuel.edit')
         ->name('cotations.export-fuel-pdf');

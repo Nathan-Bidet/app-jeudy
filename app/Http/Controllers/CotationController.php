@@ -105,6 +105,8 @@ class CotationController extends Controller
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
                     'fuel_history' => route('cotations.fuel-history'),
                     'export_pdf' => route('cotations.export-pdf'),
+                    'mail_draft' => route('cotations.mail-draft'),
+                    'send_mail' => route('cotations.send-mail'),
                     'export_fuel_pdf' => route('cotations.export-fuel-pdf'),
                     'admin' => route('admin.cotations.index'),
                 ],

@@ -1,3 +1,4 @@
+import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 import AppLayout from '@/Layouts/AppLayout';
 import { Head, useForm } from '@inertiajs/react';
 import {
@@ -18,6 +19,7 @@ import {
     RefreshCw,
     RotateCcw,
     Save,
+    Send,
     Settings2,
     Strikethrough,
     Trash2,
@@ -2008,6 +2010,8 @@ export default function CotationsIndex({
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState('');
+    const [mailOpen, setMailOpen] = useState(false);
+    const [mailNotice, setMailNotice] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
     const [isFuelEditing, setIsFuelEditing] = useState(false);
     const [draggedCerealCode, setDraggedCerealCode] = useState(null);
@@ -2546,6 +2550,21 @@ export default function CotationsIndex({
                         Export PDF
                     </a>
                 ) : null}
+                {canManage && routes.send_mail && !isEditing && !isFuelEditing ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setMailNotice(null);
+                            setMailOpen(true);
+                        }}
+                        disabled={mailOpen}
+                        aria-label="Envoyer le message d'information des cotations par e-mail"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-60"
+                    >
+                        <Send className="h-3.5 w-3.5" strokeWidth={2.3} />
+                        Envoyer
+                    </button>
+                ) : null}
                 {canManage && !isEditing && !isFuelEditing ? (
                     <button
                         type="button"
@@ -2569,6 +2588,31 @@ export default function CotationsIndex({
                     <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                         {error}
                     </div>
+                ) : null}
+
+                {mailNotice ? (
+                    <div
+                        role="status"
+                        className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${mailNotice.type === 'success'
+                            ? 'border-green-200 bg-green-50 text-green-800'
+                            : 'border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)]'}`}
+                    >
+                        {mailNotice.text}
+                    </div>
+                ) : null}
+
+                {canManage && routes.send_mail ? (
+                    <CotationMailModal
+                        show={mailOpen}
+                        draftUrl={routes.mail_draft}
+                        sendUrl={routes.send_mail}
+                        onClose={() => setMailOpen(false)}
+                        onSent={(count) => setMailNotice({
+                            type: 'success',
+                            text: count > 1 ? `Message envoyé à ${count} destinataires.` : 'Message envoyé.',
+                        })}
+                        onCancel={() => setMailNotice({ type: 'info', text: "Envoi annulé : aucun e-mail n'a été envoyé." })}
+                    />
                 ) : null}
 
                 {!canViewCereals && !canViewFuel ? (
