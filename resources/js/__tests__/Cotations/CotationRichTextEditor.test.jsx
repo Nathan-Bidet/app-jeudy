@@ -54,11 +54,11 @@ describe('CotationRichTextEditor', () => {
     it('applique la couleur du texte et le surlignage', () => {
         render(<RichTextEditor value="<p>x</p>" onChange={() => {}} />);
 
-        fireEvent.change(screen.getByLabelText('Couleur du texte'), { target: { value: '#ff0000' } });
-        fireEvent.change(screen.getByLabelText('Couleur de surlignage'), { target: { value: '#ffff00' } });
+        fireEvent.change(screen.getByLabelText(/^Couleur du texte/), { target: { value: '#ff0000' } });
+        fireEvent.change(screen.getByLabelText(/^Couleur de surlignage/), { target: { value: '#ff00ff' } });
 
         expect(execCommand).toHaveBeenCalledWith('foreColor', false, '#ff0000');
-        expect(execCommand).toHaveBeenCalledWith('hiliteColor', false, '#ffff00');
+        expect(execCommand).toHaveBeenCalledWith('hiliteColor', false, '#ff00ff');
     });
 
     it('applique la taille du texte choisie en pixels', () => {
