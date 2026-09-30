@@ -2455,6 +2455,7 @@ export default function CotationsIndex({
                         show={mailOpen}
                         draftUrl={routes.mail_draft}
                         sendUrl={routes.send_mail}
+                        filesBaseUrl={routes.mail_base}
                         onClose={() => setMailOpen(false)}
                         onSent={(count) => setMailNotice({
                             type: 'success',

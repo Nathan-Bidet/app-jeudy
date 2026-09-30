@@ -7,6 +7,7 @@ use App\Models\Sector;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -66,7 +67,7 @@ it('refuse côté serveur la préparation et l\'envoi sans la permission d\'expo
     $viewer = mailUser(['cotations.cereals.view']);
 
     $this->actingAs($viewer)->getJson(route('cotations.mail-draft'))->assertForbidden();
-    $this->actingAs($viewer)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => RICH_INFO])->assertForbidden();
+    $this->actingAs($viewer)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'draft_id' => (string) Str::uuid(), 'body_html' => RICH_INFO])->assertForbidden();
 
     Mail::assertNothingSent();
 });
@@ -101,7 +102,7 @@ it('assainit le contenu avant de le mettre dans le courriel', function (): void 
     $dirty = '<p onclick="x()">Texte</p><script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">lien</a><span style="color:red;background:url(http://evil)">ok</span>';
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => $dirty])->assertOk();
+        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'draft_id' => (string) Str::uuid(), 'body_html' => $dirty])->assertOk();
 
     Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
         return ! str_contains($mail->bodyHtml, '<script')
@@ -122,7 +123,7 @@ it('envoie le message aux destinataires avec l\'objet et le HTML du bloc Informa
     $this->actingAs($editor)->postJson(route('cotations.send-mail'), [
         'to' => ['a@example.fr', 'b@example.fr'],
         'subject' => '',
-        'body_html' => RICH_INFO,
+        'draft_id' => (string) Str::uuid(), 'body_html' => RICH_INFO,
     ])->assertOk()->assertJson(['ok' => true, 'sent' => 2]);
 
     Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
@@ -139,7 +140,7 @@ it('valide les destinataires', function (array $payload): void {
     setCotationInfo(RICH_INFO);
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), $payload + ['body_html' => RICH_INFO])
+        ->postJson(route('cotations.send-mail'), $payload + ['draft_id' => (string) Str::uuid(), 'body_html' => RICH_INFO])
         ->assertUnprocessable()
         ->assertJsonStructure(['errors']);
 
@@ -160,7 +161,7 @@ it('propose un brouillon vide sans bloquer, mais refuse d\'envoyer un corps vide
     $this->actingAs($editor)->getJson(route('cotations.mail-draft'))->assertJsonPath('is_empty', true);
 
     foreach (['', '<p><br></p>', '<script>x()</script>'] as $body) {
-        $this->actingAs($editor)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => $body])
+        $this->actingAs($editor)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'draft_id' => (string) Str::uuid(), 'body_html' => $body])
             ->assertUnprocessable();
     }
 
@@ -173,7 +174,7 @@ it('envoie le corps rédigé dans la modale sans modifier le message enregistré
     $edited = '<p style="text-align: center; font-size: 24px; background-color: #ffff00">Version <b>modifiée</b></p>';
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => $edited])
+        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'draft_id' => (string) Str::uuid(), 'body_html' => $edited])
         ->assertOk();
 
     Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
@@ -192,9 +193,9 @@ it('renvoie une erreur claire quand le service de messagerie échoue', function 
     Mail::shouldReceive('send')->andThrow(new RuntimeException('SMTP down'));
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => RICH_INFO])
+        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'draft_id' => (string) Str::uuid(), 'body_html' => RICH_INFO])
         ->assertStatus(502)
-        ->assertJsonPath('message', "L'e-mail n'a pas pu être envoyé. Réessayez dans un instant.");
+        ->assertJsonPath('message', "L'e-mail n'a pas pu être envoyé. Vos pièces jointes sont conservées : réessayez dans un instant.");
 });
 
 it('ne modifie pas l\'export PDF', function (): void {

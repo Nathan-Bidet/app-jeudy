@@ -352,6 +352,20 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->middleware('sector.access:cotations.cereals.edit')
         ->middleware('throttle:admin-sensitive')
         ->name('cotations.send-mail');
+    Route::middleware(['sector.access:cotations.cereals.edit', 'throttle:cotation-mail-files'])
+        ->prefix('/cotations/mail/{draft}')
+        ->whereUuid('draft')
+        ->group(function (): void {
+            Route::post('/pdf', [CotationMailController::class, 'generatePdf'])->name('cotations.mail.pdf');
+            Route::post('/files', [CotationMailController::class, 'upload'])->name('cotations.mail.upload');
+            Route::get('/attachments/{attachment}', [CotationMailController::class, 'download'])
+                ->whereNumber('attachment')
+                ->name('cotations.mail.download');
+            Route::delete('/attachments/{attachment}', [CotationMailController::class, 'destroyAttachment'])
+                ->whereNumber('attachment')
+                ->name('cotations.mail.attachments.destroy');
+            Route::delete('/', [CotationMailController::class, 'discard'])->name('cotations.mail.discard');
+        });
     Route::get('/cotations/export-fuel-pdf', [CotationController::class, 'exportFuelPdf'])
         ->middleware('sector.access:cotations.fuel.edit')
         ->name('cotations.export-fuel-pdf');

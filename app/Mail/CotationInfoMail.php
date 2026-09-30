@@ -2,6 +2,8 @@
 
 namespace App\Mail;
 
+use App\Models\CotationMailAttachment;
+use Illuminate\Mail\Attachment;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
@@ -20,6 +22,9 @@ class CotationInfoMail extends Mailable
         public readonly string $mailSubject,
         public readonly string $bodyHtml,
         public readonly ?string $replyToAddress = null,
+        /** @var iterable<int, CotationMailAttachment> */
+        public readonly iterable $fileAttachments = [],
+        public readonly string $attachmentDisk = 'local',
     ) {
     }
 
@@ -38,6 +43,23 @@ class CotationInfoMail extends Mailable
             text: 'emails.cotations.info-text',
             with: ['bodyHtml' => $this->bodyHtml],
         );
+    }
+
+    /**
+     * Pièces jointes lues sur le disque privé, sous leur nom d'affichage.
+     *
+     * @return array<int, Attachment>
+     */
+    public function attachments(): array
+    {
+        $attachments = [];
+        foreach ($this->fileAttachments as $file) {
+            $attachments[] = Attachment::fromStorageDisk($this->attachmentDisk, $file->storagePath())
+                ->as($file->original_name)
+                ->withMime($file->mime_type);
+        }
+
+        return $attachments;
     }
 
     /**

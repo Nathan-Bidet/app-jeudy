@@ -1,4 +1,5 @@
 import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
+import CotationMailAttachments, { useMailAttachments } from '@/Components/Cotations/CotationMailAttachments';
 import Modal from '@/Components/Modal';
 import { Loader2, Send, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -26,7 +27,7 @@ function parseRecipients(value) {
  * Entrée bloquée dans les champs) et le bouton n'agit qu'à l'appui pointeur
  * (souris ou tactile), pas à l'activation clavier (Entrée/Espace).
  */
-export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, onSent, onCancel }) {
+export default function CotationMailModal({ show, draftUrl, sendUrl, filesBaseUrl, onClose, onSent, onCancel }) {
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState('');
@@ -36,6 +37,12 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
     const [recipients, setRecipients] = useState('');
     const [subject, setSubject] = useState('');
     const recipientsRef = useRef(null);
+    const attachments = useMailAttachments({
+        baseUrl: filesBaseUrl,
+        draftId: draft?.draft_id,
+        limits: draft?.limits || { extensions: [], max_files: 0, max_file_bytes: 0, max_total_bytes: 0 },
+    });
+    const { generatePdf } = attachments;
 
     useEffect(() => {
         if (!show) return undefined;
@@ -69,8 +76,18 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
         };
     }, [show, draftUrl]);
 
+    // Génération automatique du PDF dès que le brouillon (et son identifiant) est prêt.
+    const autoPdfDraftRef = useRef(null);
+    useEffect(() => {
+        if (draft?.draft_id && autoPdfDraftRef.current !== draft.draft_id) {
+            autoPdfDraftRef.current = draft.draft_id;
+            generatePdf(null);
+        }
+    }, [draft?.draft_id, generatePdf]);
+
     const cancel = () => {
         if (sending) return;
+        attachments.discard();
         onCancel?.();
         onClose();
     };
@@ -81,7 +98,7 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
 
     const send = async (event) => {
         // detail === 0 : activation clavier (Entrée/Espace sur le bouton focalisé).
-        if (event.detail === 0 || sending) return;
+        if (event.detail === 0 || sending || attachments.blocked) return;
 
         if (!bodyHtml.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()) {
             setError('Le message est vide : rédigez un message avant d\'envoyer.');
@@ -106,7 +123,13 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
                     'Content-Type': 'application/json',
                     'X-XSRF-TOKEN': xsrfToken(),
                 },
-                body: JSON.stringify({ to: list, subject, body_html: bodyHtml }),
+                body: JSON.stringify({
+                    to: list,
+                    subject,
+                    body_html: bodyHtml,
+                    draft_id: draft.draft_id,
+                    attachment_ids: attachments.attachmentIds,
+                }),
             });
             const data = await response.json().catch(() => ({}));
 
@@ -124,7 +147,7 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
         }
     };
 
-    const canSend = !loading && !sending && Boolean(draft);
+    const canSend = !loading && !sending && Boolean(draft) && !attachments.blocked;
 
     return (
         <Modal show={show} onClose={cancel} maxWidth="page" closeable={!sending}>
@@ -185,6 +208,10 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
                             <RichTextEditor key={editorKey} value={draft.body_html || ''} onChange={setBodyHtml} />
                         )}
                     </div>
+
+                    {draft ? (
+                        <CotationMailAttachments attachments={attachments} limits={draft.limits} disabled={sending} />
+                    ) : null}
 
                     {error ? (
                         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">

@@ -56,3 +56,11 @@ Schedule::command('annonces:send-scheduled')
     ->everyMinute()
     ->withoutOverlapping()
     ->timezone(config('app.timezone', 'Europe/Paris'));
+
+// Purge des pièces jointes temporaires du courriel des cotations : brouillons
+// abandonnés (fermeture du navigateur, coupure réseau) au-delà de
+// cotations.mail.expire_hours. Idempotente.
+Schedule::command('cotations:purge-mail-attachments')
+    ->hourly()
+    ->withoutOverlapping()
+    ->timezone(config('app.timezone', 'Europe/Paris'));

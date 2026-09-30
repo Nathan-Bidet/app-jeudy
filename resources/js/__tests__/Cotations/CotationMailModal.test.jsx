@@ -8,13 +8,28 @@ const DRAFT = {
     subject: 'Cotation du 30/09/2026',
     body_html: '<p><span style="color: #b91c1c">Marché haussier</span></p><p><br></p><p><em>Lundi</em></p>',
     is_empty: false,
+    draft_id: 'draft-1',
+    limits: { max_files: 5, max_file_bytes: 5 * 1024 * 1024, max_total_bytes: 15 * 1024 * 1024, extensions: ['pdf', 'png', 'txt'] },
+};
+
+const PDF = { id: 1, kind: 'pdf', name: 'Cotation_du_30-09-2026.pdf', type: 'application/pdf', size: 20480 };
+
+// Routeur de fetch simulé ; `overrides` remplace la réponse d'une route (clé : suffixe d'URL).
+const route = (overrides = {}) => (url, options = {}) => {
+    const key = Object.keys(overrides).find((suffix) => url.endsWith(suffix));
+    if (key) return overrides[key](url, options);
+    if (url === '/draft') return json(DRAFT);
+    if (url.endsWith('/pdf')) return json({ attachment: PDF });
+    if (url === '/send') return json({ ok: true, sent: 2 });
+
+    return json({ ok: true });
 };
 
 const json = (data, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(data) });
 
 function mount(props = {}) {
     const handlers = { onClose: vi.fn(), onSent: vi.fn(), onCancel: vi.fn() };
-    render(<CotationMailModal show draftUrl="/draft" sendUrl="/send" {...handlers} {...props} />);
+    render(<CotationMailModal show draftUrl="/draft" sendUrl="/send" filesBaseUrl="/mail" {...handlers} {...props} />);
 
     return handlers;
 }
@@ -30,7 +45,7 @@ describe('CotationMailModal', () => {
     let hrefSetter;
 
     beforeEach(() => {
-        fetchMock = vi.fn((url) => (url === '/draft' ? json(DRAFT) : json({ ok: true, sent: 2 })));
+        fetchMock = vi.fn(route());
         vi.stubGlobal('fetch', fetchMock);
         // Aucun mailto: ne doit jamais être déclenché.
         hrefSetter = vi.fn();
@@ -90,15 +105,15 @@ describe('CotationMailModal', () => {
             to: ['a@ex.fr', 'b@ex.fr', 'c@ex.fr', 'd@ex.fr'],
             subject: 'Cotation du 30/09/2026',
             body_html: DRAFT.body_html,
+            draft_id: 'draft-1',
+            attachment_ids: [1],
         });
         expect(hrefSetter).not.toHaveBeenCalled();
     });
 
     it('empêche le double envoi pendant que la requête est en cours', async () => {
         let resolveSend;
-        fetchMock.mockImplementation((url) => (url === '/draft'
-            ? json(DRAFT)
-            : new Promise((resolve) => { resolveSend = resolve; })));
+        fetchMock.mockImplementation(route({ '/send': () => new Promise((resolve) => { resolveSend = resolve; }) }));
         const handlers = mount();
         await screen.findByText('Marché haussier');
         fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: 'a@ex.fr' } });
@@ -116,9 +131,7 @@ describe('CotationMailModal', () => {
     });
 
     it('reste ouverte avec les destinataires saisis quand l\'envoi échoue', async () => {
-        fetchMock.mockImplementation((url) => (url === '/draft'
-            ? json(DRAFT)
-            : json({ message: "L'e-mail n'a pas pu être envoyé. Réessayez dans un instant." }, 502)));
+        fetchMock.mockImplementation(route({ '/send': () => json({ message: "L'e-mail n'a pas pu être envoyé. Réessayez dans un instant." }, 502) }));
         const { onClose, onSent } = mount();
         await screen.findByText('Marché haussier');
         fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: 'a@ex.fr' } });
@@ -133,9 +146,7 @@ describe('CotationMailModal', () => {
     });
 
     it('affiche l\'erreur de validation d\'une adresse invalide renvoyée par le serveur', async () => {
-        fetchMock.mockImplementation((url) => (url === '/draft'
-            ? json(DRAFT)
-            : json({ message: 'x', errors: { 'to.0': ['Adresse e-mail invalide : nope.'] } }, 422)));
+        fetchMock.mockImplementation(route({ '/send': () => json({ message: 'x', errors: { 'to.0': ['Adresse e-mail invalide : nope.'] } }, 422) }));
         mount();
         await screen.findByText('Marché haussier');
         fireEvent.change(screen.getByLabelText('Destinataires'), { target: { value: 'nope' } });
@@ -167,7 +178,7 @@ describe('CotationMailModal', () => {
         await waitFor(() => expect(sendRequest(fetchMock)).toBeDefined());
         expect(JSON.parse(sendRequest(fetchMock)[1].body).body_html).toBe('<p style="color: #123456">Texte réécrit</p>');
         // La seule requête de lecture ne modifie rien : aucune écriture vers une route de réglages.
-        expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual(['/draft', '/send']);
+        expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual(['/draft', '/mail/draft-1/pdf', '/send']);
     });
 
     it('refuse d\'envoyer un message vidé par l\'utilisateur', async () => {

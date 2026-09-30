@@ -107,6 +107,7 @@ class CotationController extends Controller
                     'export_pdf' => route('cotations.export-pdf'),
                     'mail_draft' => route('cotations.mail-draft'),
                     'send_mail' => route('cotations.send-mail'),
+                    'mail_base' => url('/cotations/mail'),
                     'export_fuel_pdf' => route('cotations.export-fuel-pdf'),
                     'admin' => route('admin.cotations.index'),
                 ],
@@ -379,6 +380,55 @@ class CotationController extends Controller
         return response()->json(['versions' => $versions]);
     }
 
+    /**
+     * Rend le PDF de l'export des cotations (contenu binaire). Source unique
+     * pour le bouton « Export PDF » et pour la pièce jointe du courriel : les
+     * deux PDF viennent exactement des mêmes données et de la même vue.
+     */
+    public function renderExportPdf(): string
+    {
+        $displaySettings = $this->displaySettings();
+        $leftYear = (int) ($displaySettings['harvest_left_year'] ?? now()->year);
+        $rightYear = (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1);
+
+        $cerealOrder = $this->cerealOrderConfig();
+        $groups = $this->applyCerealOrder(
+            $this->marketService->latestGroups($leftYear, $rightYear, false, false),
+            $cerealOrder,
+        );
+        $groups = $this->applyCerealLabels($groups, $this->cerealLabelsConfig());
+        $groups = array_values(array_filter($groups, static function (array $group): bool {
+            return count($group['harvests']['left']['rows'] ?? []) > 0
+                || count($group['harvests']['right']['rows'] ?? []) > 0;
+        }));
+
+        $finalPriceByKey = [];
+        foreach ($groups as $group) {
+            foreach (['left', 'right'] as $bucket) {
+                foreach ($group['harvests'][$bucket]['rows'] ?? [] as $row) {
+                    $finalPriceByKey[CotationPdfFormatter::referenceKey($row)] = $row['final_price'] ?? null;
+                }
+            }
+        }
+
+        $viewData = [
+            'cerealHarvestTables' => $this->buildCerealHarvestTables($groups, ['left' => $leftYear, 'right' => $rightYear], $this->cerealTableLabelsConfig()),
+            'transportGrid' => $this->transportGridConfig(),
+            'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
+            'finalPriceByKey' => $finalPriceByKey,
+            'generatedAt' => now(),
+            'lastRefreshAt' => $this->marketService->lastRefresh()?->fetched_at,
+            'cerealInfoHtml' => $this->cerealInfoConfig(),
+            'logoPath' => public_path('Logo Jeudy.png'),
+            'pdfOrientation' => 'landscape',
+        ];
+
+        $pdf = Pdf::loadView('cotations.pdf', $viewData)
+            ->setPaper('a4', 'landscape');
+
+        return $pdf->output();
+    }
+
     public function exportPdf(Request $request)
     {
         $access = app(AccessManager::class);
@@ -386,48 +436,11 @@ class CotationController extends Controller
         abort_unless($user && $access->can($user, 'cotations.cereals.edit'), 403);
 
         try {
-            $displaySettings = $this->displaySettings();
-            $leftYear = (int) ($displaySettings['harvest_left_year'] ?? now()->year);
-            $rightYear = (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1);
-
-            $cerealOrder = $this->cerealOrderConfig();
-            $groups = $this->applyCerealOrder(
-                $this->marketService->latestGroups($leftYear, $rightYear, false, false),
-                $cerealOrder,
-            );
-            $groups = $this->applyCerealLabels($groups, $this->cerealLabelsConfig());
-            $groups = array_values(array_filter($groups, static function (array $group): bool {
-                return count($group['harvests']['left']['rows'] ?? []) > 0
-                    || count($group['harvests']['right']['rows'] ?? []) > 0;
-            }));
-
-            $finalPriceByKey = [];
-            foreach ($groups as $group) {
-                foreach (['left', 'right'] as $bucket) {
-                    foreach ($group['harvests'][$bucket]['rows'] ?? [] as $row) {
-                        $finalPriceByKey[CotationPdfFormatter::referenceKey($row)] = $row['final_price'] ?? null;
-                    }
-                }
-            }
-
-            $viewData = [
-                'cerealHarvestTables' => $this->buildCerealHarvestTables($groups, ['left' => $leftYear, 'right' => $rightYear], $this->cerealTableLabelsConfig()),
-                'transportGrid' => $this->transportGridConfig(),
-                'fuelGrid' => CotationFuelCalculator::compute($this->fuelGridConfig()),
-                'finalPriceByKey' => $finalPriceByKey,
-                'generatedAt' => now(),
-                'lastRefreshAt' => $this->marketService->lastRefresh()?->fetched_at,
-                'cerealInfoHtml' => $this->cerealInfoConfig(),
-                'logoPath' => public_path('Logo Jeudy.png'),
-                'pdfOrientation' => 'landscape',
-            ];
-
-            $pdf = Pdf::loadView('cotations.pdf', $viewData)
-                ->setPaper('a4', 'landscape');
+            $output = $this->renderExportPdf();
 
             $filename = 'cotations-'.now()->format('Y-m-d-His').'.pdf';
 
-            return response($pdf->output(), 200, [
+            return response($output, 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="'.$filename.'"',
             ]);
