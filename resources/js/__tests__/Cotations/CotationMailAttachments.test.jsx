@@ -6,7 +6,7 @@ import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 
 const LIMITS = { max_files: 2, max_file_bytes: 1024 * 1024, max_total_bytes: 1.5 * 1024 * 1024, extensions: ['pdf', 'png', 'txt'] };
 const DRAFT = { subject: 'Cotation du 30/09/2026', body_html: '<p>Bonjour</p>', is_empty: false, draft_id: 'draft-1', limits: LIMITS };
-const PDF = { id: 1, kind: 'pdf', name: 'Cotation_du_30-09-2026.pdf', type: 'application/pdf', size: 20480 };
+const PDF = { id: 1, kind: 'pdf', name: 'COTATIONS 30.09.2026.pdf', type: 'application/pdf', size: 20480 };
 const PDF_2 = { ...PDF, id: 2, size: 30720 };
 
 const json = (data, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(data) });
@@ -94,7 +94,7 @@ describe('PDF joint automatiquement', () => {
         const open = vi.spyOn(window, 'open').mockImplementation(() => null);
         await mount();
 
-        expect(await screen.findByText('Cotation_du_30-09-2026.pdf')).toBeInTheDocument();
+        expect(await screen.findByText('COTATIONS 30.09.2026.pdf')).toBeInTheDocument();
         expect(screen.getByText(/PDF · 20 Ko/)).toBeInTheDocument();
         expect(calls(fetchMock, '/mail/draft-1/pdf', 'POST')).toHaveLength(1);
         expect(screen.getByRole('link', { name: 'Télécharger le PDF' })).toHaveAttribute('href', '/mail/draft-1/attachments/1');
@@ -111,13 +111,13 @@ describe('PDF joint automatiquement', () => {
 
         await act(async () => { finish({ ok: true, status: 200, json: () => Promise.resolve({ attachment: PDF }) }); });
 
-        expect(await screen.findByText('Cotation_du_30-09-2026.pdf')).toBeInTheDocument();
+        expect(await screen.findByText('COTATIONS 30.09.2026.pdf')).toBeInTheDocument();
         expect(sendButton()).not.toBeDisabled();
     });
 
     it('supprime le PDF, permet d\'envoyer sans lui, puis de le recréer', async () => {
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
 
         pointerClick(screen.getByRole('button', { name: 'Supprimer le PDF' }));
 
@@ -133,7 +133,7 @@ describe('PDF joint automatiquement', () => {
     it('recrée le PDF avec « Générer le PDF »', async () => {
         pdfResponses = [PDF, PDF_2];
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         pointerClick(screen.getByRole('button', { name: 'Supprimer le PDF' }));
         await screen.findByText('Aucun PDF joint');
 
@@ -180,13 +180,13 @@ describe('PDF joint automatiquement', () => {
         pointerClick(screen.getByRole('button', { name: 'Régénérer' }));
 
         expect(await screen.findByText('Le PDF n\'a pas pu être généré. Réessayez dans un instant.')).toBeInTheDocument();
-        expect(screen.getByText('Cotation_du_30-09-2026.pdf')).toBeInTheDocument();
+        expect(screen.getByText('COTATIONS 30.09.2026.pdf')).toBeInTheDocument();
         expect(sendButton()).not.toBeDisabled();
     });
 
     it('envoie avec l\'identifiant du PDF et celui du brouillon', async () => {
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         fillRecipient();
 
         pointerClick(sendButton());
@@ -207,7 +207,7 @@ describe('autres pièces jointes', () => {
 
     it('téléverse plusieurs fichiers avec progression, puis les supprime individuellement', async () => {
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
 
         pickFiles(makeFile('devis.pdf', 2048), makeFile('photo.png', 4096, 'image/png'));
         expect(FakeXHR.instances).toHaveLength(2);
@@ -238,7 +238,7 @@ describe('autres pièces jointes', () => {
 
     it('bloque l\'envoi tant qu\'un téléversement échoue, jusqu\'au retrait du fichier en erreur', async () => {
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         fillRecipient();
 
         pickFiles(makeFile('devis.pdf'));
@@ -277,7 +277,7 @@ describe('autres pièces jointes', () => {
 
     it('refuse au-delà du nombre maximal et de la taille totale', async () => {
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
 
         // Total : PDF 20 Ko + 0,9 Mo + 0,9 Mo > 1,5 Mo.
         pickFiles(makeFile('a.pdf', 900 * 1024), makeFile('b.pdf', 900 * 1024));
@@ -292,7 +292,7 @@ describe('autres pièces jointes', () => {
 
     it('supprime les fichiers temporaires à l\'annulation du brouillon', async () => {
         const { onCancel } = await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         pickFiles(makeFile('devis.pdf'));
 
         fireEvent.click(screen.getByRole('button', { name: 'Annuler' }));
@@ -304,7 +304,7 @@ describe('autres pièces jointes', () => {
 
     it('ne supprime pas le brouillon après un envoi réussi (le serveur nettoie)', async () => {
         const { onSent } = await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         fillRecipient();
 
         pointerClick(sendButton());
@@ -315,20 +315,20 @@ describe('autres pièces jointes', () => {
 
     it('conserve les pièces jointes et la saisie après un échec d\'envoi', async () => {
         await mount({ '/send': { handler: () => json({ message: 'L\'e-mail n\'a pas pu être envoyé.' }, 502) } });
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         fillRecipient();
 
         pointerClick(sendButton());
 
         expect(await screen.findByText('L\'e-mail n\'a pas pu être envoyé.')).toBeInTheDocument();
-        expect(screen.getByText('Cotation_du_30-09-2026.pdf')).toBeInTheDocument();
+        expect(screen.getByText('COTATIONS 30.09.2026.pdf')).toBeInTheDocument();
         expect(screen.getByLabelText('Destinataires')).toHaveValue('a@ex.fr');
         expect(sendButton()).not.toBeDisabled();
     });
 
     it('n\'envoie jamais avec Entrée, même avec des pièces jointes', async () => {
         await mount();
-        await screen.findByText('Cotation_du_30-09-2026.pdf');
+        await screen.findByText('COTATIONS 30.09.2026.pdf');
         fillRecipient();
 
         [{ key: 'Enter' }, { key: 'Enter', ctrlKey: true }, { key: 'Enter', metaKey: true }].forEach((init) => {

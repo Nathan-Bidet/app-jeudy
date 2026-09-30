@@ -100,7 +100,7 @@ it('génère le PDF nommé selon la date, sans chemin exposé, sur le disque pri
 
     [$draft, $attachment] = makeDraftWithPdf($this, $user);
 
-    expect($attachment)->toMatchArray(['kind' => 'pdf', 'name' => 'Cotation_du_30-09-2026.pdf', 'type' => 'application/pdf'])
+    expect($attachment)->toMatchArray(['kind' => 'pdf', 'name' => 'COTATIONS 30.09.2026.pdf', 'type' => 'application/pdf'])
         ->and($attachment['size'])->toBeGreaterThan(100)
         ->and(array_keys($attachment))->toEqualCanonicalizing(['id', 'kind', 'name', 'type', 'size']);
 
@@ -433,4 +433,54 @@ it('n\'expose plus le stockage : disque privé, aucune route publique', function
     expect($disks['disks']['local']['root'])->toEndWith('storage/app/private')
         ->and(config('cotations.mail.disk'))->toBe('local')
         ->and($disks['disks']['local'])->not->toHaveKey('visibility');
+});
+
+it('nomme le PDF « COTATIONS JJ.MM.AAAA.pdf » de la même façon partout (export, liste, courriel, régénération)', function (): void {
+    Mail::fake();
+    Carbon::setTestNow(Carbon::parse('2026-03-05 10:00:00', 'Europe/Paris'));
+    $user = attachmentUser();
+
+    // Export manuel : en-tête de téléchargement.
+    $disposition = $this->actingAs($user)->get(route('cotations.export-pdf'))->assertOk()->headers->get('content-disposition');
+    expect($disposition)->toBe('attachment; filename="COTATIONS 05.03.2026.pdf"');
+
+    // Liste de la modale + téléchargement de la pièce jointe.
+    [$draft, $pdf] = makeDraftWithPdf($this, $user);
+    expect($pdf['name'])->toBe('COTATIONS 05.03.2026.pdf');
+    $this->actingAs($user)->get(attachmentUrl($draft, '/attachments/'.$pdf['id']))
+        ->assertOk()
+        ->assertHeader('content-disposition', 'attachment; filename="COTATIONS 05.03.2026.pdf"');
+
+    // Régénération le lendemain : la date du jour de la nouvelle génération.
+    Carbon::setTestNow(Carbon::parse('2026-03-06 09:00:00', 'Europe/Paris'));
+    $new = $this->actingAs($user)->postJson(route('cotations.mail.pdf', $draft), ['replaces' => $pdf['id']])->json('attachment');
+    expect($new['name'])->toBe('COTATIONS 06.03.2026.pdf');
+
+    // Courriel reçu.
+    $this->actingAs($user)->postJson(route('cotations.send-mail'), sendPayload($draft, [$new['id']]))->assertOk();
+    Mail::assertSent(CotationInfoMail::class, fn (CotationInfoMail $mail): bool => collect($mail->attachments())->map(fn ($a) => $a->as)->all() === ['COTATIONS 06.03.2026.pdf']);
+});
+
+it('utilise le fuseau de l\'application autour de minuit, pas celui du serveur', function (): void {
+    // 23h30 UTC le 29/09 : déjà le 30/09 à Paris (UTC+2), encore le 29/09 en UTC.
+    $instant = Carbon::parse('2026-09-29 23:30:00', 'UTC');
+
+    config(['app.timezone' => 'Europe/Paris']);
+    expect(\App\Support\Cotations\CotationPdfFormatter::exportFilename($instant))->toBe('COTATIONS 30.09.2026.pdf');
+
+    config(['app.timezone' => 'UTC']);
+    expect(\App\Support\Cotations\CotationPdfFormatter::exportFilename($instant))->toBe('COTATIONS 29.09.2026.pdf');
+
+    // Sans instant fourni : « maintenant », converti dans le fuseau de l'application.
+    config(['app.timezone' => 'Europe/Paris']);
+    Carbon::setTestNow($instant);
+    expect(app(CotationMailAttachmentService::class)->pdfFilename())->toBe('COTATIONS 30.09.2026.pdf');
+});
+
+it('garde les zéros initiaux et le format exact du nom', function (): void {
+    config(['app.timezone' => 'Europe/Paris']);
+
+    expect(\App\Support\Cotations\CotationPdfFormatter::exportFilename(Carbon::parse('2026-01-02 08:00:00', 'Europe/Paris')))
+        ->toBe('COTATIONS 02.01.2026.pdf')
+        ->toMatch('/^COTATIONS \d{2}\.\d{2}\.\d{4}\.pdf$/');
 });

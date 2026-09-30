@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Throwable;
 
 class CotationController extends Controller
@@ -438,11 +439,12 @@ class CotationController extends Controller
         try {
             $output = $this->renderExportPdf();
 
-            $filename = 'cotations-'.now()->format('Y-m-d-His').'.pdf';
-
             return response($output, 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+                'Content-Disposition' => HeaderUtils::makeDisposition(
+                    HeaderUtils::DISPOSITION_ATTACHMENT,
+                    CotationPdfFormatter::exportFilename(),
+                ),
             ]);
         } catch (Throwable $exception) {
             Log::error('cotations.export-pdf failed', [

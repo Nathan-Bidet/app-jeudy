@@ -4,6 +4,7 @@ namespace App\Services\Cotations;
 
 use App\Models\CotationMailAttachment;
 use App\Models\User;
+use App\Support\Cotations\CotationPdfFormatter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -45,7 +46,7 @@ class CotationMailAttachmentService
 
     public function pdfFilename(): string
     {
-        return 'Cotation_du_'.now(config('app.timezone'))->format('d-m-Y').'.pdf';
+        return CotationPdfFormatter::exportFilename();
     }
 
     /**

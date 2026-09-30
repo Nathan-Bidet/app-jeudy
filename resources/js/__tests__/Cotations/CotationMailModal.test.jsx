@@ -12,7 +12,7 @@ const DRAFT = {
     limits: { max_files: 5, max_file_bytes: 5 * 1024 * 1024, max_total_bytes: 15 * 1024 * 1024, extensions: ['pdf', 'png', 'txt'] },
 };
 
-const PDF = { id: 1, kind: 'pdf', name: 'Cotation_du_30-09-2026.pdf', type: 'application/pdf', size: 20480 };
+const PDF = { id: 1, kind: 'pdf', name: 'COTATIONS 30.09.2026.pdf', type: 'application/pdf', size: 20480 };
 
 // Routeur de fetch simulé ; `overrides` remplace la réponse d'une route (clé : suffixe d'URL).
 const route = (overrides = {}) => (url, options = {}) => {
