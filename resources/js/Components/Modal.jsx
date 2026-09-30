@@ -28,6 +28,10 @@ export default function Modal({
         '3xl': 'sm:max-w-3xl',
         '4xl': 'sm:max-w-4xl',
         '5xl': 'sm:max-w-5xl',
+        // Largeur utile du contenu d'une page standard : conteneur max-w-[1320px]
+        // moins son padding sm:p-6 (voir Layouts/AppLayout.jsx). La marge latérale
+        // de la modale est assurée par le px-3 / sm:px-4 du Dialog.
+        page: 'sm:max-w-[calc(1320px-3rem)]',
     }[maxWidth];
 
     return (

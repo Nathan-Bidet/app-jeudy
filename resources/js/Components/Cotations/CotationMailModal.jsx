@@ -127,9 +127,9 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
     const canSend = !loading && !sending && Boolean(draft);
 
     return (
-        <Modal show={show} onClose={cancel} maxWidth="2xl" closeable={!sending}>
-            <form onSubmit={(event) => event.preventDefault()} noValidate className="rounded-lg bg-[var(--app-surface)] text-[var(--app-text)]">
-                <div className="flex items-center justify-between gap-3 border-b border-[var(--app-border)] px-4 py-3">
+        <Modal show={show} onClose={cancel} maxWidth="page" closeable={!sending}>
+            <form onSubmit={(event) => event.preventDefault()} noValidate className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col rounded-lg bg-[var(--app-surface)] text-[var(--app-text)] sm:max-h-[calc(100dvh-3rem)]">
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--app-border)] px-4 py-3">
                     <h2 className="text-sm font-black uppercase tracking-[0.1em]">Nouveau message</h2>
                     <button
                         type="button"
@@ -142,7 +142,7 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
                     </button>
                 </div>
 
-                <div className="space-y-3 px-4 py-4">
+                <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
                     <label className="block">
                         <span className="mb-1 block text-xs font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">À</span>
                         <input
@@ -193,7 +193,7 @@ export default function CotationMailModal({ show, draftUrl, sendUrl, onClose, on
                     ) : null}
                 </div>
 
-                <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--app-border)] px-4 py-3">
+                <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-[var(--app-border)] px-4 py-3">
                     <button
                         type="button"
                         onClick={cancel}
