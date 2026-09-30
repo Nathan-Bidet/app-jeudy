@@ -18,8 +18,11 @@ use Throwable;
  * Composition et envoi du message d'information des cotations par e-mail.
  *
  * Même permission que l'export PDF (cotations.cereals.edit), vérifiée ici en
- * plus du middleware de route. Le corps vient toujours de la source unique du
- * bloc « Information » (cotation_settings.cereal_info_html), jamais du client.
+ * plus du middleware de route. Le corps de départ vient de la source unique du
+ * bloc « Information » (cotation_settings.cereal_info_html) ; le texte envoyé
+ * est celui rédigé dans la modale, toujours assaini ici avec les mêmes règles
+ * que l'éditeur des cotations (CerealInfoSanitizer). Le message enregistré
+ * n'est jamais modifié.
  */
 class CotationMailController extends Controller
 {
@@ -48,7 +51,9 @@ class CotationMailController extends Controller
             'to' => ['required', 'array', 'min:1', 'max:20'],
             'to.*' => ['required', 'string', 'email:rfc', 'max:254', 'distinct:ignore_case'],
             'subject' => ['nullable', 'string', 'max:200'],
+            'body_html' => ['required', 'string', 'max:100000'],
         ], [
+            'body_html.required' => 'Le message est vide : rédigez un message avant d\'envoyer.',
             'to.required' => 'Renseignez au moins un destinataire.',
             'to.min' => 'Renseignez au moins un destinataire.',
             'to.max' => 'Vingt destinataires maximum.',
@@ -56,10 +61,10 @@ class CotationMailController extends Controller
             'to.*.distinct' => 'Adresse e-mail en double : :input.',
         ]);
 
-        $html = $this->infoHtml();
+        $html = CerealInfoSanitizer::sanitize($validated['body_html']);
         if ($this->isEmpty($html)) {
             return response()->json([
-                'message' => "Le message d'information est vide : rien à envoyer.",
+                'message' => 'Le message est vide : rédigez un message avant d\'envoyer.',
             ], 422);
         }
 

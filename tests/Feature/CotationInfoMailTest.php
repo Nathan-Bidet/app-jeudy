@@ -66,7 +66,7 @@ it('refuse côté serveur la préparation et l\'envoi sans la permission d\'expo
     $viewer = mailUser(['cotations.cereals.view']);
 
     $this->actingAs($viewer)->getJson(route('cotations.mail-draft'))->assertForbidden();
-    $this->actingAs($viewer)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr']])->assertForbidden();
+    $this->actingAs($viewer)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => RICH_INFO])->assertForbidden();
 
     Mail::assertNothingSent();
 });
@@ -98,10 +98,10 @@ it('reprend le message d\'information avec sa mise en forme', function (): void 
 
 it('assainit le contenu avant de le mettre dans le courriel', function (): void {
     Mail::fake();
-    setCotationInfo('<p onclick="x()">Texte</p><script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">lien</a><span style="color:red;background:url(http://evil)">ok</span>');
+    $dirty = '<p onclick="x()">Texte</p><script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">lien</a><span style="color:red;background:url(http://evil)">ok</span>';
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr']])->assertOk();
+        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => $dirty])->assertOk();
 
     Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
         return ! str_contains($mail->bodyHtml, '<script')
@@ -122,6 +122,7 @@ it('envoie le message aux destinataires avec l\'objet et le HTML du bloc Informa
     $this->actingAs($editor)->postJson(route('cotations.send-mail'), [
         'to' => ['a@example.fr', 'b@example.fr'],
         'subject' => '',
+        'body_html' => RICH_INFO,
     ])->assertOk()->assertJson(['ok' => true, 'sent' => 2]);
 
     Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
@@ -138,7 +139,7 @@ it('valide les destinataires', function (array $payload): void {
     setCotationInfo(RICH_INFO);
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), $payload)
+        ->postJson(route('cotations.send-mail'), $payload + ['body_html' => RICH_INFO])
         ->assertUnprocessable()
         ->assertJsonStructure(['errors']);
 
@@ -151,16 +152,38 @@ it('valide les destinataires', function (array $payload): void {
     'trop nombreux' => [['to' => array_map(fn ($i) => "u{$i}@example.fr", range(1, 21))]],
 ]);
 
-it('refuse d\'envoyer un message d\'information vide', function (): void {
+it('propose un brouillon vide sans bloquer, mais refuse d\'envoyer un corps vide', function (): void {
     Mail::fake();
     setCotationInfo('<p><br></p>');
     $editor = mailUser(['cotations.cereals.edit']);
 
     $this->actingAs($editor)->getJson(route('cotations.mail-draft'))->assertJsonPath('is_empty', true);
-    $this->actingAs($editor)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr']])
-        ->assertUnprocessable();
+
+    foreach (['', '<p><br></p>', '<script>x()</script>'] as $body) {
+        $this->actingAs($editor)->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => $body])
+            ->assertUnprocessable();
+    }
 
     Mail::assertNothingSent();
+});
+
+it('envoie le corps rédigé dans la modale sans modifier le message enregistré', function (): void {
+    Mail::fake();
+    setCotationInfo(RICH_INFO);
+    $edited = '<p style="text-align: center; font-size: 24px; background-color: #ffff00">Version <b>modifiée</b></p>';
+
+    $this->actingAs(mailUser(['cotations.cereals.edit']))
+        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => $edited])
+        ->assertOk();
+
+    Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
+        return str_contains($mail->bodyHtml, 'text-align: center')
+            && str_contains($mail->bodyHtml, 'font-size: 24px')
+            && str_contains($mail->bodyHtml, 'background-color: #ffff00')
+            && str_contains($mail->bodyHtml, '<b>modifiée</b>')
+            && ! str_contains($mail->bodyHtml, 'Marché haussier');
+    });
+    expect(CotationSetting::query()->where('key', 'cereal_info_html')->value('note'))->toBe(RICH_INFO);
 });
 
 it('renvoie une erreur claire quand le service de messagerie échoue', function (): void {
@@ -169,7 +192,7 @@ it('renvoie une erreur claire quand le service de messagerie échoue', function 
     Mail::shouldReceive('send')->andThrow(new RuntimeException('SMTP down'));
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))
-        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr']])
+        ->postJson(route('cotations.send-mail'), ['to' => ['a@example.fr'], 'body_html' => RICH_INFO])
         ->assertStatus(502)
         ->assertJsonPath('message', "L'e-mail n'a pas pu être envoyé. Réessayez dans un instant.");
 });
