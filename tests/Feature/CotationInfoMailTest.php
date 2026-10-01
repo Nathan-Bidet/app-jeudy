@@ -79,7 +79,7 @@ it('prépare l\'objet avec la date du jour au fuseau de l\'application', functio
 
     $this->actingAs(mailUser(['cotations.cereals.edit']))->getJson(route('cotations.mail-draft'))
         ->assertOk()
-        ->assertJsonPath('subject', 'Cotation du 30/09/2026')
+        ->assertJsonPath('subject', 'COTATIONS 30.09.2026')
         ->assertJsonPath('is_empty', false);
 });
 
@@ -127,7 +127,7 @@ it('envoie le message aux destinataires avec l\'objet et le HTML du bloc Informa
     ])->assertOk()->assertJson(['ok' => true, 'sent' => 2]);
 
     Mail::assertSent(CotationInfoMail::class, function (CotationInfoMail $mail): bool {
-        $mail->assertHasSubject('Cotation du 30/09/2026');
+        $mail->assertHasSubject('COTATIONS 30.09.2026');
         $mail->assertSeeInHtml('color: #b91c1c', false);
         $mail->assertSeeInText('Marché haussier');
 
@@ -233,4 +233,17 @@ it('propose l\'adresse configurée comme destinataire par défaut, sans la conto
 
 it('ne donne pas l\'adresse par défaut sans la permission d\'export', function (): void {
     $this->actingAs(mailUser(['cotations.cereals.view']))->getJson(route('cotations.mail-draft'))->assertForbidden();
+});
+
+it('garde un objet dynamique « COTATIONS JJ.MM.AAAA » selon le fuseau métier, sans ancien format', function (): void {
+    setCotationInfo(RICH_INFO);
+    $editor = mailUser(['cotations.cereals.edit']);
+
+    // 23h30 UTC le 31/12 = 00h30 le 01/01 à Paris : la date suit le fuseau de l'application.
+    Carbon::setTestNow(Carbon::parse('2026-12-31 23:30:00', 'UTC'));
+    $subject = $this->actingAs($editor)->getJson(route('cotations.mail-draft'))->json('subject');
+    expect($subject)->toBe('COTATIONS 01.01.2027')->and($subject)->not->toContain('Cotation du');
+
+    Carbon::setTestNow(Carbon::parse('2026-03-05 10:00:00', 'Europe/Paris'));
+    expect($this->actingAs($editor)->getJson(route('cotations.mail-draft'))->json('subject'))->toBe('COTATIONS 05.03.2026');
 });

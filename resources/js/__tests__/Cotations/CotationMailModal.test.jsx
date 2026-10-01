@@ -5,7 +5,7 @@ import '@testing-library/jest-dom';
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 
 const DRAFT = {
-    subject: 'Cotation du 30/09/2026',
+    subject: 'COTATIONS 30.09.2026',
     body_html: '<p><span style="color: #b91c1c">Marché haussier</span></p><p><br></p><p><em>Lundi</em></p>',
     is_empty: false,
     draft_id: 'draft-1',
@@ -62,7 +62,7 @@ describe('CotationMailModal', () => {
     it('affiche l\'objet daté et le message avec sa mise en forme', async () => {
         mount();
 
-        expect(await screen.findByDisplayValue('Cotation du 30/09/2026')).toBeInTheDocument();
+        expect(await screen.findByDisplayValue('COTATIONS 30.09.2026')).toBeInTheDocument();
         const colored = await screen.findByText('Marché haussier');
         expect(colored).toHaveStyle({ color: '#b91c1c' });
         expect(screen.getByText('Lundi').tagName).toBe('EM');
@@ -105,7 +105,7 @@ describe('CotationMailModal', () => {
         expect(options.method).toBe('POST');
         expect(JSON.parse(options.body)).toEqual({
             to: ['a@ex.fr', 'b@ex.fr', 'c@ex.fr', 'd@ex.fr'],
-            subject: 'Cotation du 30/09/2026',
+            subject: 'COTATIONS 30.09.2026',
             body_html: DRAFT.body_html,
             draft_id: 'draft-1',
             attachment_ids: [1],

@@ -1,4 +1,5 @@
 import CerealHistoryBar from '@/Components/Cotations/CerealHistoryBar';
+import CerealHistoryDay from '@/Components/Cotations/CerealHistoryDay';
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 import PdfExportButton from '@/Components/Cotations/PdfExportButton';
 import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
@@ -2277,13 +2278,6 @@ export default function CotationsIndex({
     };
 
     const isViewingCerealHistory = Boolean(cerealHistory.version);
-    // En mode historique, tout l'affichage céréales vient de l'instantané, jamais des valeurs actuelles.
-    const displayMarket = cerealHistory.version?.market ?? marketData;
-    const historyTransportGrid = cerealHistory.version?.transport_grid;
-    const displayTransportGrid = useMemo(
-        () => (historyTransportGrid ? normalizeTransportGrid(historyTransportGrid) : form.data.transport_grid),
-        [historyTransportGrid, form.data.transport_grid],
-    );
 
     const fetchCerealHistoryVersion = async (date, dates = cerealHistory.dates) => {
         setCerealHistory((current) => ({ ...current, loading: true, error: '' }));
@@ -2295,7 +2289,7 @@ export default function CotationsIndex({
             });
             const data = await response.json().catch(() => ({}));
 
-            if (!response.ok || !data?.version?.market) {
+            if (!response.ok || !data?.version?.groups) {
                 // Version supprimée entre l'affichage du calendrier et le clic : on resynchronise les dates.
                 const refreshed = await fetch(routes.cereal_history_dates, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
                     .then((res) => res.json()).catch(() => ({ dates }));
@@ -2346,7 +2340,7 @@ export default function CotationsIndex({
     const closeCerealHistory = () => setCerealHistory({ dates: [], activeDate: null, version: null, loading: false, error: '' });
 
     const cerealGroups = useMemo(() => {
-        const groups = displayMarket?.groups || [];
+        const groups = marketData?.groups || [];
         if (isEditing) {
             const customCerealsByCode = Object.fromEntries((form.data.custom_cereals || []).map((cereal) => [cereal.code, cereal]));
             const mergedGroups = groups.map((group) => {
@@ -2387,7 +2381,7 @@ export default function CotationsIndex({
             (group?.harvests?.left?.rows || []).length > 0
             || (group?.harvests?.right?.rows || []).length > 0
         ));
-    }, [displayMarket, isEditing, form.data.custom_cereals, form.data.cereal_order, form.data.cereal_labels]);
+    }, [marketData, isEditing, form.data.custom_cereals, form.data.cereal_order, form.data.cereal_labels]);
     const optionGroups = useMemo(() => marketData?.options || [], [marketData]);
     const optionGroupsByCode = useMemo(() => {
         const byCode = Object.fromEntries(optionGroups.map((group) => [group.code, group]));
@@ -2401,7 +2395,7 @@ export default function CotationsIndex({
         return byCode;
     }, [optionGroups, form.data.custom_cereals]);
     const finalPriceOptions = useMemo(() => {
-        const marketRows = flattenMarketRows(displayMarket?.groups || []);
+        const marketRows = flattenMarketRows(marketData?.groups || []);
         const draftRows = isEditing ? (form.data.manual_prices || []) : [];
         const rowsByKey = new Map();
 
@@ -2434,7 +2428,7 @@ export default function CotationsIndex({
                 };
             })
             .filter(Boolean);
-    }, [isEditing, form.data.manual_prices, displayMarket]);
+    }, [isEditing, form.data.manual_prices, marketData]);
 
     const header = (
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2443,7 +2437,7 @@ export default function CotationsIndex({
                 {canViewCereals ? (
                     <p className="mt-1 text-sm text-[var(--app-muted)]">
                         {isViewingCerealHistory
-                            ? `Actualisation serveur de cette version : ${formatDateTime(displayMarket?.fetched_at)}`
+                            ? `Dernier relevé de cette journée : ${formatDateTime(cerealHistory.version?.recorded_at)}`
                             : `Dernière actualisation serveur : ${formatDateTime(marketData?.fetched_at)}`}
                     </p>
                 ) : null}
@@ -2567,8 +2561,7 @@ export default function CotationsIndex({
                                     Historique — cotations du {formatFrDate(cerealHistory.activeDate)} (lecture seule)
                                 </p>
                                 <p className="text-xs text-[var(--app-muted)]">
-                                    Version enregistrée le {formatDateTime(cerealHistory.version?.created_at)}
-                                    {cerealHistory.version?.created_by_name ? ` par ${cerealHistory.version.created_by_name}` : ' (relevé automatique de fin de journée)'}.
+                                    Dernier relevé de la journée : {formatDateTime(cerealHistory.version?.recorded_at)}.
                                     Ce ne sont pas les cotations actuelles.
                                 </p>
                                 <CerealHistoryBar
@@ -2581,21 +2574,23 @@ export default function CotationsIndex({
                             </div>
                         ) : null}
 
+                        {isViewingCerealHistory ? (
+                            <CerealHistoryDay day={cerealHistory.version} />
+                        ) : (
+                            <>
                         <CerealInfoSection
                             canView={canViewCereals}
                             isEditing={isEditing}
-                            html={isViewingCerealHistory ? (displayMarket?.cereal_info_html || '') : form.data.cereal_info_html}
+                            html={form.data.cereal_info_html}
                             onChange={setCerealInfoHtml}
                         />
 
-                        {!isViewingCerealHistory ? (
-                            <HarvestSettings
-                                rows={manualSettings.display || []}
-                                canManage={isEditing}
-                                form={form}
-                                setFormSetting={setFormSetting}
-                            />
-                        ) : null}
+                        <HarvestSettings
+                            rows={manualSettings.display || []}
+                            canManage={isEditing}
+                            form={form}
+                            setFormSetting={setFormSetting}
+                        />
 
                         {loading ? (
                             <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 text-sm text-[var(--app-muted)]">
@@ -2636,7 +2631,7 @@ export default function CotationsIndex({
                                             setCerealLabel={setCerealLabel}
                                             setCerealTableLabel={setCerealTableLabel}
                                             cerealLabels={form.data.cereal_labels || {}}
-                                            tableLabels={cerealTableLabelsFor((isViewingCerealHistory ? displayMarket?.cereal_table_labels : form.data.cereal_table_labels) || {}, group.code)}
+                                            tableLabels={cerealTableLabelsFor(form.data.cereal_table_labels || {}, group.code)}
                                             finalPriceOptions={finalPriceOptions}
                                             defaultOpen={Boolean(group.code) && (group.code === lastAddedCerealCode || group.code === targetCerealCode)}
                                             dragHandle={isEditing ? (
@@ -2673,11 +2668,13 @@ export default function CotationsIndex({
                         )}
 
                         <TransportGridSection
-                            grid={displayTransportGrid}
+                            grid={form.data.transport_grid}
                             canManage={isEditing}
                             finalPriceOptions={finalPriceOptions}
                             setTransportGrid={setTransportGrid}
                         />
+                            </>
+                        )}
                     </>
                 ) : null}
 

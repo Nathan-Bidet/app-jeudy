@@ -46,13 +46,18 @@ const currentMarket = {
     custom_cereals: [],
 };
 
-const versionFor = (date, name, info) => ({
-    id: 1,
+// Forme renvoyée par le serveur : cotations de marché reconstituées depuis l'historique existant.
+const versionFor = (date, wheatName, price) => ({
     business_date: date,
-    created_at: `${date}T18:00:00+02:00`,
-    created_by_name: 'Alice Martin',
-    market: { ...currentMarket, groups: [group('EBM', name, 480)], cereal_info_html: `<p>${info}</p>` },
-    transport_grid: null,
+    recorded_at: `${date}T18:00:00+02:00`,
+    row_count: 1,
+    groups: [{
+        code: 'EBM',
+        name: wheatName,
+        sort: 20,
+        harvests: [{ year: 2026, rows: [{ label: 'Septembre', maturity_year: 2026, contract_code: null, price, quoted_at: null, recorded_at: `${date}T18:00:00+02:00` }] }],
+    }],
+    not_historized: ['Marges et prix finaux', "Texte d'information"],
 });
 
 const routes = {
@@ -109,7 +114,7 @@ describe('Cotations céréales — mode historique', () => {
     it('affiche l’instantané de la dernière date, bloque les actions, puis revient au présent', async () => {
         mockFetch({
             '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
-            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 'Info du 2 octobre') } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5) } }),
         });
         render(<CotationsIndex {...props} />);
         fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
@@ -117,9 +122,10 @@ describe('Cotations céréales — mode historique', () => {
         const mode = await screen.findByTestId('cereal-history-mode');
         expect(mode).toHaveTextContent('cotations du 02/10/2026');
         expect(mode).toHaveTextContent('lecture seule');
-        expect(mode).toHaveTextContent('par Alice Martin');
-        // Valeurs de la version, pas les valeurs actuelles.
-        expect(screen.getByText('Info du 2 octobre')).toBeInTheDocument();
+        // Valeurs de la journée, pas les valeurs actuelles.
+        expect(screen.getByText('Blé du 2 octobre')).toBeInTheDocument();
+        expect(screen.getByText('231,50')).toBeInTheDocument();
+        expect(screen.getByRole('note')).toHaveTextContent('Marges et prix finaux');
         expect(screen.queryByText('Information ACTUELLE')).toBeNull();
         expect(screen.queryByText('Blé actuel')).toBeNull();
         // Aucune action pouvant écraser ou envoyer : Actualiser, Modifier, Export PDF, Envoyer.
@@ -142,8 +148,8 @@ describe('Cotations céréales — mode historique', () => {
     it('charge la version choisie dans le calendrier et met la date à jour', async () => {
         mockFetch({
             '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
-            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2', 'Info du 2 octobre') } }),
-            '/hist/2026-09-28': () => ({ status: 200, body: { version: versionFor('2026-09-28', 'Blé du 28', 'Info du 28 septembre') } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5) } }),
+            '/hist/2026-09-28': () => ({ status: 200, body: { version: versionFor('2026-09-28', 'Blé du 28 septembre', 180) } }),
         });
         render(<CotationsIndex {...props} />);
         fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
@@ -153,7 +159,7 @@ describe('Cotations céréales — mode historique', () => {
         fireEvent.click(await screen.findByRole('button', { name: 'Mois précédent' }));
         fireEvent.click(screen.getByRole('button', { name: '28/09/2026, version disponible' }));
 
-        expect(await screen.findByText('Info du 28 septembre')).toBeInTheDocument();
+        expect(await screen.findByText('Blé du 28 septembre')).toBeInTheDocument();
         expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('cotations du 28/09/2026');
         expect(screen.queryByRole('dialog')).toBeNull();
     });
@@ -161,7 +167,7 @@ describe('Cotations céréales — mode historique', () => {
     it('version supprimée entre le calendrier et le clic : message clair, vue précédente conservée', async () => {
         mockFetch({
             '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
-            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2', 'Info du 2 octobre') } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5) } }),
             '/hist/2026-09-28': () => ({ status: 404, body: { message: "Cette version historique n'est plus disponible." } }),
         });
         render(<CotationsIndex {...props} />);
@@ -172,7 +178,7 @@ describe('Cotations céréales — mode historique', () => {
 
         expect(await screen.findByRole('alert')).toHaveTextContent("Cette version historique n'est plus disponible.");
         expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('cotations du 02/10/2026');
-        expect(screen.getByText('Info du 2 octobre')).toBeInTheDocument();
+        expect(screen.getByText('Blé du 2 octobre')).toBeInTheDocument();
     });
 
     it('sans permission de consultation, aucun bouton Historique', () => {
