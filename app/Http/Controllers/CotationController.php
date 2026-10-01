@@ -7,6 +7,7 @@ use App\Models\CotationFuelPriceHistory;
 use App\Models\CotationManualPrice;
 use App\Models\CotationSetting;
 use App\Services\AuditLogService;
+use App\Services\Cotations\CotationCerealHistoryService;
 use App\Services\Cotations\CotationMarketService;
 use App\Support\Access\AccessManager;
 use App\Support\Cotations\CerealInfoSanitizer;
@@ -105,6 +106,8 @@ class CotationController extends Controller
                     'settings_update' => route('cotations.settings.update'),
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
                     'fuel_history' => route('cotations.fuel-history'),
+                    'cereal_history_dates' => route('cotations.cereal-history.dates'),
+                    'cereal_history_base' => url('/cotations/cereal-history'),
                     'export_pdf' => route('cotations.export-pdf'),
                     'mail_draft' => route('cotations.mail-draft'),
                     'send_mail' => route('cotations.send-mail'),
@@ -324,7 +327,73 @@ class CotationController extends Controller
             ],
         ]);
 
+        // Nouvelle version historique des cotations céréales (ignorée si le contenu
+        // visible n'a pas changé). Une défaillance de l'historique ne doit jamais
+        // faire échouer la sauvegarde des cotations.
+        try {
+            app(CotationCerealHistoryService::class)->record($this->cerealSnapshotPayload(), 'edit', $request->user());
+        } catch (Throwable $exception) {
+            Log::error('cotations.cereal-history record failed', ['message' => $exception->getMessage()]);
+        }
+
         return back()->with('status', 'Cotations settings updated.');
+    }
+
+    /**
+     * État complet de la page céréales tel qu'un lecteur le voit (hors mode
+     * édition) : source unique des instantanés historiques.
+     *
+     * @return array<string, mixed>
+     */
+    public function cerealSnapshotPayload(): array
+    {
+        return [
+            'market' => $this->marketPayload(null),
+            'transport_grid' => $this->transportGridConfig(),
+        ];
+    }
+
+    /**
+     * Jours disposant d'une version historique des cotations céréales (lecture seule).
+     */
+    public function cerealHistoryDates(Request $request): JsonResponse
+    {
+        $dates = app(CotationCerealHistoryService::class)->dates();
+
+        return response()->json([
+            'dates' => $dates,
+            'latest' => $dates[0] ?? null,
+            'oldest' => $dates[count($dates) - 1] ?? null,
+        ]);
+    }
+
+    /**
+     * Version historique d'une journée : la dernière de la journée (fuseau métier).
+     * 404 explicite si la journée n'a plus de version.
+     */
+    public function cerealHistoryShow(Request $request, string $date): JsonResponse
+    {
+        $snapshot = app(CotationCerealHistoryService::class)->forDate($date);
+
+        if (! $snapshot) {
+            return response()->json([
+                'message' => "Cette version historique n'est plus disponible.",
+            ], 404);
+        }
+
+        $payload = $snapshot->payload ?? [];
+
+        return response()->json([
+            'version' => [
+                'id' => $snapshot->id,
+                'business_date' => $snapshot->business_date?->toDateString(),
+                'created_at' => $snapshot->created_at?->toIso8601String(),
+                'created_by_name' => $this->userLabel($snapshot->createdBy),
+                'source' => $snapshot->source,
+                'market' => $payload['market'] ?? null,
+                'transport_grid' => $payload['transport_grid'] ?? null,
+            ],
+        ]);
     }
 
     public function updateFuelSettings(Request $request): RedirectResponse
