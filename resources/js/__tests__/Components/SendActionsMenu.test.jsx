@@ -158,3 +158,54 @@ describe('SendActionsMenu — lisibilité dans une ligne colorée', () => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 });
+
+describe('SendActionsMenu — positionnement', () => {
+    it('est rendu dans <body> (hors des conteneurs overflow du tableau) en position fixe', () => {
+        const { container } = render(
+            <div style={{ overflow: 'hidden' }}>
+                <SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />
+            </div>,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        const menu = screen.getByRole('menu');
+        expect(container.contains(menu)).toBe(false);
+        expect(document.body.contains(menu)).toBe(true);
+        expect(menu.style.position).toBe('fixed');
+        expect(menu.className).toContain('text-[var(--app-text)]');
+    });
+
+    it('place le focus sur la première option et navigue aux flèches', () => {
+        render(<SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        const [sms, mail] = screen.getAllByRole('menuitem');
+        expect(sms).toHaveFocus();
+        fireEvent.keyDown(sms, { key: 'ArrowDown' });
+        expect(mail).toHaveFocus();
+        fireEvent.keyDown(mail, { key: 'ArrowDown' });
+        expect(sms).toHaveFocus();
+        fireEvent.keyDown(sms, { key: 'ArrowUp' });
+        expect(mail).toHaveFocus();
+    });
+
+    it('se ferme au clic extérieur mais pas au clic dans le menu', () => {
+        render(<SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        fireEvent.mouseDown(screen.getByRole('menu'));
+        expect(screen.getByRole('menu')).toBeInTheDocument();
+
+        fireEvent.mouseDown(document.body);
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('conserve les deux options avec leur pictogramme', () => {
+        render(<SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        screen.getAllByRole('menuitem').forEach((item) => {
+            expect(item.querySelector('svg')).not.toBeNull();
+        });
+    });
+});
