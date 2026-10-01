@@ -1,16 +1,8 @@
 import Modal from '@/Components/Modal';
+import { buildPlaceIndex, resolvePlace } from '@/Support/placeResolution';
 import { stripTextMarkers } from '@/Support/textFormatting';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useMemo, useState } from 'react';
-
-function normalizePlaceValue(value) {
-    return String(value || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLocaleLowerCase('fr')
-        .replace(/[^\p{L}\p{N}]+/gu, ' ')
-        .trim();
-}
 
 function detectPlatform() {
     if (typeof navigator === 'undefined') {
@@ -98,82 +90,14 @@ export default function PlaceActionsLink({
         () => buildMapOptions(placeToOpen, platform, coordinates),
         [placeToOpen, platform, coordinates],
     );
-    const normalizedResolver = useMemo(() => {
-        if (!placeResolver || typeof placeResolver !== 'object') {
-            return new Map();
-        }
-
-        return new Map(
-            Object.entries(placeResolver)
-                .map(([key, value]) => [normalizePlaceValue(key), String(value || '').trim()])
-                .filter(([key, value]) => key !== '' && value !== ''),
-        );
-    }, [placeResolver]);
-    const reverseResolverEntries = useMemo(() => {
-        if (!placeResolver || typeof placeResolver !== 'object') {
-            return [];
-        }
-
-        return Object.entries(placeResolver)
-            .map(([key, value]) => {
-                const name = String(key || '').trim();
-                const address = String(value || '').trim();
-                return {
-                    name,
-                    address,
-                    normalizedAddress: normalizePlaceValue(address),
-                };
-            })
-            .filter((entry) => entry.name && entry.address && entry.normalizedAddress);
-    }, [placeResolver]);
-    const reverseResolver = useMemo(() => {
-        if (!reverseResolverEntries.length) {
-            return new Map();
-        }
-
-        const map = new Map();
-        reverseResolverEntries.forEach(({ name, normalizedAddress }) => {
-            if (!map.has(normalizedAddress)) {
-                map.set(normalizedAddress, name);
-            }
-        });
-
-        return map;
-    }, [reverseResolverEntries]);
+    const placeIndex = useMemo(() => buildPlaceIndex(placeResolver), [placeResolver]);
 
     if (!places.length) {
         return null;
     }
 
-    const resolveDestination = (place) => {
-        const raw = String(place || '').trim();
-        if (!raw) return raw;
-
-        if (placeResolver && typeof placeResolver === 'object') {
-            const direct = placeResolver[raw];
-            if (typeof direct === 'string' && direct.trim() !== '') {
-                return direct.trim();
-            }
-        }
-
-        const normalizedRaw = normalizePlaceValue(raw);
-        const normalized = normalizedResolver.get(normalizedRaw);
-        if (normalized) {
-            return normalized;
-        }
-
-        const fuzzyMatch = reverseResolverEntries.find(({ normalizedAddress }) =>
-            normalizedAddress.includes(normalizedRaw) || normalizedRaw.includes(normalizedAddress),
-        );
-        if (fuzzyMatch?.address) {
-            return fuzzyMatch.address;
-        }
-
-        return raw;
-    };
-
     const openPlace = (place) => {
-        const destination = resolveDestination(place);
+        const { destination } = resolvePlace(place, placeIndex);
         if (!destination) return;
 
         if (platform === 'windows') {
@@ -192,23 +116,7 @@ export default function PlaceActionsLink({
             return triggerLabel;
         }
 
-        const raw = String(place || '').trim();
-        if (!raw) return raw;
-
-        const normalizedRaw = normalizePlaceValue(raw);
-        const depotName = reverseResolver.get(normalizedRaw);
-        if (depotName) {
-            return depotName;
-        }
-
-        const fuzzyName = reverseResolverEntries.find(({ normalizedAddress }) =>
-            normalizedAddress.includes(normalizedRaw) || normalizedRaw.includes(normalizedAddress),
-        )?.name;
-        if (fuzzyName) {
-            return fuzzyName;
-        }
-
-        return raw;
+        return resolvePlace(place, placeIndex).label;
     };
 
     return (
