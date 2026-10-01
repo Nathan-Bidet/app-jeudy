@@ -31,7 +31,7 @@ class FormattingRuleService
     }
 
     /**
-     * @return array{matchedRuleId:?int,textColor:?string,bgColor:?string,ruleName:?string,matchedPriority:?int,matchedPattern:?string}
+     * @return array{matchedRuleId:?int,textColor:?string,bgColor:?string,phoneColor:?string,ruleName:?string,matchedPriority:?int,matchedPattern:?string}
      */
     public function resolveFormatting(string $taskText, ?string $commentText, string $targetModule): array
     {
@@ -45,7 +45,7 @@ class FormattingRuleService
 
     /**
      * @param  iterable<int,FormattingRule>  $rules
-     * @return array{matchedRuleId:?int,textColor:?string,bgColor:?string,ruleName:?string,matchedPriority:?int,matchedPattern:?string}
+     * @return array{matchedRuleId:?int,textColor:?string,bgColor:?string,phoneColor:?string,ruleName:?string,matchedPriority:?int,matchedPattern:?string}
      */
     public function resolveFormattingWithRules(string $taskText, ?string $commentText, string $targetModule, iterable $rules): array
     {
@@ -60,6 +60,7 @@ class FormattingRuleService
         $matched = null;
         $textColor = null;
         $bgColor = null;
+        $phoneColor = null;
 
         foreach ($rules as $rule) {
             if (! $rule instanceof FormattingRule || ! $this->isRuleApplicableToTarget($rule, $target)) {
@@ -87,7 +88,11 @@ class FormattingRuleService
                 $bgColor = $this->normalizeColor($rule->bg_color);
             }
 
-            if ($textColor !== null && $bgColor !== null) {
+            if ($phoneColor === null) {
+                $phoneColor = $this->normalizeColor($rule->phone_color);
+            }
+
+            if ($textColor !== null && $bgColor !== null && $phoneColor !== null) {
                 break;
             }
         }
@@ -100,6 +105,7 @@ class FormattingRuleService
             'matchedRuleId' => $matched['matchedRuleId'],
             'textColor' => $textColor,
             'bgColor' => $bgColor,
+            'phoneColor' => $phoneColor,
             'ruleName' => $matched['ruleName'],
             'matchedPriority' => $matched['matchedPriority'],
             'matchedPattern' => $matched['matchedPattern'],
@@ -169,7 +175,7 @@ class FormattingRuleService
     }
 
     /**
-     * @return array{matchedRuleId:?int,textColor:?string,bgColor:?string,ruleName:?string,matchedPriority:?int,matchedPattern:?string}
+     * @return array{matchedRuleId:?int,textColor:?string,bgColor:?string,phoneColor:?string,ruleName:?string,matchedPriority:?int,matchedPattern:?string}
      */
     private function emptyResult(): array
     {
@@ -177,6 +183,7 @@ class FormattingRuleService
             'matchedRuleId' => null,
             'textColor' => null,
             'bgColor' => null,
+            'phoneColor' => null,
             'ruleName' => null,
             'matchedPriority' => null,
             'matchedPattern' => null,

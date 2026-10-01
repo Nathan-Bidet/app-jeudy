@@ -116,7 +116,7 @@ class AprevoirService
     /**
      * @param  AprevoirTask|array<string,mixed>  $task
      * @param  array<int, FormattingRule>|null  $rules
-     * @return array{matched: bool, rule_id: ?int, rule_pattern: ?string, rule_name: ?string, text_color: ?string, bg_color: ?string}
+     * @return array{matched: bool, rule_id: ?int, rule_pattern: ?string, rule_name: ?string, text_color: ?string, bg_color: ?string, phone_color: ?string}
      */
     public function applyColorRules(Model|array $task, ?array $rules = null): array
     {
@@ -133,6 +133,7 @@ class AprevoirService
             'rule_name' => $resolved['ruleName'],
             'text_color' => $resolved['textColor'],
             'bg_color' => $resolved['bgColor'],
+            'phone_color' => $resolved['phoneColor'],
         ];
     }
 
@@ -535,7 +536,7 @@ class AprevoirService
     }
 
     /**
-     * @param  array{matched: bool, rule_id: ?int, rule_pattern: ?string, rule_name: ?string, text_color: ?string, bg_color: ?string}  $style
+     * @param  array{matched: bool, rule_id: ?int, rule_pattern: ?string, rule_name: ?string, text_color: ?string, bg_color: ?string, phone_color: ?string}  $style
      * @return array<string,mixed>
      */
     private function mapTask(Model $task, array $style): array

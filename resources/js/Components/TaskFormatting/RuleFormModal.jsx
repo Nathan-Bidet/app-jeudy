@@ -1,9 +1,11 @@
+import FormattedText from '@/Components/FormattedText';
 import InputError from '@/Components/InputError';
 import InputLabel from '@/Components/InputLabel';
 import Modal from '@/Components/Modal';
 import PrimaryButton from '@/Components/PrimaryButton';
 import SecondaryButton from '@/Components/SecondaryButton';
 import TextInput from '@/Components/TextInput';
+import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 
 const SCOPE_LABELS = {
     task: 'Tâche',
@@ -17,24 +19,51 @@ const MATCH_TYPE_LABELS = {
     regex: 'Regex',
 };
 
+const PREVIEW_PHONE = '06 12 34 56 78';
+
+// Même calcul que le rendu réel des tâches (variable --app-phone-color incluse).
 function previewStyle(form) {
-    const style = {};
-
-    if (form?.data?.text_color) {
-        style.color = form.data.text_color;
-    }
-
-    if (form?.data?.bg_color) {
-        style.backgroundColor = form.data.bg_color;
-    }
-
-    return style;
+    return adaptiveTaskStyle(form?.data || {});
 }
 
 function normalizeHex(value) {
     const text = String(value || '').trim();
 
     return text ? text.toUpperCase() : '';
+}
+
+function ColorField({ form, field, id, label, placeholder, pickerFallback, disabled, hint = null }) {
+    return (
+        <div>
+            <InputLabel htmlFor={id} value={label} />
+            <div className="mt-1 flex items-center gap-2">
+                <TextInput
+                    id={id}
+                    className="block w-full"
+                    placeholder={placeholder}
+                    value={form.data[field]}
+                    onChange={(event) => form.setData(field, normalizeHex(event.target.value))}
+                    disabled={disabled}
+                />
+                <input
+                    type="color"
+                    value={form.data[field] || pickerFallback}
+                    onChange={(event) => form.setData(field, normalizeHex(event.target.value))}
+                    disabled={disabled}
+                    className="h-10 w-12 rounded border border-gray-300 bg-white p-1"
+                />
+                <SecondaryButton
+                    type="button"
+                    onClick={() => form.setData(field, '')}
+                    disabled={disabled}
+                >
+                    Auto
+                </SecondaryButton>
+            </div>
+            {hint ? <p className="mt-1 text-xs text-[var(--app-muted)]">{hint}</p> : null}
+            <InputError className="mt-2" message={form.errors[field]} />
+        </div>
+    );
 }
 
 export default function RuleFormModal({
@@ -127,63 +156,36 @@ export default function RuleFormModal({
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        <div>
-                            <InputLabel htmlFor="formatting-text-color" value="Couleur texte" />
-                            <div className="mt-1 flex items-center gap-2">
-                                <TextInput
-                                    id="formatting-text-color"
-                                    className="block w-full"
-                                    placeholder="#111827"
-                                    value={form.data.text_color}
-                                    onChange={(event) => form.setData('text_color', normalizeHex(event.target.value))}
-                                    disabled={isReadOnly}
-                                />
-                                <input
-                                    type="color"
-                                    value={form.data.text_color || '#111111'}
-                                    onChange={(event) => form.setData('text_color', normalizeHex(event.target.value))}
-                                    disabled={isReadOnly}
-                                    className="h-10 w-12 rounded border border-gray-300 bg-white p-1"
-                                />
-                                <SecondaryButton
-                                    type="button"
-                                    onClick={() => form.setData('text_color', '')}
-                                    disabled={isReadOnly}
-                                >
-                                    Auto
-                                </SecondaryButton>
-                            </div>
-                            <InputError className="mt-2" message={form.errors.text_color} />
-                        </div>
+                        <ColorField
+                            form={form}
+                            field="text_color"
+                            id="formatting-text-color"
+                            label="Couleur texte"
+                            placeholder="#111827"
+                            pickerFallback="#111111"
+                            disabled={isReadOnly}
+                        />
 
-                        <div>
-                            <InputLabel htmlFor="formatting-bg-color" value="Couleur fond" />
-                            <div className="mt-1 flex items-center gap-2">
-                                <TextInput
-                                    id="formatting-bg-color"
-                                    className="block w-full"
-                                    placeholder="#FEF3C7"
-                                    value={form.data.bg_color}
-                                    onChange={(event) => form.setData('bg_color', normalizeHex(event.target.value))}
-                                    disabled={isReadOnly}
-                                />
-                                <input
-                                    type="color"
-                                    value={form.data.bg_color || '#FFFFFF'}
-                                    onChange={(event) => form.setData('bg_color', normalizeHex(event.target.value))}
-                                    disabled={isReadOnly}
-                                    className="h-10 w-12 rounded border border-gray-300 bg-white p-1"
-                                />
-                                <SecondaryButton
-                                    type="button"
-                                    onClick={() => form.setData('bg_color', '')}
-                                    disabled={isReadOnly}
-                                >
-                                    Auto
-                                </SecondaryButton>
-                            </div>
-                            <InputError className="mt-2" message={form.errors.bg_color} />
-                        </div>
+                        <ColorField
+                            form={form}
+                            field="bg_color"
+                            id="formatting-bg-color"
+                            label="Couleur fond"
+                            placeholder="#FEF3C7"
+                            pickerFallback="#FFFFFF"
+                            disabled={isReadOnly}
+                        />
+
+                        <ColorField
+                            form={form}
+                            field="phone_color"
+                            id="formatting-phone-color"
+                            label="Couleur des numéros de téléphone"
+                            placeholder="#1D4ED8"
+                            pickerFallback="#1D4ED8"
+                            disabled={isReadOnly}
+                            hint="Auto : couleur habituelle des liens."
+                        />
                     </div>
 
                     <div>
@@ -238,7 +240,9 @@ export default function RuleFormModal({
                     <div className="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--app-muted)]">Aperçu live</p>
                         <div className="mt-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2" style={previewStyle(form)}>
-                            Tâche démo: Livraison client - Commentaire: urgent avant 10h
+                            <FormattedText
+                                text={`Tâche démo: Livraison client - Commentaire: urgent avant 10h - Tél. ${PREVIEW_PHONE}`}
+                            />
                         </div>
                     </div>
                 </div>

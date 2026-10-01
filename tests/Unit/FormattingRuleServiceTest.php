@@ -147,3 +147,40 @@ function makeFormattingRule(array $overrides = []): FormattingRule
 
     return $rule;
 }
+
+it('merges the phone color from matching rules like text and background colors', function () {
+    $service = new FormattingRuleService();
+
+    $result = $service->resolveFormattingWithRules(
+        taskText: 'Client urgent',
+        commentText: null,
+        targetModule: FormattingRuleService::TARGET_A_PREVOIR,
+        rules: [
+            makeFormattingRule(['id' => 30, 'priority' => 1, 'pattern' => 'urgent', 'text_color' => '#111111']),
+            makeFormattingRule(['id' => 31, 'priority' => 2, 'pattern' => 'urgent', 'phone_color' => '#FACC15']),
+            makeFormattingRule(['id' => 32, 'priority' => 3, 'pattern' => 'urgent', 'phone_color' => '#000000']),
+        ],
+    );
+
+    expect($result['phoneColor'])->toBe('#FACC15')
+        ->and($result['textColor'])->toBe('#111111');
+});
+
+it('returns a null phone color for legacy rules and when nothing matches', function () {
+    $service = new FormattingRuleService();
+
+    $legacy = $service->resolveFormattingWithRules(
+        taskText: 'Client urgent',
+        commentText: null,
+        targetModule: FormattingRuleService::TARGET_LDT,
+        rules: [makeFormattingRule(['id' => 40, 'pattern' => 'urgent', 'text_color' => '#111111', 'bg_color' => '#FDE68A'])],
+    );
+    $none = $service->resolveFormattingWithRules('Autre', null, FormattingRuleService::TARGET_LDT, [
+        makeFormattingRule(['id' => 41, 'pattern' => 'urgent', 'phone_color' => '#FACC15']),
+    ]);
+
+    expect($legacy['phoneColor'])->toBeNull()
+        ->and($legacy['matchedRuleId'])->toBe(40)
+        ->and($none['phoneColor'])->toBeNull()
+        ->and($none['matchedRuleId'])->toBeNull();
+});

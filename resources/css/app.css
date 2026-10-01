@@ -81,6 +81,26 @@ html.theme-dark .ldt-page .app-autolink {
     color: rgb(141, 88, 26);
 }
 
+/*
+ * Couleur des numéros de téléphone définie par la règle de mise en forme
+ * (--app-phone-color, posée par adaptiveTaskStyle sur le conteneur de la tâche).
+ * Ces sélecteurs ont une spécificité supérieure à celles ci-dessus et ne ciblent
+ * que les liens `data-phone` : e-mails et autres liens ne sont pas touchés.
+ * Sans variable, on retombe sur la couleur historique de chaque contexte.
+ */
+.app-autolink[data-phone] {
+    color: var(--app-phone-color, #282727);
+}
+
+html.theme-dark .app-autolink[data-phone] {
+    color: var(--app-phone-color, #f2e4cf);
+}
+
+.ldt-page .app-autolink[data-phone],
+html.theme-dark .ldt-page .app-autolink[data-phone] {
+    color: var(--app-phone-color, rgb(141, 88, 26));
+}
+
 .ldt-avatar-transporter,
 .ldt-avatar-depot {
     color: #000000;

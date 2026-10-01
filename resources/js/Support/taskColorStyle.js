@@ -210,6 +210,8 @@ function autoTextColorForBackground(bgRgb) {
         : lightText;
 }
 
+export const PHONE_COLOR_VAR = '--app-phone-color';
+
 export function adaptiveTaskStyle(rawStyle = {}) {
     const textRaw = String(rawStyle?.text_color || rawStyle?.textColor || '').trim();
     const bgRaw = String(rawStyle?.bg_color || rawStyle?.bgColor || '').trim();
@@ -225,6 +227,13 @@ export function adaptiveTaskStyle(rawStyle = {}) {
 
     if (textRaw) {
         result.color = textRaw;
+    }
+
+    // Variable CSS héritée jusqu'aux liens téléphone (voir `.app-autolink[data-phone]`
+    // dans app.css). Sans valeur (« Auto »), les liens gardent leur couleur par défaut.
+    const phoneRaw = String(rawStyle?.phone_color || rawStyle?.phoneColor || '').trim();
+    if (phoneRaw && parseColor(phoneRaw)) {
+        result[PHONE_COLOR_VAR] = phoneRaw;
     }
 
     // Only adapt colors in dark mode.
