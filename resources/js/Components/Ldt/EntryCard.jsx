@@ -1,5 +1,6 @@
 import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
+import { loadingPlaceForMessage } from '@/Support/placeResolution';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { stripTextMarkers } from '@/Support/textFormatting';
 import { buildMailHref, singleLineText, toSmsHref, toTelHref } from '@/Support/contactLinks';
@@ -93,7 +94,7 @@ function buildMailLink(address, subject, lines) {
     return buildMailHref(address, subject, lines);
 }
 
-function taskSmsHref(number, entry, item, includeComment, includeTransport) {
+function taskSmsHref(number, entry, item, includeComment, includeTransport, placeResolver) {
     const base = smsHref(number);
     if (!base) return null;
 
@@ -102,7 +103,7 @@ function taskSmsHref(number, entry, item, includeComment, includeTransport) {
         stripTextMarkers(item?.task).trim(),
     ].filter(Boolean);
 
-    const loading = singleLineSmsText(item?.loading_place);
+    const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
     if (loading) {
         lines.push(`Chargement: ${loading}`);
     }
@@ -124,7 +125,7 @@ function taskSmsHref(number, entry, item, includeComment, includeTransport) {
     return `${base}?body=${encodeURIComponent(lines.join('\n'))}`;
 }
 
-function taskMailHref(address, entry, item, includeComment, includeTransport) {
+function taskMailHref(address, entry, item, includeComment, includeTransport, placeResolver) {
     const task = stripTextMarkers(item?.task).trim();
     if (!task) return null;
 
@@ -134,7 +135,7 @@ function taskMailHref(address, entry, item, includeComment, includeTransport) {
         task,
     ].filter(Boolean);
 
-    const loading = singleLineSmsText(item?.loading_place);
+    const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
     if (loading) {
         lines.push(`Chargement: ${loading}`);
     }
@@ -158,7 +159,7 @@ function taskMailHref(address, entry, item, includeComment, includeTransport) {
     return buildMailLink(address, subject, lines);
 }
 
-function entrySmsHref(number, entry, taskItems, commentSelection, transportSelection) {
+function entrySmsHref(number, entry, taskItems, commentSelection, transportSelection, placeResolver) {
     const base = smsHref(number);
     if (!base) return null;
 
@@ -173,7 +174,7 @@ function entrySmsHref(number, entry, taskItems, commentSelection, transportSelec
 
         lines.push(`${index + 1}. ${task}`);
 
-        const loading = singleLineSmsText(item?.loading_place);
+        const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
         if (loading) {
             lines.push(`   Chargement: ${loading}`);
         }
@@ -201,7 +202,7 @@ function entrySmsHref(number, entry, taskItems, commentSelection, transportSelec
     return `${base}?body=${encodeURIComponent(lines.join('\n'))}`;
 }
 
-function entryMailHref(address, entry, taskItems, commentSelection, transportSelection) {
+function entryMailHref(address, entry, taskItems, commentSelection, transportSelection, placeResolver) {
     const lines = [
         `${entry?.date_label || ''}`.trim(),
         `${entry?.assignee_label || ''}`.trim(),
@@ -214,7 +215,7 @@ function entryMailHref(address, entry, taskItems, commentSelection, transportSel
 
         lines.push(`${index + 1}. ${task}`);
 
-        const loading = singleLineSmsText(item?.loading_place);
+        const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
         if (loading) {
             lines.push(`   Chargement: ${loading}`);
         }
@@ -380,6 +381,7 @@ export default function EntryCard({
                                     taskItems,
                                     commentSelection,
                                     transportSelection,
+                                    placeResolver,
                                 )}
                                 className="inline-flex h-8 items-center gap-1 rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-[11px] font-black uppercase tracking-[0.08em] text-[rgb(141,88,26)]"
                             >
@@ -395,6 +397,7 @@ export default function EntryCard({
                                     taskItems,
                                     commentSelection,
                                     transportSelection,
+                                    placeResolver,
                                 )}
                                 className="inline-flex h-8 items-center gap-1 rounded-lg border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-[11px] font-black uppercase tracking-[0.08em] text-[rgb(141,88,26)]"
                             >
@@ -464,11 +467,12 @@ export default function EntryCard({
                                     style={{ color: detailTextColor }}
                                 >
                                     {String(item.loading_place || '').trim() !== '' ? (
-                                        <span className="inline-flex items-center gap-1">
+                                        <span className="inline-flex items-start gap-1">
                                             <span className="font-semibold">Chargement :</span>
                                             <PlaceActionsLink
                                                 text={item.loading_place}
                                                 placeResolver={placeResolver}
+                                                showDepotAddress
                                                 buttonClassName="text-[12px] text-[rgb(141,88,26)]"
                                             />
                                         </span>
@@ -557,6 +561,7 @@ export default function EntryCard({
                                                     item,
                                                     Boolean(commentSelection?.[String(item.id ?? index)]),
                                                     Boolean(transportSelection?.[String(item.id ?? index)]),
+                                                    placeResolver,
                                                 )}
                                                 className="inline-flex h-6 items-center gap-1 rounded-md border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-[10px] font-black uppercase tracking-[0.08em] text-[rgb(141,88,26)]"
                                             >
@@ -572,6 +577,7 @@ export default function EntryCard({
                                                     item,
                                                     Boolean(commentSelection?.[String(item.id ?? index)]),
                                                     Boolean(transportSelection?.[String(item.id ?? index)]),
+                                                    placeResolver,
                                                 )}
                                                 className="inline-flex h-6 items-center gap-1 rounded-md border-2 border-[var(--app-border)] bg-[var(--app-surface)] px-2 text-[10px] font-black uppercase tracking-[0.08em] text-[rgb(141,88,26)]"
                                             >

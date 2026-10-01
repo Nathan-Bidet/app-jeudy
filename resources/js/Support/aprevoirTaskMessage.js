@@ -1,4 +1,5 @@
 import { isFrenchMobileNumber, singleLineText } from '@/Support/contactLinks';
+import { loadingPlaceForMessage } from '@/Support/placeResolution';
 import { stripTextMarkers } from '@/Support/textFormatting';
 
 /**
@@ -41,7 +42,7 @@ export function pickAprevoirSmsNumber(assignee) {
  * @param {object|null} task - la tâche affichée
  * @returns {string[]} lignes du message, prêtes à être jointes par '\n'
  */
-export function buildAprevoirTaskMessageLines(group, task) {
+export function buildAprevoirTaskMessageLines(group, task, placeResolver = null) {
     const lines = [];
 
     const dateLabel = String(group?.date_label || group?.date || '').trim();
@@ -59,7 +60,8 @@ export function buildAprevoirTaskMessageLines(group, task) {
         lines.push(taskText);
     }
 
-    const loading = singleLineText(task?.loading_place);
+    // Dépôt interne -> son adresse (le chauffeur a besoin de l'adresse, pas du nom).
+    const loading = loadingPlaceForMessage(task?.loading_place, placeResolver);
     if (loading) {
         lines.push(`Chargement: ${loading}`);
     }

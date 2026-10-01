@@ -72,7 +72,7 @@ export default function TaskRow({
     // (resources/js/Components/Aprevoir/DesktopTable.jsx) — lu directement
     // sur group.assignee, jamais copié ni recherché par nom.
     const assignee = group?.assignee;
-    const sendMessageLines = buildAprevoirTaskMessageLines(group, task);
+    const sendMessageLines = buildAprevoirTaskMessageLines(group, task, placeResolver);
     const sendSmsNumber = pickAprevoirSmsNumber(assignee);
     const sendSmsHref = sendSmsNumber ? buildSmsHref(sendSmsNumber, sendMessageLines) : null;
     // L'e-mail reste toujours proposable : sans adresse, le lien mailto:
@@ -108,9 +108,9 @@ export default function TaskRow({
                     {task.loading_place || task.delivery_place ? (
                         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs opacity-95">
                             {task.loading_place ? (
-                                <span className="inline-flex items-center gap-1">
+                                <span className="inline-flex items-start gap-1">
                                     <span className="font-semibold">Chargement :</span>
-                                    <PlaceActionsLink text={task.loading_place} placeResolver={placeResolver} buttonClassName="text-xs" />
+                                    <PlaceActionsLink text={task.loading_place} placeResolver={placeResolver} showDepotAddress buttonClassName="text-xs" />
                                 </span>
                             ) : null}
                             {task.delivery_place ? (

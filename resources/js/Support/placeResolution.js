@@ -1,3 +1,5 @@
+import { stripTextMarkers } from '@/Support/textFormatting';
+
 /**
  * Résolution d'un lieu de tâche (texte enregistré) vers un dépôt connu.
  *
@@ -53,4 +55,48 @@ export function resolvePlace(place, index) {
     if (!entry) return { label: raw, destination: raw };
 
     return { label: entry.name, destination: entry.address };
+}
+
+/**
+ * Adresse telle qu'affichée/envoyée : l'adresse de la fiche dépôt, sans le code
+ * pays par défaut « FR » (ajouté en fin d'adresse par le serveur pour la navigation).
+ */
+export function displayAddress(address) {
+    return String(address || '')
+        .replace(/,\s*FR\s*$/i, '')
+        .trim();
+}
+
+/**
+ * Adresse complète du dépôt interne correspondant à un lieu, ou null pour un
+ * lieu libre / un dépôt sans adresse connue.
+ */
+export function depotAddressForPlace(place, index) {
+    const raw = String(place || '').trim();
+    if (!raw) return null;
+
+    const normalized = normalizePlaceValue(raw);
+    const entry = index?.byName?.get(normalized) || index?.byAddress?.get(normalized);
+    const address = displayAddress(entry?.address);
+
+    return address || null;
+}
+
+/**
+ * Lieu(x) de chargement pour un message e-mail/SMS : chaque dépôt interne est
+ * remplacé par son adresse ; sans adresse (ou lieu libre), le texte d'origine
+ * est conservé. Retourne un texte sur une seule ligne (même format que
+ * singleLineText, lieux séparés par « | »).
+ */
+export function loadingPlaceForMessage(value, placeResolver) {
+    const index = buildPlaceIndex(placeResolver);
+
+    return String(value ?? '')
+        .split(/\r\n|\r|\n/)
+        .map((line) => stripTextMarkers(line).trim())
+        .filter(Boolean)
+        .map((line) => depotAddressForPlace(line, index) || line)
+        .join(' | ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 }

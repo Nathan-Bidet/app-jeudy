@@ -1,5 +1,5 @@
 import Modal from '@/Components/Modal';
-import { buildPlaceIndex, resolvePlace } from '@/Support/placeResolution';
+import { buildPlaceIndex, depotAddressForPlace, resolvePlace } from '@/Support/placeResolution';
 import { stripTextMarkers } from '@/Support/textFormatting';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -65,7 +65,17 @@ function buildMapOptions(place, platform, coordinates = null) {
     ];
 }
 
+// Adresse de la fiche du dépôt interne, sous son nom (alignée sur le texte,
+// après l'icône). Rien pour un lieu libre ou un dépôt sans adresse.
+function DepotAddressLine({ place, placeIndex }) {
+    const address = depotAddressForPlace(place, placeIndex);
+    if (!address) return null;
+
+    return <span className="pl-5 text-[0.92em] font-normal leading-snug opacity-80 break-words">{address}</span>;
+}
+
 export default function PlaceActionsLink({
+    showDepotAddress = false,
     text,
     placeResolver = null,
     coordinates = null,
@@ -123,8 +133,8 @@ export default function PlaceActionsLink({
         <>
             <div className={`inline-flex flex-col gap-1 ${className}`}>
                 {places.map((place, index) => (
+                    <div key={`${place}-${index}`} className="flex flex-col items-start">
                     <button
-                        key={`${place}-${index}`}
                         type="button"
                         onClick={(event) => {
                             event.stopPropagation();
@@ -140,6 +150,10 @@ export default function PlaceActionsLink({
                         <MapPin className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
                         <span>{displayPlace(place)}</span>
                     </button>
+                    {showDepotAddress && !triggerLabel ? (
+                        <DepotAddressLine place={place} placeIndex={placeIndex} />
+                    ) : null}
+                    </div>
                 ))}
             </div>
 
