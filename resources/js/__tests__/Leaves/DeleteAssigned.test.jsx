@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 vi.mock('@/Layouts/AppLayout', () => ({ default: ({ children }) => <div>{children}</div> }));
@@ -36,46 +36,61 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 const renderPage = (props) => render(<LeavesIndex {...props} />);
+// Les congés validés/refusés ne figurent que dans l'historique, replié par défaut.
+const openHistory = () => fireEvent.click(screen.getByRole('button', { name: "Afficher l'historique" }));
 
-describe('Congés — suppression pour les collaborateurs affectés', () => {
-    it('n’affiche aucun bouton ni section sans droit', () => {
-        renderPage({ myLeaveRequests: [leave({ can_delete: false })], assignedLeaveRequests: [] });
+describe('Congés — suppression dans l’historique des demandes à valider', () => {
+    it('ne contient plus le bloc « Congés de mes collaborateurs affectés »', () => {
+        renderPage({ leaveRequestsToValidate: [leave({ can_delete: true })], canValidateRequests: true });
 
-        expect(screen.queryByRole('button', { name: 'Supprimer' })).toBeNull();
+        expect(screen.queryByText('Congés de mes collaborateurs affectés')).toBeNull();
         expect(screen.queryByTestId('assigned-leaves')).toBeNull();
     });
 
-    it('affiche le bouton seulement sur les lignes supprimables', () => {
+    it('affiche le bouton seulement sur les lignes que le serveur autorise', () => {
         renderPage({
-            myLeaveRequests: [leave({ id: 1, can_delete: true }), leave({ id: 2, can_delete: false })],
+            canValidateRequests: true,
+            leaveRequestsToValidate: [
+                leave({ id: 1, can_delete: true }),
+                leave({ id: 2, can_delete: false }),
+                leave({ id: 3, status: 'refused', status_label: 'Refusé', can_delete: false }),
+            ],
         });
 
+        openHistory();
         expect(screen.getAllByRole('button', { name: 'Supprimer' })).toHaveLength(1);
     });
 
-    it('liste les congés des collaborateurs affectés et distingue en attente / validé dans la confirmation', () => {
+    it('n’affiche aucun bouton sans autorisation', () => {
+        renderPage({ canValidateRequests: true, leaveRequestsToValidate: [leave({ can_delete: false })] });
+
+        expect(screen.queryByRole('button', { name: 'Supprimer' })).toBeNull();
+    });
+
+    it('distingue en attente / validé dans la confirmation et conserve l’état de la page', () => {
         renderPage({
-            assignedLeaveRequests: [
+            canValidateRequests: true,
+            leaveRequestsToValidate: [
                 leave({ id: 10, status: 'pending', can_delete: true }),
                 leave({ id: 11, status: 'approved', status_label: 'Validé', can_delete: true }),
             ],
         });
 
-        const section = screen.getByTestId('assigned-leaves');
-        const [pendingBtn, approvedBtn] = within(section).getAllByRole('button', { name: 'Supprimer' });
+        openHistory();
+        const [pendingBtn, approvedBtn] = screen.getAllByRole('button', { name: 'Supprimer' });
 
         fireEvent.click(pendingBtn);
         expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('demande de congé en attente de Paul Martin'));
-        expect(router.delete).toHaveBeenLastCalledWith('/leaves.destroy/10');
+        expect(router.delete).toHaveBeenLastCalledWith('/leaves.destroy/10', { preserveState: true, preserveScroll: true });
 
         fireEvent.click(approvedBtn);
         expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('congé DÉJÀ VALIDÉ de Paul Martin'));
-        expect(router.delete).toHaveBeenLastCalledWith('/leaves.destroy/11');
+        expect(router.delete).toHaveBeenLastCalledWith('/leaves.destroy/11', { preserveState: true, preserveScroll: true });
     });
 
-    it('ne supprime rien si la confirmation est refusée', () => {
+    it('ne supprime rien si la confirmation est annulée', () => {
         window.confirm.mockReturnValue(false);
-        renderPage({ assignedLeaveRequests: [leave({ can_delete: true })] });
+        renderPage({ canValidateRequests: true, leaveRequestsToValidate: [leave({ can_delete: true })] });
 
         fireEvent.click(screen.getByRole('button', { name: 'Supprimer' }));
         expect(router.delete).not.toHaveBeenCalled();

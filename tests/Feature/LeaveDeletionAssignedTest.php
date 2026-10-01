@@ -210,35 +210,80 @@ function leavesPagePayload($test, User $viewer): array
     return json_decode(html_entity_decode($m[1], ENT_QUOTES), true)['props'];
 }
 
-it('expose le bouton Supprimer seulement pour les collaborateurs affectés du détenteur', function (): void {
+function leaveToValidate(User $target, User $validator, string $status): LeaveRequest
+{
+    $leave = leaveFor($target, $status);
+    $leave->forceFill(['validator_1_id' => $validator->id])->save();
+
+    return $leave;
+}
+
+it('n’ajoute aucun bloc dédié : aucune donnée « collaborateurs affectés » n’est envoyée à la page', function (): void {
+    $manager = leaveActor([DELETE_ABILITY]);
+    $worker = leaveActor();
+    assign($manager, $worker);
+    leaveToValidate($worker, $manager, LeaveRequest::STATUS_APPROVED);
+
+    $props = leavesPagePayload($this, $manager);
+
+    expect($props)->not->toHaveKey('assignedLeaveRequests');
+});
+
+it('autorise le bouton dans l’historique pour une demande en attente ou validée d’un collaborateur affecté', function (): void {
+    $manager = leaveActor([DELETE_ABILITY]);
+    $worker = leaveActor();
+    assign($manager, $worker);
+    $pending = leaveToValidate($worker, $manager, LeaveRequest::STATUS_PENDING);
+    $approved = leaveToValidate($worker, $manager, LeaveRequest::STATUS_APPROVED);
+
+    $rows = collect(leavesPagePayload($this, $manager)['leaveRequestsToValidate'])->keyBy('id');
+
+    expect($rows[$pending->id]['can_delete'])->toBeTrue()
+        ->and($rows[$approved->id]['can_delete'])->toBeTrue();
+});
+
+it('refuse le bouton : demande refusée, collaborateur non affecté, sans permission, permission refusée', function (): void {
     $manager = leaveActor([DELETE_ABILITY]);
     $worker = leaveActor();
     $stranger = leaveActor();
     assign($manager, $worker);
-    $pending = leaveFor($worker, LeaveRequest::STATUS_PENDING);
-    $approved = leaveFor($worker, LeaveRequest::STATUS_APPROVED);
-    leaveFor($worker, LeaveRequest::STATUS_REFUSED);
-    leaveFor($stranger, LeaveRequest::STATUS_APPROVED);
-    $mine = leaveFor($worker, LeaveRequest::STATUS_PENDING, $manager);
+    $refused = leaveToValidate($worker, $manager, LeaveRequest::STATUS_REFUSED);
+    $notAssigned = leaveToValidate($stranger, $manager, LeaveRequest::STATUS_APPROVED);
+
+    $rows = collect(leavesPagePayload($this, $manager)['leaveRequestsToValidate'])->keyBy('id');
+    expect($rows[$refused->id]['can_delete'])->toBeFalse()
+        ->and($rows[$notAssigned->id]['can_delete'])->toBeFalse();
+
+    $noPermission = leaveActor();
+    assign($noPermission, $worker);
+    $ok = leaveToValidate($worker, $noPermission, LeaveRequest::STATUS_APPROVED);
+    expect(collect(leavesPagePayload($this, $noPermission)['leaveRequestsToValidate'])->firstWhere('id', $ok->id)['can_delete'])->toBeFalse();
+
+    $denied = leaveActor([DELETE_ABILITY]);
+    AccessException::query()->create(['user_id' => $denied->id, 'sector_id' => null, 'ability' => DELETE_ABILITY, 'effect' => 'deny']);
+    assign($denied, $worker);
+    $own = leaveToValidate($worker, $denied, LeaveRequest::STATUS_APPROVED);
+    expect(collect(leavesPagePayload($this, $denied)['leaveRequestsToValidate'])->firstWhere('id', $own->id)['can_delete'])->toBeFalse();
+});
+
+it('n’élargit pas l’historique : une demande hors de la file du valideur n’y apparaît pas', function (): void {
+    $manager = leaveActor([DELETE_ABILITY]);
+    $worker = leaveActor();
+    assign($manager, $worker);
+    $notMine = leaveFor($worker, LeaveRequest::STATUS_APPROVED); // aucun valideur : hors historique
 
     $props = leavesPagePayload($this, $manager);
 
-    $listed = collect($props['assignedLeaveRequests']);
-    expect($listed->pluck('id')->sort()->values()->all())->toBe([$pending->id, $approved->id])
-        ->and($listed->every(fn ($row) => $row['can_delete'] === true))->toBeTrue();
-    expect(collect($props['myLeaveRequests'])->firstWhere('id', $mine->id)['can_delete'])->toBeTrue();
-    expect($props['canDeleteLeaveRequests'])->toBeFalse();
+    expect(collect($props['leaveRequestsToValidate'])->pluck('id')->all())->not->toContain($notMine->id);
 });
 
-it('masque le bouton et la liste sans permission', function (): void {
-    $manager = leaveActor();
+it('« Mes demandes » ne porte plus de décision de suppression', function (): void {
+    $manager = leaveActor([DELETE_ABILITY]);
     $worker = leaveActor();
     assign($manager, $worker);
     $mine = leaveFor($worker, LeaveRequest::STATUS_PENDING, $manager);
-    leaveFor($worker, LeaveRequest::STATUS_APPROVED);
 
-    $props = leavesPagePayload($this, $manager);
+    $row = collect(leavesPagePayload($this, $manager)['myLeaveRequests'])->firstWhere('id', $mine->id);
 
-    expect($props['assignedLeaveRequests'])->toBe([])
-        ->and(collect($props['myLeaveRequests'])->firstWhere('id', $mine->id)['can_delete'])->toBeFalse();
+    expect($row)->not->toHaveKey('can_delete');
 });

@@ -217,8 +217,6 @@ class LeaveRequestController extends Controller
                 'start_at' => $leaveRequest->start_at?->toDateString(),
                 'end_at' => $leaveRequest->end_at?->toDateString(),
                 'status' => $leaveRequest->status,
-                // Bouton « Supprimer » : même décision que le serveur à la suppression.
-                'can_delete' => $isAdmin || ($mayDeleteAssigned && $deletionAuthorizer->canDelete($user, $leaveRequest, $assignedTargetIds)),
                 'message' => $leaveRequest->message,
                 'proposed_start_at' => $leaveRequest->proposed_start_at?->toDateString(),
                 'proposed_end_at' => $leaveRequest->proposed_end_at?->toDateString(),
@@ -248,6 +246,12 @@ class LeaveRequestController extends Controller
 
                 // Vrai tant que CE lecteur peut encore se prononcer. Il devient
                 // faux dès qu'il a tranché, sans dépendre de l'autre valideur.
+                // Bouton « Supprimer » de l'historique des demandes à valider : même
+                // décision que le serveur à la suppression (absent de « Mes demandes »).
+                ...($includeValidationDetail ? [
+                    'can_delete' => $isAdmin || ($mayDeleteAssigned && $deletionAuthorizer->canDelete($user, $leaveRequest, $assignedTargetIds)),
+                ] : []),
+
                 'awaiting_my_decision' => $isAdmin
                     ? $leaveRequest->undecidedLevels() !== []
                     : $leaveRequest->undecidedLevelsFor($viewerId) !== [],
@@ -314,22 +318,6 @@ class LeaveRequestController extends Controller
             ->values()
             ->all();
 
-        // Congés (en attente ou validés) des collaborateurs affectés, suppressibles
-        // par le détenteur de la permission — hors demandes qu'il a lui-même
-        // déposées, déjà listées dans « Mes demandes ».
-        $assignedLeaveRequests = $mayDeleteAssigned
-            ? LeaveRequest::query()
-                ->with(['target:id,name,first_name,last_name,email', 'leaveType:id,name', 'proposedBy:id,name,first_name,last_name,email'])
-                ->whereIn('target_user_id', $assignedTargetIds)
-                ->whereIn('status', LeaveDeletionAuthorizer::deletableStatuses())
-                ->where('requester_user_id', '!=', $user->id)
-                ->orderByDesc('start_at')
-                ->get()
-                ->map(fn (LeaveRequest $leaveRequest): array => $formatLeaveRequest($leaveRequest, false))
-                ->values()
-                ->all()
-            : [];
-
         $highlightId = $request->query('highlight') ? (int) $request->query('highlight') : null;
 
         return Inertia::render('Leaves/Index', [
@@ -342,7 +330,6 @@ class LeaveRequestController extends Controller
             'canValidateRequests' => $canValidateRequests,
             'pendingValidationCount' => $pendingValidationCount,
             'canDeleteLeaveRequests' => $isAdmin,
-            'assignedLeaveRequests' => $assignedLeaveRequests,
             'highlightId' => $highlightId,
         ]);
     }
