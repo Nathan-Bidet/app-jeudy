@@ -50,6 +50,7 @@ class SectorController extends Controller
         'heures.create',
         'heures.export',
         'conges_heures.validators_identity.view',
+        'conges_heures.leaves.delete_assigned',
         'engrais.view',
         'engrais.view.current_week_only',
         'engrais.create',

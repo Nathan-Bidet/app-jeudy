@@ -79,6 +79,7 @@ class RbacSeeder extends Seeder
             'heures.create',
             'heures.export',
             'conges_heures.validators_identity.view',
+            'conges_heures.leaves.delete_assigned',
             'admin.users.view',
             'admin.users.manage',
             'admin.sectors.view',
