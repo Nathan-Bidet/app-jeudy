@@ -84,7 +84,7 @@ export default function SendActionsMenu({
                     role="menu"
                     aria-label={label}
                     onClick={(event) => event.stopPropagation()}
-                    className="absolute left-1/2 top-full z-20 mt-1 w-60 max-w-[85vw] -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] text-left shadow-xl shadow-black/15"
+                    className="absolute left-1/2 top-full z-20 mt-1 w-60 max-w-[85vw] -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] text-left text-[var(--app-text)] shadow-xl shadow-black/15"
                 >
                     {!hasAnyRecipient ? (
                         <p className="px-3.5 py-2.5 text-xs text-[var(--app-muted)]">{noRecipientMessage}</p>
@@ -95,7 +95,7 @@ export default function SendActionsMenu({
                                     role="menuitem"
                                     href={smsHref}
                                     onClick={() => setOpen(false)}
-                                    className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm font-semibold hover:bg-[var(--app-surface-soft)]"
+                                    className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm font-semibold hover:bg-[var(--app-surface-soft)] focus-visible:bg-[var(--app-surface-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--brand-yellow-dark)]"
                                 >
                                     <Smartphone className="h-4 w-4 shrink-0" strokeWidth={2.2} />
                                     Envoyer par SMS
@@ -116,7 +116,7 @@ export default function SendActionsMenu({
                                     role="menuitem"
                                     href={mailHref}
                                     onClick={() => setOpen(false)}
-                                    className="flex flex-col gap-0.5 px-3.5 py-2.5 text-sm font-semibold hover:bg-[var(--app-surface-soft)]"
+                                    className="flex flex-col gap-0.5 px-3.5 py-2.5 text-sm font-semibold hover:bg-[var(--app-surface-soft)] focus-visible:bg-[var(--app-surface-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--brand-yellow-dark)]"
                                 >
                                     <span className="flex items-center gap-2.5">
                                         <Mail className="h-4 w-4 shrink-0" strokeWidth={2.2} />

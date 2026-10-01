@@ -108,3 +108,53 @@ describe('SendActionsMenu', () => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 });
+
+describe('SendActionsMenu — lisibilité dans une ligne colorée', () => {
+    // Régression : dans une ligne dont la règle impose un texte blanc (fond vert),
+    // le menu (fond clair) héritait de cette couleur et devenait illisible.
+    const renderInColoredRow = (props) =>
+        render(
+            <div style={{ color: '#ffffff', backgroundColor: '#166534' }}>
+                <SendActionsMenu {...props} />
+            </div>,
+        );
+
+    it('fixe sa propre couleur de texte (thème) au lieu d’hériter de la ligne', () => {
+        renderInColoredRow({ smsHref: 'sms:0612345678', mailHref: 'mailto:a@b.com' });
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByRole('menu').className).toContain('text-[var(--app-text)]');
+        expect(screen.getByRole('menu').className).toContain('bg-[var(--app-surface)]');
+    });
+
+    it('garde une couleur explicite pour les options désactivées et les notes', () => {
+        renderInColoredRow({ smsHref: null, mailHref: 'mailto:a@b.com', mailHasRecipient: false });
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByText('Aucun numéro de portable renseigné').className).toContain('text-[var(--app-muted)]');
+        expect(screen.getByText('Adresse à renseigner dans votre messagerie').className).toContain('text-[var(--app-muted)]');
+    });
+
+    it('rend focus et survol visibles sur les options, et se ferme à Échap en rendant le focus', () => {
+        renderInColoredRow({ smsHref: 'sms:0612345678', mailHref: 'mailto:a@b.com' });
+        const trigger = screen.getByRole('button', { name: /Envoyer/ });
+        fireEvent.click(trigger);
+
+        screen.getAllByRole('menuitem').forEach((item) => {
+            expect(item.className).toContain('hover:bg-[var(--app-surface-soft)]');
+            expect(item.className).toContain('focus-visible:bg-[var(--app-surface-soft)]');
+        });
+
+        fireEvent.keyDown(document, { key: 'Escape' });
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        expect(trigger).toHaveFocus();
+    });
+
+    it('ferme le menu après sélection d’une option', () => {
+        renderInColoredRow({ smsHref: 'sms:0612345678', mailHref: 'mailto:a@b.com' });
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+        fireEvent.click(screen.getByRole('menuitem', { name: /Envoyer par SMS/ }));
+
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+});
