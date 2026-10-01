@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
 import { buildAprevoirTaskMessageLines } from '@/Support/aprevoirTaskMessage';
-import { depotAddressForPlace, buildPlaceIndex, displayAddress, loadingPlaceForMessage } from '@/Support/placeResolution';
+import { depotAddressForPlace, buildPlaceIndex, displayAddress, placeForMessage } from '@/Support/placeResolution';
 
 // Format du serveur (reference.depot_place_map) : adresse + code pays par défaut.
 const DEPOTS = {
@@ -35,20 +35,34 @@ describe('messages e-mail / SMS', () => {
     });
 
     it('conserve le nom sans adresse, et un lieu libre tel quel', () => {
-        expect(loadingPlaceForMessage('Sansadresse', DEPOTS)).toBe('Sansadresse');
-        expect(loadingPlaceForMessage('Ferme Dupont', DEPOTS)).toBe('Ferme Dupont');
-        expect(loadingPlaceForMessage('Ferme **Dupont**', DEPOTS)).toBe('Ferme Dupont');
+        expect(placeForMessage('Sansadresse', DEPOTS)).toBe('Sansadresse');
+        expect(placeForMessage('Ferme Dupont', DEPOTS)).toBe('Ferme Dupont');
+        expect(placeForMessage('Ferme **Dupont**', DEPOTS)).toBe('Ferme Dupont');
     });
 
     it('traite plusieurs lieux, dans l’ordre, et reste sur une ligne', () => {
-        expect(loadingPlaceForMessage('Le Marché\nFerme Dupont\nLe Montet', DEPOTS)).toBe(
+        expect(placeForMessage('Le Marché\nFerme Dupont\nLe Montet', DEPOTS)).toBe(
             'Le Plan de Foire, 03240 Le Montet | Ferme Dupont | 35 Route Départementale, 03240 Le Montet',
         );
     });
 
-    it('la livraison reste inchangée (nom du dépôt)', () => {
-        const lines = buildAprevoirTaskMessageLines({}, { task: 'T', delivery_place: 'Le Montet' }, DEPOTS);
-        expect(lines).toContain('Livraison: Le Montet');
+    it('livraison : remplace le dépôt par son adresse, comme le chargement', () => {
+        const lines = buildAprevoirTaskMessageLines(
+            {},
+            { task: 'T', loading_place: 'Le Montet', delivery_place: 'Le Marché' },
+            DEPOTS,
+        );
+        expect(lines).toContain('Chargement: 35 Route Départementale, 03240 Le Montet');
+        expect(lines).toContain('Livraison: Le Plan de Foire, 03240 Le Montet');
+    });
+
+    it('livraison : dépôt sans adresse, lieu libre et lieux multiples', () => {
+        const lines = (delivery) => buildAprevoirTaskMessageLines({}, { task: 'T', delivery_place: delivery }, DEPOTS);
+
+        expect(lines('Sansadresse')).toContain('Livraison: Sansadresse');
+        expect(lines('Ferme Dupont')).toContain('Livraison: Ferme Dupont');
+        expect(lines('Ferme Dupont\nLe Montet')).toContain('Livraison: Ferme Dupont | 35 Route Départementale, 03240 Le Montet');
+        expect(lines('').join('\n')).not.toMatch(/Livraison|null|undefined/);
     });
 
     it('sans resolver, le message est identique à l’existant', () => {
@@ -74,6 +88,14 @@ describe('affichage dans la liste (PlaceActionsLink)', () => {
 
         const off = render(<PlaceActionsLink text="Le Montet" placeResolver={DEPOTS} />);
         expect(off.container.querySelector('button').parentElement.children).toHaveLength(1);
+    });
+
+    it('le même composant sert chargement et livraison (même rendu)', () => {
+        const a = render(<PlaceActionsLink text="Le Marché" placeResolver={DEPOTS} showDepotAddress />);
+        const b = render(<PlaceActionsLink text="Le Marché" placeResolver={DEPOTS} showDepotAddress />);
+
+        expect(a.container.innerHTML).toBe(b.container.innerHTML);
+        expect(a.container.textContent).toBe('Le MarchéLe Plan de Foire, 03240 Le Montet');
     });
 
     it('chaque lieu multiple porte sa propre adresse', () => {

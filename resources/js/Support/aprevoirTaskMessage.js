@@ -1,5 +1,5 @@
 import { isFrenchMobileNumber, singleLineText } from '@/Support/contactLinks';
-import { loadingPlaceForMessage } from '@/Support/placeResolution';
+import { placeForMessage } from '@/Support/placeResolution';
 import { stripTextMarkers } from '@/Support/textFormatting';
 
 /**
@@ -61,12 +61,12 @@ export function buildAprevoirTaskMessageLines(group, task, placeResolver = null)
     }
 
     // Dépôt interne -> son adresse (le chauffeur a besoin de l'adresse, pas du nom).
-    const loading = loadingPlaceForMessage(task?.loading_place, placeResolver);
+    const loading = placeForMessage(task?.loading_place, placeResolver);
     if (loading) {
         lines.push(`Chargement: ${loading}`);
     }
 
-    const delivery = singleLineText(task?.delivery_place);
+    const delivery = placeForMessage(task?.delivery_place, placeResolver);
     if (delivery) {
         lines.push(`Livraison: ${delivery}`);
     }

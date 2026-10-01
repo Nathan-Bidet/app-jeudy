@@ -114,9 +114,9 @@ export default function TaskRow({
                                 </span>
                             ) : null}
                             {task.delivery_place ? (
-                                <span className="inline-flex items-center gap-1">
+                                <span className="inline-flex items-start gap-1">
                                     <span className="font-semibold">Livraison :</span>
-                                    <PlaceActionsLink text={task.delivery_place} placeResolver={placeResolver} buttonClassName="text-xs" />
+                                    <PlaceActionsLink text={task.delivery_place} placeResolver={placeResolver} showDepotAddress buttonClassName="text-xs" />
                                 </span>
                             ) : null}
                         </div>

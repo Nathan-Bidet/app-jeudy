@@ -83,12 +83,12 @@ export function depotAddressForPlace(place, index) {
 }
 
 /**
- * Lieu(x) de chargement pour un message e-mail/SMS : chaque dépôt interne est
+ * Lieu(x) de chargement ou de livraison pour un message e-mail/SMS : chaque dépôt interne est
  * remplacé par son adresse ; sans adresse (ou lieu libre), le texte d'origine
  * est conservé. Retourne un texte sur une seule ligne (même format que
  * singleLineText, lieux séparés par « | »).
  */
-export function loadingPlaceForMessage(value, placeResolver) {
+export function placeForMessage(value, placeResolver) {
     const index = buildPlaceIndex(placeResolver);
 
     return String(value ?? '')

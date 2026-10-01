@@ -1,6 +1,6 @@
 import FormattedText from '@/Components/FormattedText';
 import PlaceActionsLink from '@/Components/PlaceActionsLink';
-import { loadingPlaceForMessage } from '@/Support/placeResolution';
+import { placeForMessage } from '@/Support/placeResolution';
 import { adaptiveTaskStyle } from '@/Support/taskColorStyle';
 import { stripTextMarkers } from '@/Support/textFormatting';
 import { buildMailHref, singleLineText, toSmsHref, toTelHref } from '@/Support/contactLinks';
@@ -103,12 +103,12 @@ function taskSmsHref(number, entry, item, includeComment, includeTransport, plac
         stripTextMarkers(item?.task).trim(),
     ].filter(Boolean);
 
-    const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
+    const loading = placeForMessage(item?.loading_place, placeResolver);
     if (loading) {
         lines.push(`Chargement: ${loading}`);
     }
 
-    const delivery = singleLineSmsText(item?.delivery_place);
+    const delivery = placeForMessage(item?.delivery_place, placeResolver);
     if (delivery) {
         lines.push(`Livraison: ${delivery}`);
     }
@@ -135,12 +135,12 @@ function taskMailHref(address, entry, item, includeComment, includeTransport, pl
         task,
     ].filter(Boolean);
 
-    const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
+    const loading = placeForMessage(item?.loading_place, placeResolver);
     if (loading) {
         lines.push(`Chargement: ${loading}`);
     }
 
-    const delivery = singleLineSmsText(item?.delivery_place);
+    const delivery = placeForMessage(item?.delivery_place, placeResolver);
     if (delivery) {
         lines.push(`Livraison: ${delivery}`);
     }
@@ -174,12 +174,12 @@ function entrySmsHref(number, entry, taskItems, commentSelection, transportSelec
 
         lines.push(`${index + 1}. ${task}`);
 
-        const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
+        const loading = placeForMessage(item?.loading_place, placeResolver);
         if (loading) {
             lines.push(`   Chargement: ${loading}`);
         }
 
-        const delivery = singleLineSmsText(item?.delivery_place);
+        const delivery = placeForMessage(item?.delivery_place, placeResolver);
         if (delivery) {
             lines.push(`   Livraison: ${delivery}`);
         }
@@ -215,12 +215,12 @@ function entryMailHref(address, entry, taskItems, commentSelection, transportSel
 
         lines.push(`${index + 1}. ${task}`);
 
-        const loading = loadingPlaceForMessage(item?.loading_place, placeResolver);
+        const loading = placeForMessage(item?.loading_place, placeResolver);
         if (loading) {
             lines.push(`   Chargement: ${loading}`);
         }
 
-        const delivery = singleLineSmsText(item?.delivery_place);
+        const delivery = placeForMessage(item?.delivery_place, placeResolver);
         if (delivery) {
             lines.push(`   Livraison: ${delivery}`);
         }
@@ -478,11 +478,12 @@ export default function EntryCard({
                                         </span>
                                     ) : null}
                                     {String(item.delivery_place || '').trim() !== '' ? (
-                                        <span className="inline-flex items-center gap-1">
+                                        <span className="inline-flex items-start gap-1">
                                             <span className="font-semibold">Livraison :</span>
                                             <PlaceActionsLink
                                                 text={item.delivery_place}
                                                 placeResolver={placeResolver}
+                                                showDepotAddress
                                                 buttonClassName="text-[12px] text-[rgb(141,88,26)]"
                                             />
                                         </span>
