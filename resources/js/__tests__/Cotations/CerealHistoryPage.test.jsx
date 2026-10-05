@@ -357,3 +357,35 @@ describe('Cotations céréales — le MATIF change avec la date (régression « 
         expect(screen.getByText('Information ACTUELLE')).toBeInTheDocument();
     });
 });
+
+describe('Cotations céréales — échéance échue : dernier cours repris', () => {
+    it('affiche le cours repris, le prix final calculé et la date du dernier cours', async () => {
+        const base = versionFor('2026-10-05', 'Colza', 490, 17);
+        const row = {
+            ...base.market.groups[0].harvests.left.rows[0],
+            matif: 490,
+            margin: 17,
+            margin_operation: 'add',
+            final_price: 507,
+            carried_quote_at: '2026-07-30T15:00:05+02:00',
+        };
+        const version = {
+            ...base,
+            market: { ...base.market, groups: [{ ...base.market.groups[0], harvests: { ...base.market.groups[0].harvests, left: { year: 2026, rows: [row] } } }] },
+            warnings: ["1 ligne(s) reprennent le dernier cours connu d'une échéance échue (date indiquée sous le cours) : ce n'est pas une nouvelle cotation du contrat."],
+        };
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-05'] } }),
+            '/hist/2026-10-05': () => ({ status: 200, body: { version } }),
+        });
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+        fireEvent.click(screen.getByText('Colza'));
+
+        expect(screen.getByText(/490,00/)).toBeInTheDocument();
+        expect(screen.getByText('dernier cours du 30/07/2026')).toBeInTheDocument();
+        expect(screen.getAllByText(/507/).length).toBeGreaterThan(0);
+        expect(screen.getByRole('note')).toHaveTextContent('reprennent le dernier cours connu');
+    });
+});

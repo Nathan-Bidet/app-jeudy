@@ -211,6 +211,76 @@ class CotationMarketHistoryService
         return $result;
     }
 
+    /**
+     * Dernier cours connu des contrats ÉCHUS absents du relevé de 15 h — même règle
+     * que l'affichage actuel (qui reprend le dernier cours d'une échéance échue
+     * conservée), appliquée « à la date consultée » :
+     *  - le contrat (produit, récolte, année, mois, libellé exacts) est identifié
+     *    par l'identité de la ligne ; aucun autre contrat n'est jamais utilisé ;
+     *  - il doit ne plus avoir AUCUN cours à partir du début de la journée
+     *    consultée : un contrat qui recoit encore des cours ce jour-là ou plus tard
+     *    est actif, son absence est une anomalie de collecte et n'est PAS masquée ;
+     *  - le cours repris est le plus récent enregistré au plus tard à 15 h
+     *    (heure de Paris) ce jour-là — jamais un cours postérieur à la journée.
+     *
+     * @param  array<int, string>  $hashes  identités de ligne de marché sans cours
+     * @return array<string, array<string, mixed>> identité => ligne de marché (cf. marketRowFromPrice) + `carried_quote_at`
+     */
+    public function carriedQuotes(string $date, CarbonImmutable $recordedAt, array $hashes): array
+    {
+        if ($hashes === [] || ! $this->available()) {
+            return [];
+        }
+
+        $storage = (string) config('app.timezone', 'UTC');
+        $business = $this->compactor->businessTimezone();
+        [$dayStart] = $this->compactor->dayBounds($date);
+        $target = $this->target($date);
+        $limit = ($recordedAt->lessThan($target) ? $recordedAt : $target)->setTimezone($storage)->format('Y-m-d H:i:s');
+        $wanted = array_flip($hashes);
+        $carried = [];
+
+        DB::table('cotation_market_prices')
+            ->selectRaw('product_code, harvest_year, maturity_year, maturity_month, maturity_label, MAX(created_at) as last_any')
+            ->groupBy('product_code', 'harvest_year', 'maturity_year', 'maturity_month', 'maturity_label')
+            ->get()
+            ->each(function (object $contract) use (&$carried, $wanted, $dayStart, $limit, $storage, $business): void {
+                $hash = \App\Models\CotationManualPrice::identityHash(
+                    (string) $contract->product_code,
+                    (int) $contract->harvest_year,
+                    (int) $contract->maturity_year,
+                    $contract->maturity_month !== null ? (int) $contract->maturity_month : null,
+                    (string) $contract->maturity_label,
+                );
+
+                // Contrat encore coté ce jour-là ou plus tard : actif, pas de report.
+                if (! isset($wanted[$hash]) || (string) $contract->last_any >= $dayStart) {
+                    return;
+                }
+
+                $price = DB::table('cotation_market_prices')
+                    ->where('product_code', $contract->product_code)
+                    ->where('harvest_year', $contract->harvest_year)
+                    ->where('maturity_year', $contract->maturity_year)
+                    ->where('maturity_label', $contract->maturity_label)
+                    ->where(fn ($q) => $contract->maturity_month === null ? $q->whereNull('maturity_month') : $q->where('maturity_month', $contract->maturity_month))
+                    ->where('created_at', '<=', $limit)
+                    ->orderByDesc('created_at')
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($price === null) {
+                    return;
+                }
+
+                $row = $this->marketService->marketRowFromPrice($price);
+                $row['carried_quote_at'] = CarbonImmutable::parse((string) $price->created_at, $storage)->setTimezone($business)->toIso8601String();
+                $carried[$hash] = $row;
+            });
+
+        return $carried;
+    }
+
     public function target(string $day): CarbonImmutable
     {
         return $this->compactor->dayBounds($day)[2];

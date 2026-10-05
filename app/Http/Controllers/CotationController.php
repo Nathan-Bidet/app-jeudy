@@ -378,6 +378,20 @@ class CotationController extends Controller
         $left = (int) $state['harvest_years']['left'];
         $right = (int) $state['harvest_years']['right'];
         $marketRows = $selection['market_rows'];
+
+        // Échéances échues conservées : dernier cours connu du MÊME contrat, au plus tard à 15 h ce jour-là
+        // (règle de l'affichage actuel, bornée à la date consultée) ; un contrat actif sans cours n'est pas comblé.
+        $wantedHashes = collect($state['manual_lines'])
+            ->filter(fn (array $line): bool => ($line['line_type'] ?? null) === 'matif'
+                && in_array((int) ($line['harvest_year'] ?? 0), [$left, $right], true)
+                && ! empty($line['market_identity_hash'])
+                && ! isset($marketRows[$line['market_identity_hash']]))
+            ->pluck('market_identity_hash')
+            ->unique()
+            ->values()
+            ->all();
+        $carried = $history->carriedQuotes($date, $selection['recorded_at'], $wantedHashes);
+        $marketRows += $carried;
         $soldProductSorts = collect($marketRows)->pluck('product_sort', 'product_code')->all();
         $customSorts = collect($state['custom_cereals'])->pluck('sort_order', 'code')->all();
 
@@ -400,6 +414,21 @@ class CotationController extends Controller
             false,
             collect($state['custom_cereals'])->pluck('name', 'code')->all(),
         );
+        $carriedLines = 0;
+        foreach ($groups as &$group) {
+            foreach (['left', 'right'] as $bucket) {
+                foreach ($group['harvests'][$bucket]['rows'] as &$row) {
+                    $source = $carried[$row['market_identity_hash'] ?? ''] ?? null;
+                    if ($source !== null && ($row['matif'] ?? null) !== null) {
+                        $row['carried_quote_at'] = $source['carried_quote_at'];
+                        $carriedLines++;
+                    }
+                }
+                unset($row);
+            }
+        }
+        unset($group);
+
         $groups = $this->applyCerealOrder($groups, $state['cereal_order']);
         $groups = $this->applyCerealLabels($groups, $state['cereal_labels']);
 
@@ -425,6 +454,7 @@ class CotationController extends Controller
             'transport_grid' => $state['transport_grid'],
             'warnings' => array_values(array_filter([
                 $infoUnreliable ? "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères)." : null,
+                $carriedLines > 0 ? $carriedLines.' ligne(s) reprennent le dernier cours connu d\'une échéance échue (date indiquée sous le cours) : ce n\'est pas une nouvelle cotation du contrat.' : null,
                 ...$warnings,
             ])),
         ]]);

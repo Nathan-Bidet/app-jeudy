@@ -432,55 +432,117 @@ it('donne à chaque journée ses propres cours MATIF par échéance et sa base, 
         ->and($sep['Février']['matif'])->toEqual(555)->and($sep['Février']['final_price'])->toEqual(560);
 });
 
-it('signale un cours absent du relevé de 15 h (contrat échu) sans afficher le dernier cours connu', function (): void {
+it('reprend le dernier cours d’une échéance échue conservée, avec la base de la date, et l’indique', function (): void {
     setHarvestYears();
     $augHash = CotationManualPrice::identityHash('ECO', 2026, 2026, 8, 'Août');
-    manualLine(['identity_hash' => $augHash, 'market_identity_hash' => $augHash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson']);
-    // Dernier cours connu du contrat échu, un autre jour (jamais à utiliser le 12/08).
-    $last = marketRefresh('2026-07-30 15:00:05');
-    marketPrice($last, '2026-07-30 15:00:05', 'ECO', 'Août', 490, 2026, 2026, 8);
-    marketRow('2026-08-12 15:00:03', 'ECO', 'Novembre', 534.75, 2026);
+    $line = manualLine(['identity_hash' => $augHash, 'market_identity_hash' => $augHash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson', 'margin' => 17, 'margin_operation' => 'add']);
+    $snap = fn (float $margin, string $op) => snapshotOf($line, ['identity_hash' => $augHash, 'market_identity_hash' => $augHash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson', 'margin' => $margin, 'margin_operation' => $op]);
+    // Dernier cours du contrat échu : 30/07 à 15:00:05 (490). La base passe de −17 à +17 le 30/09 (après).
+    $expiry = marketRefresh('2026-07-30 15:00:05');
+    marketPrice($expiry, '2026-07-30 15:00:05', 'ECO', 'Août', 490, 2026, 2026, 8);
+    foreach (['2026-08-12', '2026-09-30', '2026-10-05'] as $day) {
+        marketPrice(marketRefresh("$day 15:00:03"), "$day 15:00:03", 'ECO', 'Novembre', 540, 2026, 2026, 11); // relevé de la journée, sans le contrat échu
+    }
+    auditEntry('2026-09-30 09:41:32', ['manual_prices' => [['before' => $snap(17, 'subtract'), 'after' => $snap(17, 'add')]]]);
     $viewer = marketUser(['cotations.cereals.view']);
+    $rowOf = fn (string $day) => collect(historyDay($this, $viewer, $day)->assertOk()->json('version.market.groups.0.harvests.left.rows'))->firstWhere('display_label', 'Moisson');
 
-    $version = historyDay($this, $viewer, '2026-08-12')->assertOk()->json('version');
-    $row = collect($version['market']['groups'][0]['harvests']['left']['rows'])->firstWhere('display_label', 'Moisson');
+    $aug = $rowOf('2026-08-12');   // base d'alors : −17
+    $sep = $rowOf('2026-09-30');   // base d'alors : +17 (modifiée à 09:41, avant le relevé de 15 h)
+    $oct = $rowOf('2026-10-05');
 
-    expect($row['matif'])->toBeNull()->and($row['final_price'])->toBeNull()
-        ->and(implode(' ', $version['warnings']))->toContain('Pas de cours MATIF dans le relevé de 15 h')->toContain('Moisson')
-        ->toContain('dernier cours enregistré le 30/07/2026 à 15:00')->toContain('aucun cours enregistré depuis');
+    // Même dernier Matif (490) aux trois dates, mais le prix final suit la base de chaque date.
+    expect($aug['matif'])->toEqual(490)->and($aug['margin_operation'])->toBe('subtract')->and($aug['final_price'])->toEqual(473)
+        ->and($sep['matif'])->toEqual(490)->and($sep['margin_operation'])->toBe('add')->and($sep['final_price'])->toEqual(507)
+        ->and($oct['final_price'])->toEqual(507)
+        ->and($aug['carried_quote_at'])->toStartWith('2026-07-30T15:00:05')
+        ->and(implode(' ', historyDay($this, $viewer, '2026-10-05')->json('version.warnings')))
+            ->toContain('reprennent le dernier cours connu d\'une échéance échue')->not->toContain('Pas de cours MATIF');
 });
 
-
-it('explique chaque absence d’après les enregistrements : échu, cours à une autre heure, cours à d’autres dates, ligne liée', function (): void {
+it('ne reporte jamais un cours postérieur à la journée, ni sur un contrat encore actif, ni d’un autre contrat', function (): void {
     setHarvestYears();
-    // Contrat échu : dernier cours le 10/09 à 01:59, plus rien ensuite (comme le blé Septembre).
+    $hash = CotationManualPrice::identityHash('ECO', 2026, 2026, 8, 'Août');
+    manualLine(['identity_hash' => $hash, 'market_identity_hash' => $hash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson']);
+    // Contrat coté le 01/10 (100) puis de nouveau le 06/10 (200) : il n'a PAS de cours les 02, 03, 04 et 05/10.
+    marketPrice(marketRefresh('2026-10-01 15:00:03'), '2026-10-01 15:00:03', 'ECO', 'Août', 100, 2026, 2026, 8);
+    marketPrice(marketRefresh('2026-10-06 15:00:03'), '2026-10-06 15:00:03', 'ECO', 'Août', 200, 2026, 2026, 8);
+    // Un AUTRE contrat du même produit et de la même échéance, d'une autre année (ne doit pas être repris).
+    marketPrice(marketRefresh('2026-10-03 15:00:03'), '2026-10-03 15:00:03', 'ECO', 'Août', 999, 2027, 2027, 8);
+    marketRow('2026-10-03 15:00:03', 'EMA', 'Novembre', 150);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $version = historyDay($this, $viewer, '2026-10-03')->assertOk()->json('version');
+    $row = collect($version['market']['groups'][0]['harvests']['left']['rows'] ?? [])->firstWhere('display_label', 'Moisson');
+
+    // Contrat actif (des cours existent après le 03/10) : anomalie de collecte, aucun report (ni 100, ni 200, ni 999).
+    expect($row['matif'])->toBeNull()->and($row['final_price'])->toBeNull()->and($row)->not->toHaveKey('carried_quote_at')
+        ->and(implode(' ', $version['warnings']))->toContain('Pas de cours MATIF dans le relevé de 15 h')->toContain('Moisson');
+});
+
+it('respecte la frontière de la journée à Paris : un cours à 00h30 le jour consulté n’est pas « antérieur »', function (): void {
+    setHarvestYears();
+    $hash = CotationManualPrice::identityHash('ECO', 2026, 2026, 8, 'Août');
+    manualLine(['identity_hash' => $hash, 'market_identity_hash' => $hash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson']);
+    // Dernier cours à 00h30 (Paris) le 02/10 = 22h30 UTC le 01/10 : appartient à la journée du 02/10.
+    marketPrice(marketRefresh('2026-10-02 00:30:00'), '2026-10-02 00:30:00', 'ECO', 'Août', 300, 2026, 2026, 8);
+    foreach (['2026-10-02', '2026-10-03'] as $day) {
+        marketPrice(marketRefresh("$day 15:00:03"), "$day 15:00:03", 'ECO', 'Novembre', 540, 2026, 2026, 11);
+    }
+    $viewer = marketUser(['cotations.cereals.view']);
+    $rowOf = fn (string $day) => collect(historyDay($this, $viewer, $day)->json('version.market.groups.0.harvests.left.rows'))->firstWhere('display_label', 'Moisson');
+
+    expect($rowOf('2026-10-02')['matif'])->toBeNull()                     // cours le jour même (hors relevé de 15 h) : non reporté
+        ->and($rowOf('2026-10-03')['matif'])->toEqual(300)                // lendemain : contrat échu, dernier cours repris
+        ->and($rowOf('2026-10-03')['carried_quote_at'])->toStartWith('2026-10-02T00:30:00');
+});
+
+it('n’invente rien quand aucun cours n’a jamais existé pour le contrat', function (): void {
+    setHarvestYears();
+    $hash = CotationManualPrice::identityHash('ECO', 2026, 2026, 8, 'Août');
+    manualLine(['identity_hash' => $hash, 'market_identity_hash' => $hash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson']);
+    marketPrice(marketRefresh('2026-10-03 15:00:03'), '2026-10-03 15:00:03', 'ECO', 'Novembre', 540, 2026, 2026, 11);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $version = historyDay($this, $viewer, '2026-10-03')->json('version');
+    $row = collect($version['market']['groups'][0]['harvests']['left']['rows'])->firstWhere('display_label', 'Moisson');
+
+    expect($row['matif'])->toBeNull()
+        ->and(implode(' ', $version['warnings']))->toContain("Moisson) : aucun cours enregistré pour ce contrat dans l'historique");
+});
+
+it('explique les absences restantes et reporte les contrats échus (y compris céréales personnalisées et lignes liées)', function (): void {
+    setHarvestYears();
+    // Blé Septembre : dernier cours le 10/09 à 01:59, plus rien ensuite (échu).
     $septHash = CotationManualPrice::identityHash('EBM', 2026, 2026, 9, 'Septembre');
     manualLine(['display_label' => 'Moisson']);
-    // Ligne d'une céréale personnalisée adossée au MÊME contrat (Orge/Seigle…).
-    $custom = manualLine(['identity_hash' => sha1('orge'), 'market_identity_hash' => $septHash, 'product_code' => 'CMQJN92JY', 'product_name' => 'Orge', 'display_label' => 'Moisson orge', 'sort_order' => 2]);
-    // Ligne libre liée au prix final d'une autre ligne sans cours.
-    manualLine(['identity_hash' => sha1('fourrager'), 'market_identity_hash' => null, 'line_type' => 'custom', 'product_code' => 'CMQJNXXXX', 'product_name' => 'Blé fourrager', 'display_label' => 'Moisson fourrager', 'manual_matif' => 176.75, 'final_price_reference_key' => 'identity:'.$septHash, 'sort_order' => 3]);
-    // Contrat coté avant et après la date mais absent de CE relevé.
+    // Orge adossée au MÊME contrat.
+    manualLine(['identity_hash' => sha1('orge'), 'market_identity_hash' => $septHash, 'product_code' => 'CMQJN92JY', 'product_name' => 'Orge', 'display_label' => 'Moisson orge', 'sort_order' => 2]);
+    // Ligne libre liée au prix final de « Moisson ».
+    manualLine(['identity_hash' => sha1('fourrager'), 'market_identity_hash' => null, 'line_type' => 'custom', 'product_code' => 'CMQJNXXXX', 'product_name' => 'Blé fourrager', 'display_label' => 'Moisson fourrager', 'manual_matif' => 176.75, 'final_price_reference_key' => 'identity:'.CotationManualPrice::identityHash('EBM', 2026, 2026, 9, 'Septembre'), 'sort_order' => 3]);
+    // Décembre : coté à 08:00 le 11/09 (autre heure) et après → actif, absent du relevé de 15 h = anomalie.
     $decHash = CotationManualPrice::identityHash('EBM', 2026, 2026, 12, 'Décembre');
     manualLine(['identity_hash' => $decHash, 'market_identity_hash' => $decHash, 'maturity_label' => 'Décembre', 'maturity_month' => 12, 'display_label' => 'Sept - Oct', 'sort_order' => 4]);
 
-    $expiry = marketRefresh('2026-09-10 01:59:04');
-    marketPrice($expiry, '2026-09-10 01:59:04', 'EBM', 'Septembre', 234.25, 2026, 2026, 9);
-    $day = marketRefresh('2026-09-11 15:00:04');
-    marketPrice($day, '2026-09-11 15:00:04', 'EBM', 'Novembre', 240, 2026, 2026, 11); // le relevé existe, sans Septembre ni Décembre
-    $early = marketRefresh('2026-09-11 08:00:00');
-    marketPrice($early, '2026-09-11 08:00:00', 'EBM', 'Décembre', 238, 2026, 2026, 12);  // Décembre coté à une AUTRE heure du même jour
-    $after = marketRefresh('2026-09-14 15:00:04');
-    marketPrice($after, '2026-09-14 15:00:04', 'EBM', 'Décembre', 239, 2026, 2026, 12);  // et après
+    marketPrice(marketRefresh('2026-09-10 01:59:04'), '2026-09-10 01:59:04', 'EBM', 'Septembre', 234.25, 2026, 2026, 9);
+    marketPrice(marketRefresh('2026-09-11 15:00:04'), '2026-09-11 15:00:04', 'EBM', 'Novembre', 240, 2026, 2026, 11);
+    marketPrice(marketRefresh('2026-09-11 08:00:00'), '2026-09-11 08:00:00', 'EBM', 'Décembre', 238, 2026, 2026, 12);
+    marketPrice(marketRefresh('2026-09-14 15:00:04'), '2026-09-14 15:00:04', 'EBM', 'Décembre', 239, 2026, 2026, 12);
     $viewer = marketUser(['cotations.cereals.view']);
 
-    $warnings = historyDay($this, $viewer, '2026-09-11')->assertOk()->json('version.warnings');
-    $text = implode("\n", $warnings);
+    $version = historyDay($this, $viewer, '2026-09-11')->assertOk()->json('version');
+    $rows = collect($version['market']['groups'])->flatMap(fn ($g) => $g['harvests']['left']['rows'])->keyBy('display_label');
+    $text = implode("\n", $version['warnings']);
 
-    expect($text)->toContain('Moisson) : dernier cours enregistré le 10/09/2026 à 01:59, aucun cours enregistré depuis')
-        ->and($text)->toContain('Orge — Septembre (Moisson orge) : dernier cours enregistré le 10/09/2026 à 01:59')
-        ->and($text)->toContain('Moisson fourrager) : prix lié à une autre ligne')
+    // Échu : dernier cours (234,25) repris, aussi pour l'orge et pour la ligne liée.
+    expect($rows['Moisson']['matif'])->toEqual(234.25)->and($rows['Moisson']['final_price'])->toEqual(214.25)
+        ->and($rows['Moisson orge']['matif'])->toEqual(234.25)
+        ->and($rows['Moisson fourrager']['final_price'])->not->toBeNull()
+        ->and($rows['Moisson']['carried_quote_at'])->toStartWith('2026-09-10T01:59:04');
+    // Actif et absent du relevé : signalé, jamais comblé ; l'échu n'est plus listé comme indisponible.
+    expect($rows['Sept - Oct']['matif'])->toBeNull()
         ->and($text)->toContain("Sept - Oct) : des cours existent à d'autres moments (dernier avant ce relevé : 11/09/2026 à 08:00)")
+        ->and($text)->not->toContain('Moisson) : dernier cours enregistré')
         ->and($text)->not->toContain('non coté');
 });
 

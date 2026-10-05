@@ -606,7 +606,14 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                         </select>
                     </div>
                 ) : (
-                    <span className={COTATION_VALUE_CLASS}>{formatPrice(matifValue)}</span>
+                    <>
+                        <span className={COTATION_VALUE_CLASS}>{formatPrice(matifValue)}</span>
+                        {row.carried_quote_at ? (
+                            <span className="block text-[10px] font-normal leading-tight text-[var(--app-muted)]" title="Contrat échu : dernier cours connu à cette date, pas une nouvelle cotation">
+                                dernier cours du {formatFrDate(String(row.carried_quote_at).slice(0, 10))}
+                            </span>
+                        ) : null}
+                    </>
                 )}
             </td>
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
