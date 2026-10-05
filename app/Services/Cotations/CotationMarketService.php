@@ -228,6 +228,105 @@ class CotationMarketService
             });
         }
 
+        return $this->assembleGroups(
+            $configuredRows,
+            $marketRows,
+            $leftHarvestYear,
+            $rightHarvestYear,
+            $includeEmptyProducts,
+            $includeCustomProducts,
+            $customCerealNameByCode,
+        );
+    }
+
+    /**
+     * Ligne de marché normalisée à partir d'un enregistrement de cotation_market_prices.
+     *
+     * @return array<string, mixed>
+     */
+    public function marketRowFromPrice(object $price): array
+    {
+        $identity = CotationManualPrice::identityHash(
+            (string) $price->product_code,
+            (int) $price->harvest_year,
+            (int) $price->maturity_year,
+            $price->maturity_month !== null ? (int) $price->maturity_month : null,
+            (string) $price->maturity_label,
+        );
+
+        return [
+            'identity_hash' => $identity,
+            'product_code' => $price->product_code,
+            'product_name' => $price->product_name,
+            'product_sort' => (int) $price->product_sort,
+            'contract_code' => $price->contract_code,
+            'label' => $price->maturity_label,
+            'maturity_label' => $price->maturity_label,
+            'maturity_month' => $price->maturity_month,
+            'maturity_year' => (int) $price->maturity_year,
+            'harvest_year' => (int) $price->harvest_year,
+            'matif' => (float) $price->price,
+            'sort' => (int) $price->maturity_sort,
+            'last_seen_at' => $price->created_at ? Carbon::parse($price->created_at)->toIso8601String() : null,
+        ];
+    }
+
+    /**
+     * Ligne configurée telle qu'elle était à une date passée, à partir de son
+     * instantané d'audit (mêmes champs que le calcul courant).
+     *
+     * @param  array<string, mixed>  $snapshot  forme de CotationController::manualPriceSnapshot()
+     * @param  array<string, array<string, mixed>>  $marketRows
+     * @return array<string, mixed>
+     */
+    public function configuredRowFromSnapshot(array $snapshot, array $marketRows, int $productSort): array
+    {
+        $lineType = ($snapshot['line_type'] ?? null) === 'matif' ? 'matif' : 'custom';
+        $marketIdentity = $lineType === 'matif' ? ($snapshot['market_identity_hash'] ?? null) : null;
+        $market = $marketIdentity ? ($marketRows[$marketIdentity] ?? null) : null;
+        $reference = $lineType === 'custom' ? (trim((string) ($snapshot['final_price_reference_key'] ?? '')) ?: null) : null;
+        $manualMatif = isset($snapshot['manual_matif']) && $snapshot['manual_matif'] !== null ? (float) $snapshot['manual_matif'] : null;
+
+        return [
+            'identity_hash' => $snapshot['identity_hash'] ?? null,
+            'market_identity_hash' => $marketIdentity,
+            'line_type' => $lineType,
+            'manual_id' => null,
+            'product_code' => $snapshot['product_code'],
+            'product_name' => $snapshot['product_name'],
+            'product_sort' => $productSort,
+            'contract_code' => $market['contract_code'] ?? null,
+            'display_label' => $snapshot['display_label'] ?? null,
+            'label' => $snapshot['maturity_label'] ?? '',
+            'maturity_month' => $snapshot['maturity_month'] ?? null,
+            'maturity_year' => (int) $snapshot['maturity_year'],
+            'harvest_year' => (int) $snapshot['harvest_year'],
+            'matif' => $lineType === 'matif' ? ($market['matif'] ?? null) : $manualMatif,
+            'euronext_price' => $market['matif'] ?? null,
+            'manual_matif' => $manualMatif,
+            'final_price_reference_key' => $reference,
+            'margin' => isset($snapshot['margin']) && $snapshot['margin'] !== null ? abs((float) $snapshot['margin']) : null,
+            'margin_operation' => CotationManualPrice::normalizeMarginOperation($snapshot['margin_operation'] ?? null),
+            'sort' => (int) ($snapshot['sort_order'] ?? 0),
+            'last_seen_at' => $market['last_seen_at'] ?? null,
+            'has_euronext' => $lineType === 'matif' && $market !== null,
+        ];
+    }
+
+    /**
+     * Assemble les cartes (produit → récoltes → lignes) à partir de lignes
+     * configurées et de cours de marché. Partagé par l'affichage courant et par
+     * la reconstitution de l'historique : une seule logique de calcul (MATIF,
+     * base, prix final, références), donc un rendu identique.
+     *
+     * @param  array<int, array<string, mixed>>  $configuredRows
+     * @param  array<string, array<string, mixed>>  $marketRows
+     * @param  array<string, string>  $customCerealNameByCode
+     * @return array<int, array<string, mixed>>
+     */
+    public function assembleGroups(array $configuredRows, array $marketRows, int $leftHarvestYear, int $rightHarvestYear, bool $includeEmptyProducts, bool $includeCustomProducts, array $customCerealNameByCode): array
+    {
+        $groups = [];
         $configuredRows = $this->resolveFinalPriceReferences($configuredRows, $marketRows);
 
         if ($includeEmptyProducts) {
@@ -416,33 +515,10 @@ class CotationMarketService
             ->orderBy('maturity_sort')
             ->get()
             ->each(function (object $price) use (&$rows): void {
-                $identity = CotationManualPrice::identityHash(
-                    (string) $price->product_code,
-                    (int) $price->harvest_year,
-                    (int) $price->maturity_year,
-                    $price->maturity_month !== null ? (int) $price->maturity_month : null,
-                    (string) $price->maturity_label,
-                );
+                $row = $this->marketRowFromPrice($price);
 
-                if (isset($rows[$identity])) {
-                    return;
-                }
-
-                $rows[$identity] = [
-                    'identity_hash' => $identity,
-                    'product_code' => $price->product_code,
-                    'product_name' => $price->product_name,
-                    'product_sort' => (int) $price->product_sort,
-                    'contract_code' => $price->contract_code,
-                    'label' => $price->maturity_label,
-                    'maturity_label' => $price->maturity_label,
-                    'maturity_month' => $price->maturity_month,
-                    'maturity_year' => (int) $price->maturity_year,
-                    'harvest_year' => (int) $price->harvest_year,
-                    'matif' => (float) $price->price,
-                    'sort' => (int) $price->maturity_sort,
-                    'last_seen_at' => $price->created_at ? Carbon::parse($price->created_at)->toIso8601String() : null,
-                ];
+                // Premier rencontré (ordre produit/récolte/échéance) conservé en cas de doublon d'identité.
+                $rows[$row['identity_hash']] ??= $row;
             });
 
         return $rows;

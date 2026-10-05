@@ -46,18 +46,27 @@ const currentMarket = {
     custom_cereals: [],
 };
 
-// Forme renvoyée par le serveur : cotations de marché reconstituées depuis l'historique existant.
-const versionFor = (date, wheatName, price) => ({
+// Forme renvoyée par le serveur : mêmes cartes que la vue d'origine (MATIF, base, prix final),
+// reconstituées à la date (relevé de 15 h + réglages d'alors).
+const versionFor = (date, wheatName, matif, margin, extra = {}) => ({
     business_date: date,
-    recorded_at: `${date}T18:00:00+02:00`,
-    row_count: 1,
-    groups: [{
-        code: 'EBM',
-        name: wheatName,
-        sort: 20,
-        harvests: [{ year: 2026, rows: [{ label: 'Septembre', maturity_year: 2026, contract_code: null, price, quoted_at: null, recorded_at: `${date}T18:00:00+02:00` }] }],
-    }],
-    not_historized: ['Marges et prix finaux', "Texte d'information"],
+    recorded_at: `${date}T15:00:04+02:00`,
+    target_time: '15:00',
+    market: {
+        ...currentMarket,
+        groups: [{
+            ...group('EBM', wheatName, matif),
+            harvests: {
+                left: { year: 2026, rows: [{ ...group('EBM', wheatName, matif).harvests.left.rows[0], margin, margin_operation: 'subtract', final_price: matif - margin }] },
+                right: { year: 2027, rows: [] },
+            },
+        }],
+        cereal_info_html: `<p>Info du ${date}</p>`,
+        fetched_at: `${date}T15:00:04+02:00`,
+    },
+    transport_grid: null,
+    warnings: [],
+    ...extra,
 });
 
 const routes = {
@@ -114,7 +123,7 @@ describe('Cotations céréales — mode historique', () => {
     it('affiche l’instantané de la dernière date, bloque les actions, puis revient au présent', async () => {
         mockFetch({
             '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
-            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5) } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
         });
         render(<CotationsIndex {...props} />);
         fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
@@ -124,8 +133,9 @@ describe('Cotations céréales — mode historique', () => {
         expect(mode).toHaveTextContent('lecture seule');
         // Valeurs de la journée, pas les valeurs actuelles.
         expect(screen.getByText('Blé du 2 octobre')).toBeInTheDocument();
-        expect(screen.getByText('231,50')).toBeInTheDocument();
-        expect(screen.getByRole('note')).toHaveTextContent('Marges et prix finaux');
+        expect(mode).toHaveTextContent('relevé de 15:00');
+        // Info historisée de la date, pas le texte actuel.
+        expect(screen.getByText('Info du 2026-10-02')).toBeInTheDocument();
         expect(screen.queryByText('Information ACTUELLE')).toBeNull();
         expect(screen.queryByText('Blé actuel')).toBeNull();
         // Aucune action pouvant écraser ou envoyer : Actualiser, Modifier, Export PDF, Envoyer.
@@ -148,8 +158,8 @@ describe('Cotations céréales — mode historique', () => {
     it('charge la version choisie dans le calendrier et met la date à jour', async () => {
         mockFetch({
             '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
-            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5) } }),
-            '/hist/2026-09-28': () => ({ status: 200, body: { version: versionFor('2026-09-28', 'Blé du 28 septembre', 180) } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
+            '/hist/2026-09-28': () => ({ status: 200, body: { version: versionFor('2026-09-28', 'Blé du 28 septembre', 180, 10) } }),
         });
         render(<CotationsIndex {...props} />);
         fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
@@ -167,7 +177,7 @@ describe('Cotations céréales — mode historique', () => {
     it('version supprimée entre le calendrier et le clic : message clair, vue précédente conservée', async () => {
         mockFetch({
             '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
-            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5) } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
             '/hist/2026-09-28': () => ({ status: 404, body: { message: "Cette version historique n'est plus disponible." } }),
         });
         render(<CotationsIndex {...props} />);
@@ -185,5 +195,54 @@ describe('Cotations céréales — mode historique', () => {
         render(<CotationsIndex {...props} permissions={{ can_view_cereals: false, can_view_fuel: true }} />);
 
         expect(screen.queryByRole('button', { name: /Historique/ })).toBeNull();
+    });
+});
+
+describe('Cotations céréales — rendu d’origine en mode historique', () => {
+    it('affiche les mêmes colonnes que la vue actuelle avec base et prix final de la date', async () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02'] } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
+        });
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+
+        fireEvent.click(screen.getByText('Blé du 2 octobre')); // déplie la carte, comme la vue d'origine
+
+        ['Livraison', 'Échéance', 'MATIF', 'Base', 'Prix final'].forEach((header) => {
+            expect(screen.getAllByText(header).length).toBeGreaterThan(0);
+        });
+        // prix final = MATIF 231,5 − base 11,5 = 220, et la base d'alors (11,5) est restituée
+        expect(screen.getAllByText(/220/).length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/231|232/).length).toBeGreaterThan(0);
+    });
+
+    it('affiche l’avertissement de reconstitution et reste en lecture seule', async () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02'] } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé', 231.5, 11.5, { warnings: ["Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères)."] }) } }),
+        });
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+
+        expect(await screen.findByRole('note')).toHaveTextContent('4 000 caractères');
+        expect(screen.queryByRole('button', { name: /Modifier les cotations/ })).toBeNull();
+    });
+
+    it('journée sans relevé de 15 h : message clair, vue précédente conservée', async () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-10-01'] } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé', 231.5, 11.5) } }),
+            '/hist/2026-10-01': () => ({ status: 404, body: { status: 'no_target', message: "Le relevé de 15 h n'est pas disponible pour cette journée." } }),
+        });
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+
+        fireEvent.click(screen.getByRole('button', { name: /Plus ancienne/ }));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent("Le relevé de 15 h n'est pas disponible");
+        expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('cotations du 02/10/2026');
     });
 });

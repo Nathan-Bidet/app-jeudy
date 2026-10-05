@@ -7,6 +7,7 @@ use App\Models\CotationFuelPriceHistory;
 use App\Models\CotationManualPrice;
 use App\Models\CotationSetting;
 use App\Services\AuditLogService;
+use App\Services\Cotations\CotationConfigHistoryService;
 use App\Services\Cotations\CotationMarketHistoryService;
 use App\Services\Cotations\CotationMarketService;
 use App\Support\Access\AccessManager;
@@ -346,21 +347,125 @@ class CotationController extends Controller
     }
 
     /**
-     * Cotations d'une journée, reconstituées depuis l'historique existant :
-     * pour chaque contrat, le dernier relevé de la journée (fuseau métier).
-     * 404 explicite si la journée n'a plus de relevé.
+     * Cotations d'une journée telles qu'à la vue d'origine, reconstituées depuis
+     * l'historique existant : cours MATIF du relevé de 15 h
+     * (CotationMarketHistoryService) + réglages d'alors (marges, libellés,
+     * textes…) rétablis depuis le journal d'audit (CotationConfigHistoryService).
+     * 404 avec message explicite si la journée est indisponible.
      */
     public function cerealHistoryShow(Request $request, string $date): JsonResponse
     {
-        $day = app(CotationMarketHistoryService::class)->forDate($date);
+        $history = app(CotationMarketHistoryService::class);
+        $selection = $history->selectForDate($date);
 
-        if ($day === null) {
+        if ($selection['status'] !== CotationMarketHistoryService::STATUS_OK) {
             return response()->json([
-                'message' => "Cette version historique n'est plus disponible.",
+                'status' => $selection['status'],
+                'message' => $selection['status'] === CotationMarketHistoryService::STATUS_NO_TARGET
+                    ? "Le relevé de 15 h n'est pas disponible pour cette journée."
+                    : "Cette version historique n'est plus disponible.",
             ], 404);
         }
 
-        return response()->json(['version' => $day]);
+        $state = app(CotationConfigHistoryService::class)->configAt($selection['recorded_at'], $this->currentCerealConfig());
+
+        // Lignes créées depuis la date demandée et jamais passées par le journal : absentes à l'époque.
+        $state['manual_lines'] = array_filter(
+            $state['manual_lines'],
+            fn (array $line): bool => ! isset($line['_created_at']) || $line['_created_at'] <= $selection['recorded_at']->getTimestamp(),
+        );
+
+        $left = (int) $state['harvest_years']['left'];
+        $right = (int) $state['harvest_years']['right'];
+        $marketRows = $selection['market_rows'];
+        $soldProductSorts = collect($marketRows)->pluck('product_sort', 'product_code')->all();
+        $customSorts = collect($state['custom_cereals'])->pluck('sort_order', 'code')->all();
+
+        $configuredRows = collect($state['manual_lines'])
+            ->filter(fn (array $line): bool => in_array((int) ($line['harvest_year'] ?? 0), [$left, $right], true))
+            ->map(fn (array $line): array => $this->marketService->configuredRowFromSnapshot(
+                $line,
+                $marketRows,
+                (int) ($soldProductSorts[$line['product_code']] ?? $customSorts[$line['product_code']] ?? 999),
+            ))
+            ->values()
+            ->all();
+
+        $groups = $this->marketService->assembleGroups(
+            $configuredRows,
+            $marketRows,
+            $left,
+            $right,
+            false,
+            false,
+            collect($state['custom_cereals'])->pluck('name', 'code')->all(),
+        );
+        $groups = $this->applyCerealOrder($groups, $state['cereal_order']);
+        $groups = $this->applyCerealLabels($groups, $state['cereal_labels']);
+
+        $infoUnreliable = in_array('cereal_info_truncated', $state['warnings'], true);
+
+        return response()->json(['version' => [
+            'business_date' => $date,
+            'recorded_at' => $selection['recorded_at']->toIso8601String(),
+            'target_time' => $history->target($date)->format('H:i'),
+            'market' => [
+                'groups' => $groups,
+                'harvest_years' => ['left' => $left, 'right' => $right],
+                'cereal_order' => $this->normalizeCerealOrder($state['cereal_order'], $groups),
+                'cereal_labels' => $state['cereal_labels'],
+                'cereal_table_labels' => $state['cereal_table_labels'],
+                'cereal_info_html' => $infoUnreliable ? '' : CerealInfoSanitizer::sanitize($state['cereal_info']),
+                'options' => [],
+                'custom_cereals' => [],
+                'fetched_at' => $selection['recorded_at']->toIso8601String(),
+            ],
+            'transport_grid' => $state['transport_grid'],
+            'warnings' => $infoUnreliable ? [
+                "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères).",
+            ] : [],
+        ]]);
+    }
+
+    /**
+     * État actuel des réglages de cotation, point de départ de la
+     * reconstitution historique (voir CotationConfigHistoryService).
+     *
+     * @return array<string, mixed>
+     */
+    private function currentCerealConfig(): array
+    {
+        $lines = [];
+        if (Schema::hasTable('cotation_manual_prices')) {
+            CotationManualPrice::query()->get()->each(function (CotationManualPrice $manual) use (&$lines): void {
+                $lines[$manual->identity_hash] = $this->manualPriceSnapshot($manual) + [
+                    '_created_at' => $manual->created_at?->getTimestamp(),
+                ];
+            });
+        }
+
+        $customs = [];
+        if (Schema::hasTable('cotation_custom_cereals')) {
+            CotationCustomCereal::query()->get()->each(function (CotationCustomCereal $cereal) use (&$customs): void {
+                $customs[$cereal->code] = $this->customCerealSnapshot($cereal);
+            });
+        }
+
+        $display = $this->displaySettings();
+
+        return [
+            'manual_lines' => $lines,
+            'custom_cereals' => $customs,
+            'cereal_order' => $this->cerealOrderConfig(),
+            'cereal_labels' => $this->cerealLabelsConfig(),
+            'cereal_table_labels' => $this->cerealTableLabelsConfig(),
+            'cereal_info' => $this->cerealInfoConfig(),
+            'transport_grid' => $this->transportGridConfig(),
+            'harvest_years' => [
+                'left' => (int) $display['harvest_left_year'],
+                'right' => (int) $display['harvest_right_year'],
+            ],
+        ];
     }
 
     public function updateFuelSettings(Request $request): RedirectResponse
