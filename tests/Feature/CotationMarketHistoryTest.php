@@ -437,7 +437,8 @@ it('signale un cours absent du relevé de 15 h (contrat échu) sans afficher le 
     $augHash = CotationManualPrice::identityHash('ECO', 2026, 2026, 8, 'Août');
     manualLine(['identity_hash' => $augHash, 'market_identity_hash' => $augHash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson']);
     // Dernier cours connu du contrat échu, un autre jour (jamais à utiliser le 12/08).
-    marketRow('2026-07-30 15:00:05', 'ECO', 'Août', 490);
+    $last = marketRefresh('2026-07-30 15:00:05');
+    marketPrice($last, '2026-07-30 15:00:05', 'ECO', 'Août', 490, 2026, 2026, 8);
     marketRow('2026-08-12 15:00:03', 'ECO', 'Novembre', 534.75, 2026);
     $viewer = marketUser(['cotations.cereals.view']);
 
@@ -445,5 +446,49 @@ it('signale un cours absent du relevé de 15 h (contrat échu) sans afficher le 
     $row = collect($version['market']['groups'][0]['harvests']['left']['rows'])->firstWhere('display_label', 'Moisson');
 
     expect($row['matif'])->toBeNull()->and($row['final_price'])->toBeNull()
-        ->and($version['warnings'][0])->toContain('Cours MATIF absent du relevé de 15 h')->toContain('Moisson');
+        ->and(implode(' ', $version['warnings']))->toContain('Pas de cours MATIF dans le relevé de 15 h')->toContain('Moisson')
+        ->toContain('dernier cours enregistré le 30/07/2026 à 15:00')->toContain('aucun cours enregistré depuis');
+});
+
+
+it('explique chaque absence d’après les enregistrements : échu, cours à une autre heure, cours à d’autres dates, ligne liée', function (): void {
+    setHarvestYears();
+    // Contrat échu : dernier cours le 10/09 à 01:59, plus rien ensuite (comme le blé Septembre).
+    $septHash = CotationManualPrice::identityHash('EBM', 2026, 2026, 9, 'Septembre');
+    manualLine(['display_label' => 'Moisson']);
+    // Ligne d'une céréale personnalisée adossée au MÊME contrat (Orge/Seigle…).
+    $custom = manualLine(['identity_hash' => sha1('orge'), 'market_identity_hash' => $septHash, 'product_code' => 'CMQJN92JY', 'product_name' => 'Orge', 'display_label' => 'Moisson orge', 'sort_order' => 2]);
+    // Ligne libre liée au prix final d'une autre ligne sans cours.
+    manualLine(['identity_hash' => sha1('fourrager'), 'market_identity_hash' => null, 'line_type' => 'custom', 'product_code' => 'CMQJNXXXX', 'product_name' => 'Blé fourrager', 'display_label' => 'Moisson fourrager', 'manual_matif' => 176.75, 'final_price_reference_key' => 'identity:'.$septHash, 'sort_order' => 3]);
+    // Contrat coté avant et après la date mais absent de CE relevé.
+    $decHash = CotationManualPrice::identityHash('EBM', 2026, 2026, 12, 'Décembre');
+    manualLine(['identity_hash' => $decHash, 'market_identity_hash' => $decHash, 'maturity_label' => 'Décembre', 'maturity_month' => 12, 'display_label' => 'Sept - Oct', 'sort_order' => 4]);
+
+    $expiry = marketRefresh('2026-09-10 01:59:04');
+    marketPrice($expiry, '2026-09-10 01:59:04', 'EBM', 'Septembre', 234.25, 2026, 2026, 9);
+    $day = marketRefresh('2026-09-11 15:00:04');
+    marketPrice($day, '2026-09-11 15:00:04', 'EBM', 'Novembre', 240, 2026, 2026, 11); // le relevé existe, sans Septembre ni Décembre
+    $early = marketRefresh('2026-09-11 08:00:00');
+    marketPrice($early, '2026-09-11 08:00:00', 'EBM', 'Décembre', 238, 2026, 2026, 12);  // Décembre coté à une AUTRE heure du même jour
+    $after = marketRefresh('2026-09-14 15:00:04');
+    marketPrice($after, '2026-09-14 15:00:04', 'EBM', 'Décembre', 239, 2026, 2026, 12);  // et après
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $warnings = historyDay($this, $viewer, '2026-09-11')->assertOk()->json('version.warnings');
+    $text = implode("\n", $warnings);
+
+    expect($text)->toContain('Moisson) : dernier cours enregistré le 10/09/2026 à 01:59, aucun cours enregistré depuis')
+        ->and($text)->toContain('Orge — Septembre (Moisson orge) : dernier cours enregistré le 10/09/2026 à 01:59')
+        ->and($text)->toContain('Moisson fourrager) : prix lié à une autre ligne')
+        ->and($text)->toContain("Sept - Oct) : des cours existent à d'autres moments (dernier avant ce relevé : 11/09/2026 à 08:00)")
+        ->and($text)->not->toContain('non coté');
+});
+
+it('ne signale rien quand toutes les lignes ont leur cours de 15 h', function (): void {
+    setHarvestYears();
+    manualLine();
+    marketRow('2026-10-01 15:00:04');
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    expect(historyDay($this, $viewer, '2026-10-01')->json('version.warnings'))->toBe([]);
 });

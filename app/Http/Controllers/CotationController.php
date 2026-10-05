@@ -405,18 +405,7 @@ class CotationController extends Controller
 
         $infoUnreliable = in_array('cereal_info_truncated', $state['warnings'], true);
 
-        // Lignes liées au marché sans cours dans le relevé de 15 h (contrat échu, relevé incomplet) :
-        // affichées « — », jamais remplacées par le cours d'une autre date ou d'une autre heure.
-        $missing = [];
-        foreach ($groups as $group) {
-            foreach (['left', 'right'] as $bucket) {
-                foreach ($group['harvests'][$bucket]['rows'] ?? [] as $row) {
-                    if (($row['line_type'] ?? null) === 'matif' && ($row['matif'] ?? null) === null) {
-                        $missing[] = sprintf('%s %s (%s)', $group['name'], $row['label'], $row['display_label'] ?: 'sans libellé');
-                    }
-                }
-            }
-        }
+        $warnings = $this->missingQuoteWarnings($groups, $history, $selection['recorded_at']);
 
         return response()->json(['version' => [
             'business_date' => $date,
@@ -436,9 +425,68 @@ class CotationController extends Controller
             'transport_grid' => $state['transport_grid'],
             'warnings' => array_values(array_filter([
                 $infoUnreliable ? "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères)." : null,
-                $missing !== [] ? 'Cours MATIF absent du relevé de 15 h (contrat non coté ce jour-là) : '.implode(' ; ', $missing).'.' : null,
+                ...$warnings,
             ])),
         ]]);
+    }
+
+    /**
+     * Explique, ligne par ligne, pourquoi un cours MATIF manque dans le relevé de 15 h,
+     * d'après les enregistrements réels (jamais d'affirmation « non coté » sans preuve).
+     *
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, string>
+     */
+    private function missingQuoteWarnings(array $groups, CotationMarketHistoryService $history, \Carbon\CarbonImmutable $at): array
+    {
+        $missing = [];
+        foreach ($groups as $group) {
+            foreach (['left', 'right'] as $bucket) {
+                foreach ($group['harvests'][$bucket]['rows'] ?? [] as $row) {
+                    if (($row['matif'] ?? null) === null && ($row['final_price'] ?? null) === null
+                        && (($row['line_type'] ?? null) === 'matif' || ! empty($row['final_price_reference_key']))) {
+                        $missing[] = [$group['name'], $row];
+                    }
+                }
+            }
+        }
+
+        if ($missing === []) {
+            return [];
+        }
+
+        $availability = $history->contractAvailability($at);
+        $format = static fn (?\Carbon\CarbonImmutable $date): string => $date
+            ? $date->setTimezone((string) config('cotations.compaction.timezone', 'Europe/Paris'))->format('d/m/Y \à H:i')
+            : '';
+        $lines = ['Pas de cours MATIF dans le relevé de 15 h pour '.count($missing).' ligne(s) — aucune valeur d\'une autre heure ou d\'une autre date n\'est affichée :'];
+
+        foreach ($missing as [$name, $row]) {
+            $label = sprintf('%s — %s (%s)', $name, $row['label'], $row['display_label'] ?: 'sans libellé');
+
+            if (($row['line_type'] ?? null) !== 'matif') {
+                $lines[] = $label.' : prix lié à une autre ligne qui n\'a pas de cours à cette date.';
+                continue;
+            }
+
+            $info = $availability[$row['market_identity_hash'] ?? ''] ?? null;
+            $lastBefore = $info['last_before'] ?? null;
+            $lastAny = $info['last_any'] ?? null;
+
+            if ($info === null || $lastAny === null) {
+                $detail = 'aucun cours enregistré pour ce contrat dans l\'historique.';
+            } elseif ($lastBefore === null) {
+                $detail = 'aucun cours enregistré avant cette date (premier cours le '.$format($lastAny).' ou plus tard).';
+            } elseif ($lastAny->lessThanOrEqualTo($at)) {
+                $detail = 'dernier cours enregistré le '.$format($lastBefore).', aucun cours enregistré depuis (le contrat ne figure plus dans les données, vraisemblablement échu).';
+            } else {
+                $detail = 'des cours existent à d\'autres moments (dernier avant ce relevé : '.$format($lastBefore).') mais aucun dans ce relevé.';
+            }
+
+            $lines[] = $label.' : '.$detail;
+        }
+
+        return $lines;
     }
 
     /**

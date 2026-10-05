@@ -173,6 +173,44 @@ class CotationMarketHistoryService
         ];
     }
 
+    /**
+     * Pour chaque contrat connu de l'historique (clé = identité des lignes de
+     * cotation) : dernier cours enregistré jusqu'à l'instant donné, et dernier
+     * cours enregistré tout court. Sert à expliquer précisément pourquoi une
+     * ligne n'a pas de cours dans un relevé (contrat disparu du flux, cours à
+     * une autre heure…), sans jamais en fabriquer un.
+     *
+     * @return array<string, array{last_before:?CarbonImmutable,last_any:?CarbonImmutable}>
+     */
+    public function contractAvailability(CarbonImmutable $at): array
+    {
+        if (! $this->available()) {
+            return [];
+        }
+
+        $storage = (string) config('app.timezone', 'UTC');
+        $limit = $at->setTimezone($storage)->format('Y-m-d H:i:s');
+        $parse = static fn (?string $value): ?CarbonImmutable => $value ? CarbonImmutable::parse($value, $storage) : null;
+        $result = [];
+
+        DB::table('cotation_market_prices')
+            ->selectRaw('product_code, harvest_year, maturity_year, maturity_month, maturity_label, MAX(created_at) as last_any, MAX(CASE WHEN created_at <= ? THEN created_at END) as last_before', [$limit])
+            ->groupBy('product_code', 'harvest_year', 'maturity_year', 'maturity_month', 'maturity_label')
+            ->get()
+            ->each(function (object $row) use (&$result, $parse): void {
+                $hash = \App\Models\CotationManualPrice::identityHash(
+                    (string) $row->product_code,
+                    (int) $row->harvest_year,
+                    (int) $row->maturity_year,
+                    $row->maturity_month !== null ? (int) $row->maturity_month : null,
+                    (string) $row->maturity_label,
+                );
+                $result[$hash] = ['last_before' => $parse($row->last_before), 'last_any' => $parse($row->last_any)];
+            });
+
+        return $result;
+    }
+
     public function target(string $day): CarbonImmutable
     {
         return $this->compactor->dayBounds($day)[2];
