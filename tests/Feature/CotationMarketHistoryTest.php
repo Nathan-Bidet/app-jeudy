@@ -395,3 +395,55 @@ it('la migration de nettoyage retire la table de snapshots sans toucher à l’h
         ->and(Schema::hasTable('cotation_market_refreshes'))->toBeTrue()
         ->and(DB::table('cotation_market_prices')->count())->toBe(1);
 });
+
+it('donne à chaque journée ses propres cours MATIF par échéance et sa base, sans réutiliser un autre jour', function (): void {
+    setHarvestYears();
+    $nov = manualLine(['maturity_label' => 'Novembre', 'maturity_month' => 11, 'margin' => 10, 'margin_operation' => 'add', 'product_code' => 'ECO', 'product_name' => 'Colza']);
+    $novHash = CotationManualPrice::identityHash('ECO', 2026, 2026, 11, 'Novembre');
+    $nov->update(['identity_hash' => $novHash, 'market_identity_hash' => $novHash]);
+    $feb = manualLine(['maturity_label' => 'Février', 'maturity_month' => 2, 'maturity_year' => 2027, 'margin' => 5, 'margin_operation' => 'add', 'product_code' => 'ECO', 'product_name' => 'Colza', 'sort_order' => 2]);
+    $febHash = CotationManualPrice::identityHash('ECO', 2026, 2027, 2, 'Février');
+    $feb->update(['identity_hash' => $febHash, 'market_identity_hash' => $febHash]);
+
+    foreach ([['2026-08-12', 500.0, 520.0], ['2026-09-30', 538.75, 555.0]] as [$day, $novPrice, $febPrice]) {
+        $refresh = marketRefresh("$day 15:00:03");
+        marketPrice($refresh, "$day 15:00:03", 'ECO', 'Novembre', $novPrice, 2026, 2026, 11);
+        marketPrice($refresh, "$day 15:00:03", 'ECO', 'Février', $febPrice, 2026, 2027, 2);
+        // Relevé d'un autre horaire, au cours différent : ne doit jamais être utilisé.
+        $late = marketRefresh("$day 23:59:05");
+        marketPrice($late, "$day 23:59:05", 'ECO', 'Novembre', 999, 2026, 2026, 11);
+    }
+    // La base passe de −10/−5 à +10/+5 entre les deux journées (modification du 30/09 matin).
+    auditEntry('2026-09-30 09:41:32', ['manual_prices' => [
+        ['before' => snapshotOf($nov, ['identity_hash' => $novHash, 'market_identity_hash' => $novHash, 'product_code' => 'ECO', 'product_name' => 'Colza', 'maturity_label' => 'Novembre', 'maturity_month' => 11, 'margin' => 10.0, 'margin_operation' => 'subtract']),
+         'after' => snapshotOf($nov, ['identity_hash' => $novHash, 'market_identity_hash' => $novHash, 'product_code' => 'ECO', 'product_name' => 'Colza', 'maturity_label' => 'Novembre', 'maturity_month' => 11, 'margin' => 10.0, 'margin_operation' => 'add'])],
+        ['before' => snapshotOf($feb, ['identity_hash' => $febHash, 'market_identity_hash' => $febHash, 'product_code' => 'ECO', 'product_name' => 'Colza', 'maturity_label' => 'Février', 'maturity_month' => 2, 'maturity_year' => 2027, 'margin' => 5.0, 'margin_operation' => 'subtract']),
+         'after' => snapshotOf($feb, ['identity_hash' => $febHash, 'market_identity_hash' => $febHash, 'product_code' => 'ECO', 'product_name' => 'Colza', 'maturity_label' => 'Février', 'maturity_month' => 2, 'maturity_year' => 2027, 'margin' => 5.0, 'margin_operation' => 'add'])],
+    ]]);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $rowsOf = fn (string $day) => collect(historyDay($this, $viewer, $day)->assertOk()->json('version.market.groups.0.harvests.left.rows'))->keyBy('label');
+    $aug = $rowsOf('2026-08-12');
+    $sep = $rowsOf('2026-09-30');
+
+    expect($aug['Novembre']['matif'])->toEqual(500)->and($aug['Novembre']['margin_operation'])->toBe('subtract')->and($aug['Novembre']['final_price'])->toEqual(490)
+        ->and($aug['Février']['matif'])->toEqual(520)->and($aug['Février']['final_price'])->toEqual(515)
+        ->and($sep['Novembre']['matif'])->toEqual(538.75)->and($sep['Novembre']['margin_operation'])->toBe('add')->and($sep['Novembre']['final_price'])->toEqual(548.75)
+        ->and($sep['Février']['matif'])->toEqual(555)->and($sep['Février']['final_price'])->toEqual(560);
+});
+
+it('signale un cours absent du relevé de 15 h (contrat échu) sans afficher le dernier cours connu', function (): void {
+    setHarvestYears();
+    $augHash = CotationManualPrice::identityHash('ECO', 2026, 2026, 8, 'Août');
+    manualLine(['identity_hash' => $augHash, 'market_identity_hash' => $augHash, 'maturity_label' => 'Août', 'maturity_month' => 8, 'product_code' => 'ECO', 'product_name' => 'Colza', 'display_label' => 'Moisson']);
+    // Dernier cours connu du contrat échu, un autre jour (jamais à utiliser le 12/08).
+    marketRow('2026-07-30 15:00:05', 'ECO', 'Août', 490);
+    marketRow('2026-08-12 15:00:03', 'ECO', 'Novembre', 534.75, 2026);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $version = historyDay($this, $viewer, '2026-08-12')->assertOk()->json('version');
+    $row = collect($version['market']['groups'][0]['harvests']['left']['rows'])->firstWhere('display_label', 'Moisson');
+
+    expect($row['matif'])->toBeNull()->and($row['final_price'])->toBeNull()
+        ->and($version['warnings'][0])->toContain('Cours MATIF absent du relevé de 15 h')->toContain('Moisson');
+});

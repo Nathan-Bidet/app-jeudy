@@ -405,6 +405,19 @@ class CotationController extends Controller
 
         $infoUnreliable = in_array('cereal_info_truncated', $state['warnings'], true);
 
+        // Lignes liées au marché sans cours dans le relevé de 15 h (contrat échu, relevé incomplet) :
+        // affichées « — », jamais remplacées par le cours d'une autre date ou d'une autre heure.
+        $missing = [];
+        foreach ($groups as $group) {
+            foreach (['left', 'right'] as $bucket) {
+                foreach ($group['harvests'][$bucket]['rows'] ?? [] as $row) {
+                    if (($row['line_type'] ?? null) === 'matif' && ($row['matif'] ?? null) === null) {
+                        $missing[] = sprintf('%s %s (%s)', $group['name'], $row['label'], $row['display_label'] ?: 'sans libellé');
+                    }
+                }
+            }
+        }
+
         return response()->json(['version' => [
             'business_date' => $date,
             'recorded_at' => $selection['recorded_at']->toIso8601String(),
@@ -421,9 +434,10 @@ class CotationController extends Controller
                 'fetched_at' => $selection['recorded_at']->toIso8601String(),
             ],
             'transport_grid' => $state['transport_grid'],
-            'warnings' => $infoUnreliable ? [
-                "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères).",
-            ] : [],
+            'warnings' => array_values(array_filter([
+                $infoUnreliable ? "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères)." : null,
+                $missing !== [] ? 'Cours MATIF absent du relevé de 15 h (contrat non coté ce jour-là) : '.implode(' ; ', $missing).'.' : null,
+            ])),
         ]]);
     }
 

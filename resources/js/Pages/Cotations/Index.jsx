@@ -2394,10 +2394,12 @@ export default function CotationsIndex({
             || (group?.harvests?.right?.rows || []).length > 0
         ));
     }, [displayMarket, isEditing, form.data.custom_cereals, form.data.cereal_order, form.data.cereal_labels]);
-    const optionGroups = useMemo(() => marketData?.options || [], [marketData]);
+    // Les « options » (cours de marché proposés à la modification) surchargent la valeur MATIF d'une ligne :
+    // en mode historique elles viennent de la version consultée (vides), jamais des cours actuels.
+    const optionGroups = useMemo(() => displayMarket?.options || [], [displayMarket]);
     const optionGroupsByCode = useMemo(() => {
         const byCode = Object.fromEntries(optionGroups.map((group) => [group.code, group]));
-        (form.data.custom_cereals || []).forEach((cereal) => {
+        (cardForm.data.custom_cereals || []).forEach((cereal) => {
             const base = byCode[cereal.base_product_code];
             if (base) {
                 byCode[cereal.code] = { ...base, code: cereal.code, name: cereal.name, base_product_code: cereal.base_product_code };
@@ -2405,7 +2407,7 @@ export default function CotationsIndex({
         });
 
         return byCode;
-    }, [optionGroups, form.data.custom_cereals]);
+    }, [optionGroups, cardForm.data.custom_cereals]);
     const finalPriceOptions = useMemo(() => {
         const marketRows = flattenMarketRows(displayMarket?.groups || []);
         const draftRows = isEditing ? (form.data.manual_prices || []) : [];

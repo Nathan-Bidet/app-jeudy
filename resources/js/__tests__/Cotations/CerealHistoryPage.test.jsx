@@ -246,3 +246,114 @@ describe('Cotations céréales — rendu d’origine en mode historique', () => 
         expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('cotations du 02/10/2026');
     });
 });
+
+describe('Cotations céréales — le MATIF change avec la date (régression « cours figé »)', () => {
+    const row = (hash, label, matif, margin, op) => ({
+        identity_hash: `line-${hash}`,
+        market_identity_hash: hash,
+        line_type: 'matif',
+        product_code: 'ECO',
+        product_name: 'Colza',
+        display_label: `Ligne ${label}`,
+        label,
+        maturity_label: label,
+        maturity_year: 2026,
+        harvest_year: 2026,
+        matif,
+        margin,
+        margin_operation: op,
+        final_price: op === 'add' ? matif + margin : matif - margin,
+    });
+
+    const day = (date, rows) => ({
+        business_date: date,
+        recorded_at: `${date}T15:00:03+02:00`,
+        target_time: '15:00',
+        market: {
+            ...currentMarket,
+            groups: [{ code: 'ECO', name: 'Colza', sort: 10, harvests: { left: { year: 2026, rows }, right: { year: 2027, rows: [] } } }],
+            cereal_info_html: '',
+            options: [],
+            fetched_at: `${date}T15:00:03+02:00`,
+        },
+        transport_grid: null,
+        warnings: [],
+    });
+
+    // 12/08 : Novembre 500 (base −10) et Février 520 (base −5) ; 30/09 : Novembre 538,75 (base +10) et Février 555 (base +5).
+    const AUG = day('2026-08-12', [row('h-nov', 'Novembre 2026', 500, 10, 'subtract'), row('h-feb', 'Février 2027', 520, 5, 'subtract')]);
+    const SEP = day('2026-09-30', [row('h-nov', 'Novembre 2026', 538.75, 10, 'add'), row('h-feb', 'Février 2027', 555, 5, 'add')]);
+
+    // Cours ACTUELS périmés pour les mêmes contrats : ils ne doivent jamais s'afficher sur une date passée.
+    const staleOptions = [{
+        code: 'ECO',
+        harvests: { left: { year: 2026, rows: [
+            { identity_hash: 'h-nov', matif: 490, label: 'Novembre 2026' },
+            { identity_hash: 'h-feb', matif: 490, label: 'Février 2027' },
+        ] }, right: { year: 2027, rows: [] } },
+    }];
+
+    const setup = () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-09-30', '2026-08-12'] } }),
+            '/hist/2026-09-30': () => ({ status: 200, body: { version: SEP } }),
+            '/hist/2026-08-12': () => ({ status: 200, body: { version: AUG } }),
+        });
+        render(<CotationsIndex {...props} marketData={{ ...currentMarket, options: staleOptions }} />);
+    };
+
+    const open = async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+        fireEvent.click(screen.getByText('Colza'));
+    };
+
+    it('affiche les cours, bases et prix finaux de chaque journée, sans cours actuel ni 490 figé', async () => {
+        setup();
+        await open();
+
+        // 30/09 : MATIF 538,75 / 555, bases +10 / +5, prix finaux 549 / 560.
+        expect(screen.getByText(/538,75/)).toBeInTheDocument();
+        expect(screen.getByText(/555,00/)).toBeInTheDocument();
+        expect(screen.getAllByText(/549/).length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/560/).length).toBeGreaterThan(0);
+        expect(screen.queryByText(/490/)).toBeNull();
+
+        // Bouton « Plus ancienne » → 12/08 : MATIF 500 / 520, bases −10 / −5, prix finaux 490 / 515.
+        fireEvent.click(screen.getByRole('button', { name: /Plus ancienne/ }));
+        await waitFor(() => expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('12/08/2026'));
+
+        expect(screen.getByText(/500,00/)).toBeInTheDocument();
+        expect(screen.getByText(/520,00/)).toBeInTheDocument();
+        expect(screen.queryByText(/538,75/)).toBeNull();
+        expect(screen.getAllByText(/515/).length).toBeGreaterThan(0);
+    });
+
+    it('met à jour tous les cours aussi via le calendrier, dans les deux sens', async () => {
+        setup();
+        await open();
+
+        fireEvent.click(screen.getByRole('button', { name: /30\/09\/2026/ }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Mois précédent' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Mois précédent' }));
+        fireEvent.click(screen.getByRole('button', { name: '12/08/2026, version disponible' }));
+        await waitFor(() => expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('12/08/2026'));
+        expect(screen.getByText(/500,00/)).toBeInTheDocument();
+        expect(screen.queryByText(/555,00/)).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: /Plus récente/ }));
+        await waitFor(() => expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('30/09/2026'));
+        expect(screen.getByText(/538,75/)).toBeInTheDocument();
+        expect(screen.queryByText(/500,00/)).toBeNull();
+    });
+
+    it('revient aux cotations actuelles à la fermeture, avec leurs propres valeurs', async () => {
+        setup();
+        await open();
+        fireEvent.click(screen.getByRole('button', { name: "Fermer l'historique" }));
+
+        expect(screen.queryByTestId('cereal-history-mode')).toBeNull();
+        expect(screen.queryByText(/538,75/)).toBeNull();
+        expect(screen.getByText('Information ACTUELLE')).toBeInTheDocument();
+    });
+});
