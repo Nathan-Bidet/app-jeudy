@@ -133,7 +133,7 @@ describe('Cotations céréales — mode historique', () => {
         expect(mode).toHaveTextContent('lecture seule');
         // Valeurs de la journée, pas les valeurs actuelles.
         expect(screen.getByText('Blé du 2 octobre')).toBeInTheDocument();
-        expect(mode).toHaveTextContent('relevé de 15:00');
+        expect(screen.getByTestId('cereal-history-notes')).toHaveTextContent('relevé de 15:00');
         // Info historisée de la date, pas le texte actuel.
         expect(screen.getByText('Info du 2026-10-02')).toBeInTheDocument();
         expect(screen.queryByText('Information ACTUELLE')).toBeNull();
@@ -387,5 +387,93 @@ describe('Cotations céréales — échéance échue : dernier cours repris', ()
         expect(screen.getByText('dernier cours du 30/07/2026')).toBeInTheDocument();
         expect(screen.getAllByText(/507/).length).toBeGreaterThan(0);
         expect(screen.getByRole('note')).toHaveTextContent('reprennent le dernier cours connu');
+    });
+});
+
+
+describe('Cotations céréales — panneau d’historique fixé pendant le défilement', () => {
+    const twoDays = () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
+            '/hist/2026-09-28': () => ({ status: 200, body: { version: versionFor('2026-09-28', 'Blé du 28 septembre', 180, 10) } }),
+        });
+    };
+
+    it('est sticky sous la navigation principale, sous la navigation (z-30) et sous le calendrier (z-120)', async () => {
+        twoDays();
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        const panel = await screen.findByTestId('cereal-history-mode');
+
+        expect(panel.className).toContain('sticky');
+        expect(panel.className).toContain('top-[var(--app-navbar-height,72px)]');
+        expect(panel.className).toContain('z-20');
+        expect(panel.className).toContain('bg-[var(--app-surface)]'); // opaque : les tableaux ne transparaissent pas
+
+        fireEvent.click(screen.getByRole('button', { name: /02\/10\/2026/ }));
+        expect(screen.getByRole('dialog').className).toContain('z-[120]');
+    });
+
+    it('ne crée aucun conteneur de défilement entre le panneau et la page (sticky opérant) et ne change rien hors historique', async () => {
+        twoDays();
+        render(<CotationsIndex {...props} />);
+
+        // Affichage actuel : comportement d'origine conservé (overflow-x-hidden), aucun panneau fixé.
+        expect(document.querySelector('div.space-y-5.min-w-0').className).toContain('overflow-x-hidden');
+        expect(screen.queryByTestId('cereal-history-mode')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        const panel = await screen.findByTestId('cereal-history-mode');
+
+        // Historique : overflow-x-clip (pas de conteneur de défilement) et le panneau est enfant direct du conteneur de contenu.
+        const container = document.querySelector('div.space-y-5.min-w-0');
+        expect(container.className).toContain('overflow-x-clip');
+        expect(container.className).not.toContain('overflow-x-hidden');
+        for (let node = panel.parentElement; node && node !== container; node = node.parentElement) {
+            expect(getComputedStyle(node).overflow).not.toMatch(/hidden|auto|scroll/);
+        }
+
+        fireEvent.click(screen.getByRole('button', { name: "Fermer l'historique" }));
+        expect(document.querySelector('div.space-y-5.min-w-0').className).toContain('overflow-x-hidden');
+    });
+
+    it('change de journée sans remonter la page et garde la section ouverte pour comparer', async () => {
+        twoDays();
+        const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+        fireEvent.click(screen.getByText('Blé du 2 octobre')); // ouvre la section
+
+        expect(screen.getAllByText('Échéance').length).toBeGreaterThan(0);
+
+        fireEvent.click(screen.getByRole('button', { name: /Plus ancienne/ }));
+        await waitFor(() => expect(screen.getByTestId('cereal-history-mode')).toHaveTextContent('28/09/2026'));
+
+        // Même section (même céréale) toujours ouverte, avec les valeurs de l'autre journée.
+        expect(screen.getByText('Blé du 28 septembre')).toBeInTheDocument();
+        expect(screen.getAllByText('Échéance').length).toBeGreaterThan(0);
+        expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it('réserve de la place pour le panneau lors d’un défilement vers une section (scroll-margin)', async () => {
+        twoDays();
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+
+        const card = document.querySelector('[data-cereal-code="EBM"]');
+        expect(card.style.scrollMarginTop).toContain('var(--app-navbar-height,72px)');
+    });
+
+    it('garde les boutons accessibles : libellés et ordre de tabulation (Plus ancienne, date, Plus récente, Fermer)', async () => {
+        twoDays();
+        render(<CotationsIndex {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: /Historique/ }));
+        const panel = await screen.findByTestId('cereal-history-mode');
+
+        const labels = [...panel.querySelectorAll('button')].map((b) => b.textContent.trim());
+        expect(labels).toEqual(['Plus ancienne', '02/10/2026', 'Plus récente', "Fermer l'historique"]);
     });
 });

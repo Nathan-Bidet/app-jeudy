@@ -2523,7 +2523,7 @@ export default function CotationsIndex({
         <AppLayout title="Cotations" header={header}>
             <Head title="Cotations" />
 
-            <div className="w-full max-w-full min-w-0 space-y-5 overflow-x-hidden">
+            <div className={`w-full max-w-full min-w-0 space-y-5 ${isViewingCerealHistory ? 'overflow-x-clip' : 'overflow-x-hidden'}`}>
                 {error ? (
                     <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                         {error}
@@ -2571,31 +2571,38 @@ export default function CotationsIndex({
                         ) : null}
 
                         {isViewingCerealHistory ? (
-                            <div
-                                role="region"
-                                aria-label="Mode historique"
-                                data-testid="cereal-history-mode"
-                                className="space-y-3 rounded-2xl border-2 border-[var(--brand-yellow-dark)] bg-[var(--app-surface)] px-4 py-3"
-                            >
-                                <p className="flex items-center gap-2 text-sm font-black">
-                                    <History className="h-4 w-4" strokeWidth={2.3} />
-                                    Historique — cotations du {formatFrDate(cerealHistory.activeDate)} (lecture seule)
-                                </p>
-                                <p className="text-xs text-[var(--app-muted)]">
-                                    Prix du relevé de {cerealHistory.version?.target_time || '15:00'} ({formatDateTime(cerealHistory.version?.recorded_at)}),
-                                    bases et réglages tels qu'à ce moment. Ce ne sont pas les cotations actuelles.
-                                </p>
-                                {(cerealHistory.version?.warnings || []).map((warning) => (
-                                    <p key={warning} role="note" className="text-xs font-semibold text-[var(--app-muted)]">{warning}</p>
-                                ))}
-                                <CerealHistoryBar
-                                    dates={cerealHistory.dates}
-                                    activeDate={cerealHistory.activeDate}
-                                    loading={cerealHistory.loading}
-                                    onSelectDate={(date) => fetchCerealHistoryVersion(date)}
-                                    onClose={closeCerealHistory}
-                                />
-                            </div>
+                            <>
+                                {/* Fixé sous la navigation principale (même repère que les en-têtes de tableau :
+                                    --app-navbar-height) ; z-20 < navigation (z-30) et < calendrier (z-[120]). */}
+                                <div
+                                    role="region"
+                                    aria-label="Mode historique"
+                                    data-testid="cereal-history-mode"
+                                    className="sticky top-[var(--app-navbar-height,72px)] z-20 space-y-2 rounded-2xl border-2 border-[var(--brand-yellow-dark)] bg-[var(--app-surface)] px-3 py-2 shadow-md shadow-black/10 sm:px-4 sm:py-3"
+                                >
+                                    <p className="flex items-center gap-2 text-xs font-black sm:text-sm">
+                                        <History className="h-4 w-4 shrink-0" strokeWidth={2.3} />
+                                        <span>Historique — cotations du {formatFrDate(cerealHistory.activeDate)} (lecture seule)</span>
+                                    </p>
+                                    <CerealHistoryBar
+                                        dates={cerealHistory.dates}
+                                        activeDate={cerealHistory.activeDate}
+                                        loading={cerealHistory.loading}
+                                        onSelectDate={(date) => fetchCerealHistoryVersion(date)}
+                                        onClose={closeCerealHistory}
+                                    />
+                                </div>
+
+                                <div data-testid="cereal-history-notes" className="space-y-1">
+                                    <p className="text-xs text-[var(--app-muted)]">
+                                        Prix du relevé de {cerealHistory.version?.target_time || '15:00'} ({formatDateTime(cerealHistory.version?.recorded_at)}),
+                                        bases et réglages tels qu'à ce moment. Ce ne sont pas les cotations actuelles.
+                                    </p>
+                                    {(cerealHistory.version?.warnings || []).map((warning) => (
+                                        <p key={warning} role="note" className="text-xs font-semibold text-[var(--app-muted)]">{warning}</p>
+                                    ))}
+                                </div>
+                            </>
                         ) : null}
 
                         <CerealInfoSection
@@ -2633,6 +2640,7 @@ export default function CotationsIndex({
                                     <div
                                         key={`${group.code || group.name}-${index}`}
                                         data-cereal-code={group.code || ''}
+                                        style={isViewingCerealHistory ? { scrollMarginTop: 'calc(var(--app-navbar-height,72px) + 9rem)' } : undefined}
                                         className="min-w-0"
                                         onDragOver={(event) => {
                                             if (!isEditing) return;
