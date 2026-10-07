@@ -1,4 +1,5 @@
 import CerealHistoryBar from '@/Components/Cotations/CerealHistoryBar';
+import CerealHistoryCharts from '@/Components/Cotations/CerealHistoryCharts';
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 import PdfExportButton from '@/Components/Cotations/PdfExportButton';
 import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
@@ -1888,6 +1889,7 @@ export default function CotationsIndex({
     const [fuelHistoryIndex, setFuelHistoryIndex] = useState(null);
     // Historique des céréales : jamais dans l'URL ni persisté, donc impossible à
     // ré-afficher par erreur ; réinitialisé par « Fermer l'historique ».
+    const [chartsOpen, setChartsOpen] = useState(false);
     const [cerealHistory, setCerealHistory] = useState({ dates: [], activeDate: null, version: null, loading: false, error: '' });
     const form = useForm({
         settings: flattenSettings(manualSettings),
@@ -2356,7 +2358,10 @@ export default function CotationsIndex({
         }
     };
 
-    const closeCerealHistory = () => setCerealHistory({ dates: [], activeDate: null, version: null, loading: false, error: '' });
+    const closeCerealHistory = () => {
+        setChartsOpen(false);
+        setCerealHistory({ dates: [], activeDate: null, version: null, loading: false, error: '' });
+    };
 
     const cerealGroups = useMemo(() => {
         const groups = displayMarket?.groups || [];
@@ -2588,6 +2593,8 @@ export default function CotationsIndex({
                                         dates={cerealHistory.dates}
                                         activeDate={cerealHistory.activeDate}
                                         loading={cerealHistory.loading}
+                                        chartsOpen={chartsOpen}
+                                        onToggleCharts={routes.cereal_history_series ? () => setChartsOpen((open) => !open) : null}
                                         onSelectDate={(date) => fetchCerealHistoryVersion(date)}
                                         onClose={closeCerealHistory}
                                     />
@@ -2602,6 +2609,10 @@ export default function CotationsIndex({
                                         <p key={warning} role="note" className="text-xs font-semibold text-[var(--app-muted)]">{warning}</p>
                                     ))}
                                 </div>
+
+                                {chartsOpen ? (
+                                    <CerealHistoryCharts seriesUrl={routes.cereal_history_series} endDate={cerealHistory.activeDate} />
+                                ) : null}
                             </>
                         ) : null}
 

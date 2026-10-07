@@ -477,3 +477,99 @@ describe('Cotations céréales — panneau d’historique fixé pendant le défi
         expect(labels).toEqual(['Plus ancienne', '02/10/2026', 'Plus récente', "Fermer l'historique"]);
     });
 });
+
+describe('Cotations céréales — graphiques dans l’historique', () => {
+    const SERIES = {
+        from: '2026-09-03',
+        to: '2026-10-02',
+        dates: ['2026-09-28', '2026-10-02'],
+        cereals: [{ code: 'EBM', name: 'Blé', series: [{ key: 's1', display_label: 'Moisson', maturity_label: 'Septembre 2026', harvest_year: 2026, points: [
+            { date: '2026-09-28', price: 180, matif: 190, carried_quote_at: null },
+            { date: '2026-10-02', price: 220, matif: 231.5, carried_quote_at: null },
+        ] }] }],
+    };
+
+    const setup = () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02', '2026-09-28'] } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
+            '/hist/2026-09-28': () => ({ status: 200, body: { version: versionFor('2026-09-28', 'Blé du 28 septembre', 180, 10) } }),
+            default: (url) => (url.startsWith('/hist/series') ? { status: 200, body: SERIES } : { status: 404, body: {} }),
+        });
+        render(<CotationsIndex {...props} routes={{ ...routes, cereal_history_series: '/hist/series' }} />);
+    };
+
+    const openHistory = async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Historique/ }));
+        return screen.findByTestId('cereal-history-mode');
+    };
+
+    it('ouvre les graphiques sous la barre (30 derniers jours se terminant à la date consultée), sans quitter les tableaux', async () => {
+        setup();
+        const panel = await openHistory();
+
+        // Bouton placé entre « Plus récente » et « Fermer l'historique », barre toujours fixée.
+        const labels = [...panel.querySelectorAll('button')].map((b) => b.textContent.trim());
+        expect(labels).toEqual(['Plus ancienne', '02/10/2026', 'Plus récente', 'Graphiques', "Fermer l'historique"]);
+        expect(panel.className).toContain('sticky');
+        expect(screen.queryByTestId('cereal-history-charts')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Graphiques' }));
+
+        const charts = await screen.findByTestId('cereal-history-charts');
+        const url = new URL(global.fetch.mock.calls.filter(([u]) => String(u).startsWith('/hist/series')).at(-1)[0], 'http://x');
+        expect(url.searchParams.get('from')).toBe('2026-09-03'); // 30 jours se terminant le 02/10
+        expect(url.searchParams.get('to')).toBe('2026-10-02');
+        expect(charts).toBeInTheDocument();
+        expect(await screen.findByRole('region', { name: 'Évolution des prix — Blé' })).toBeInTheDocument();
+        // Les tableaux restent consultables.
+        expect(screen.getByText('Blé du 2 octobre')).toBeInTheDocument();
+    });
+
+    it('suit la date consultée, puis se referme avec le bouton Graphiques', async () => {
+        setup();
+        await openHistory();
+        fireEvent.click(screen.getByRole('button', { name: 'Graphiques' }));
+        await screen.findByTestId('cereal-history-charts');
+
+        fireEvent.click(screen.getByRole('button', { name: /Plus ancienne/ }));
+        await waitFor(() => {
+            const calls = global.fetch.mock.calls.filter(([u]) => String(u).startsWith('/hist/series'));
+            expect(new URL(calls.at(-1)[0], 'http://x').searchParams.get('to')).toBe('2026-09-28');
+        });
+        expect(screen.getByTestId('cereal-history-charts')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Graphiques' }));
+        expect(screen.queryByTestId('cereal-history-charts')).toBeNull();
+        expect(screen.getByTestId('cereal-history-mode')).toBeInTheDocument();
+    });
+
+    it('« Fermer l’historique » referme aussi les graphiques et revient aux cotations actuelles', async () => {
+        setup();
+        await openHistory();
+        fireEvent.click(screen.getByRole('button', { name: 'Graphiques' }));
+        await screen.findByTestId('cereal-history-charts');
+
+        fireEvent.click(screen.getByRole('button', { name: "Fermer l'historique" }));
+
+        expect(screen.queryByTestId('cereal-history-charts')).toBeNull();
+        expect(screen.queryByTestId('cereal-history-mode')).toBeNull();
+        expect(screen.getByText('Information ACTUELLE')).toBeInTheDocument();
+
+        // Une nouvelle ouverture de l'historique repart sans graphiques.
+        fireEvent.click(screen.getByRole('button', { name: /^Historique/ }));
+        await screen.findByTestId('cereal-history-mode');
+        expect(screen.queryByTestId('cereal-history-charts')).toBeNull();
+    });
+
+    it('sans route de graphiques, le bouton n’apparaît pas', async () => {
+        mockFetch({
+            '/hist/dates': () => ({ status: 200, body: { dates: ['2026-10-02'] } }),
+            '/hist/2026-10-02': () => ({ status: 200, body: { version: versionFor('2026-10-02', 'Blé du 2 octobre', 231.5, 11.5) } }),
+        });
+        render(<CotationsIndex {...props} />);
+        await openHistory();
+
+        expect(screen.queryByRole('button', { name: 'Graphiques' })).toBeNull();
+    });
+});

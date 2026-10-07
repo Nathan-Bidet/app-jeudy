@@ -554,3 +554,183 @@ it('ne signale rien quand toutes les lignes ont leur cours de 15 h', function ()
 
     expect(historyDay($this, $viewer, '2026-10-01')->json('version.warnings'))->toBe([]);
 });
+
+/* ---------------------------------------------------------------- Graphiques (séries) */
+
+function seriesUrl(string $from, string $to): string
+{
+    return route('cotations.cereal-history.series', ['from' => $from, 'to' => $to]);
+}
+
+/** Ligne liée à un contrat (produit, mois, année) avec son identité propre. */
+function seriesLine(string $product, string $name, string $label, int $month, int $year, string $display, float $margin, string $op = 'subtract', int $harvest = 2026): CotationManualPrice
+{
+    $market = CotationManualPrice::identityHash($product, $harvest, $year, $month, $label);
+
+    return manualLine([
+        'identity_hash' => sha1("$product|$display|$label|$harvest"),
+        'market_identity_hash' => $market,
+        'product_code' => $product,
+        'product_name' => $name,
+        'maturity_label' => $label,
+        'maturity_month' => $month,
+        'maturity_year' => $year,
+        'harvest_year' => $harvest,
+        'display_label' => $display,
+        'margin' => $margin,
+        'margin_operation' => $op,
+    ]);
+}
+
+function dayWithPrices(string $day, array $prices): void
+{
+    $refresh = marketRefresh("$day 15:00:03");
+    foreach ($prices as [$product, $label, $price, $month, $year]) {
+        marketPrice($refresh, "$day 15:00:03", $product, $label, $price, 2026, $year, $month);
+    }
+}
+
+it('renvoie une série par ligne de cotation et par céréale, avec le prix final de chaque journée', function (): void {
+    setHarvestYears();
+    seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Nov - Dec', 10);
+    seriesLine('ECO', 'Colza', 'Février', 2, 2027, 'Livraison févr.', 5, 'add');
+    seriesLine('EBM', 'Blé', 'Décembre', 12, 2026, 'Moisson blé', 20);
+    foreach ([['2026-09-28', 500, 520, 200], ['2026-09-29', 510, 530, 205], ['2026-09-30', 520, 540, 210]] as [$day, $nov, $feb, $dec]) {
+        dayWithPrices($day, [['ECO', 'Novembre', $nov, 11, 2026], ['ECO', 'Février', $feb, 2, 2027], ['EBM', 'Décembre', $dec, 12, 2026]]);
+    }
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $data = $this->actingAs($viewer)->getJson(seriesUrl('2026-09-28', '2026-09-30'))->assertOk()->json();
+    $colza = collect($data['cereals'])->firstWhere('code', 'ECO');
+    $bySeries = collect($colza['series'])->keyBy('display_label');
+
+    expect($data['dates'])->toBe(['2026-09-28', '2026-09-29', '2026-09-30'])
+        ->and(collect($data['cereals'])->pluck('code')->sort()->values()->all())->toBe(['EBM', 'ECO'])
+        ->and($colza['series'])->toHaveCount(2)
+        // Nov : MATIF − 10 ; Février : MATIF + 5 ; une série = toujours la même ligne.
+        ->and(collect($bySeries['Nov - Dec']['points'])->pluck('price')->map(fn ($p) => (float) $p)->all())->toBe([490.0, 500.0, 510.0])
+        ->and(collect($bySeries['Livraison févr.']['points'])->pluck('price')->map(fn ($p) => (float) $p)->all())->toBe([525.0, 535.0, 545.0])
+        ->and(collect($bySeries['Nov - Dec']['points'])->pluck('matif')->map(fn ($p) => (float) $p)->all())->toBe([500.0, 510.0, 520.0])
+        ->and($bySeries['Nov - Dec']['points'][0])->toMatchArray(['date' => '2026-09-28', 'carried_quote_at' => null])
+        ->and($bySeries['Nov - Dec']['harvest_year'])->toBe(2026);
+});
+
+it('applique la base historique de chaque journée (même MATIF, base modifiée) et ne mélange pas les lignes', function (): void {
+    setHarvestYears();
+    $line = seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Moisson', 17, 'add');
+    $other = seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Sept - Oct', 5);
+    foreach (['2026-09-29', '2026-09-30', '2026-10-01'] as $day) {
+        dayWithPrices($day, [['ECO', 'Novembre', 540, 11, 2026]]); // MATIF identique chaque jour
+    }
+    $snap = fn (CotationManualPrice $l, float $m, string $op) => snapshotOf($l, ['identity_hash' => $l->identity_hash, 'market_identity_hash' => $l->market_identity_hash, 'product_code' => 'ECO', 'product_name' => 'Colza', 'maturity_label' => 'Novembre', 'maturity_month' => 11, 'display_label' => $l->display_label, 'margin' => $m, 'margin_operation' => $op]);
+    auditEntry('2026-06-18 11:00:00', ['before' => [], 'after' => []], 'update_cotation_settings'); // début de la couverture du journal
+    // La base de « Moisson » passe de −17 à +17 le 30/09 à 09:41.
+    auditEntry('2026-09-30 09:41:32', ['manual_prices' => [['before' => $snap($line, 17, 'subtract'), 'after' => $snap($line, 17, 'add')]]]);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $series = collect($this->actingAs($viewer)->getJson(seriesUrl('2026-09-29', '2026-10-01'))->json('cereals.0.series'))->keyBy('display_label');
+
+    expect(collect($series['Moisson']['points'])->pluck('price')->map(fn ($p) => (float) $p)->all())->toBe([523.0, 557.0, 557.0])
+        ->and(collect($series['Sept - Oct']['points'])->pluck('price')->map(fn ($p) => (float) $p)->all())->toBe([535.0, 535.0, 535.0])
+        ->and($series['Moisson']['key'])->not->toBe($series['Sept - Oct']['key']);
+});
+
+it('garde l’identité d’une série quand son libellé change, et reprend le dernier cours des échéances échues', function (): void {
+    setHarvestYears();
+    $line = seriesLine('ECO', 'Colza', 'Août', 8, 2026, 'Moisson', 17, 'add');
+    dayWithPrices('2026-07-30', [['ECO', 'Août', 490, 8, 2026]]);              // dernier cours du contrat
+    foreach (['2026-09-29', '2026-09-30'] as $day) {
+        dayWithPrices($day, [['ECO', 'Novembre', 540, 11, 2026]]);               // relevé sans le contrat échu
+    }
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $series = $this->actingAs($viewer)->getJson(seriesUrl('2026-07-30', '2026-09-30'))->json('cereals.0.series.0');
+    $points = collect($series['points'])->keyBy('date');
+
+    expect($series['key'])->toBe($line->identity_hash)
+        ->and($points->keys()->all())->toBe(['2026-07-30', '2026-09-29', '2026-09-30'])
+        ->and((float) $points['2026-07-30']['price'])->toBe(507.0)
+        ->and($points['2026-07-30']['carried_quote_at'])->toBeNull()                     // vrai cours du jour
+        ->and((float) $points['2026-09-29']['price'])->toBe(507.0)                         // 490 + 17 repris
+        ->and($points['2026-09-29']['carried_quote_at'])->toBe('2026-07-30');
+});
+
+it('ne crée pas de point pour une journée sans cotation exploitable (pas d’interpolation)', function (): void {
+    setHarvestYears();
+    seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Nov', 0);
+    dayWithPrices('2026-09-28', [['ECO', 'Novembre', 500, 11, 2026]]);
+    marketPrice(marketRefresh('2026-09-29 23:59:05'), '2026-09-29 23:59:05', 'ECO', 'Novembre', 999, 2026, 2026, 11); // 23 h 59 seulement : pas de relevé de 15 h
+    dayWithPrices('2026-09-30', [['ECO', 'Novembre', 520, 11, 2026]]);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $data = $this->actingAs($viewer)->getJson(seriesUrl('2026-09-28', '2026-09-30'))->json();
+
+    expect($data['dates'])->toBe(['2026-09-28', '2026-09-30'])
+        ->and(collect($data['cereals'][0]['series'][0]['points'])->pluck('date')->all())->toBe(['2026-09-28', '2026-09-30']);
+});
+
+it('ne charge que la période demandée et gère une période sans résultat', function (): void {
+    setHarvestYears();
+    seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Nov', 0);
+    foreach (['2026-08-01', '2026-09-15', '2026-09-30'] as $day) {
+        dayWithPrices($day, [['ECO', 'Novembre', 500, 11, 2026]]);
+    }
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $one = $this->actingAs($viewer)->getJson(seriesUrl('2026-09-10', '2026-09-20'))->json();
+    expect($one['dates'])->toBe(['2026-09-15'])->and($one['cereals'][0]['series'][0]['points'])->toHaveCount(1);
+
+    $none = $this->actingAs($viewer)->getJson(seriesUrl('2026-05-01', '2026-05-10'))->assertOk()->json();
+    expect($none['dates'])->toBe([])->and($none['cereals'])->toBe([]);
+});
+
+it('couvre les cinq périodes de l’interface : 7 jours, 30 jours, 3 mois, 1 an, plage personnalisée', function (): void {
+    setHarvestYears();
+    seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Nov', 0);
+    auditEntry('2025-11-01 11:00:00', ['before' => [], 'after' => []], 'update_cotation_settings');
+    $days = [];
+    for ($d = CarbonImmutable::parse('2025-12-01'); $d <= CarbonImmutable::parse('2026-09-30'); $d = $d->addDays(3)) {
+        $days[] = $d->toDateString();
+        dayWithPrices($d->toDateString(), [['ECO', 'Novembre', 500, 11, 2026]]);
+    }
+    $viewer = marketUser(['cotations.cereals.view']);
+    $count = fn (string $from, string $to) => count($this->actingAs($viewer)->getJson(seriesUrl($from, $to))->assertOk()->json('dates'));
+    $inRange = fn (string $from, string $to) => count(array_filter($days, fn ($d) => $d >= $from && $d <= $to));
+
+    // Fin = date consultée (30/09/2026) : 7 j = 24/09→30/09 ; 30 j = 01/09→30/09 ; 3 mois = 01/07→30/09 ; 1 an = 01/10/2025→30/09/2026.
+    foreach ([['2026-09-24', '2026-09-30'], ['2026-09-01', '2026-09-30'], ['2026-07-01', '2026-09-30'], ['2025-10-01', '2026-09-30'], ['2026-02-10', '2026-03-10']] as [$from, $to]) {
+        expect($count($from, $to))->toBe($inRange($from, $to));
+    }
+});
+
+it('vérifie les paramètres de période côté serveur', function (): void {
+    $viewer = marketUser(['cotations.cereals.view']);
+    $get = fn (array $q) => $this->actingAs($viewer)->getJson(route('cotations.cereal-history.series', $q));
+
+    $get([])->assertStatus(422)->assertJsonValidationErrors(['from', 'to']);
+    $get(['from' => '2026-13-45', 'to' => '2026-09-30'])->assertStatus(422)->assertJsonValidationErrors('from');
+    $get(['from' => '2026-09-30', 'to' => '2026-09-01'])->assertStatus(422)->assertJsonPath('errors.to.0', 'La date de fin doit être postérieure ou égale à la date de début.');
+    $get(['from' => '2026-01-01', 'to' => '2999-01-01'])->assertStatus(422)->assertJsonPath('errors.to.0', 'La date de fin ne peut pas être dans le futur.');
+    $get(['from' => '2024-01-01', 'to' => '2026-01-01'])->assertStatus(422)->assertJsonPath('errors.to.0', 'La période ne peut pas dépasser un an (366 jours).');
+    $get(['from' => '2025-09-30', 'to' => '2026-09-30'])->assertOk();
+});
+
+it('respecte les permissions de consultation des cotations céréales pour les graphiques', function (): void {
+    $fuelOnly = marketUser(['cotations.fuel.view']);
+    $editor = marketUser(['cotations.cereals.edit']);
+
+    $this->actingAs($fuelOnly)->getJson(seriesUrl('2026-09-01', '2026-09-30'))->assertForbidden();
+    $this->actingAs($editor)->getJson(seriesUrl('2026-09-01', '2026-09-30'))->assertOk();
+});
+
+it('donne les mêmes prix aux graphiques qu’à la consultation d’une journée', function (): void {
+    setHarvestYears();
+    seriesLine('ECO', 'Colza', 'Novembre', 11, 2026, 'Nov', 12, 'add');
+    dayWithPrices('2026-09-30', [['ECO', 'Novembre', 538.75, 11, 2026]]);
+    $viewer = marketUser(['cotations.cereals.view']);
+
+    $point = $this->actingAs($viewer)->getJson(seriesUrl('2026-09-30', '2026-09-30'))->json('cereals.0.series.0.points.0');
+    $row = historyDay($this, $viewer, '2026-09-30')->json('version.market.groups.0.harvests.left.rows.0');
+
+    expect((float) $point['price'])->toBe((float) $row['final_price'])->and((float) $point['matif'])->toBe(538.75);
+});

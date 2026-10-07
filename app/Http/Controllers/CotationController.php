@@ -108,6 +108,7 @@ class CotationController extends Controller
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
                     'fuel_history' => route('cotations.fuel-history'),
                     'cereal_history_dates' => route('cotations.cereal-history.dates'),
+                    'cereal_history_series' => route('cotations.cereal-history.series'),
                     'cereal_history_base' => url('/cotations/cereal-history'),
                     'export_pdf' => route('cotations.export-pdf'),
                     'mail_draft' => route('cotations.mail-draft'),
@@ -347,6 +348,115 @@ class CotationController extends Controller
     }
 
     /**
+     * Évolution des prix finaux par céréale sur une période (graphiques de l'historique).
+     *
+     * Chaque point est la cotation réellement consultable d'une journée : même
+     * reconstitution que la consultation du jour (relevé de 15 h, base et réglages d'alors,
+     * dernier cours connu des échéances échues). Une série = une ligne de cotation
+     * (identité stable de la ligne). Aucune donnée n'est copiée ni interpolée : les journées
+     * sans cotation exploitable n'ont simplement pas de point.
+     */
+    public function cerealHistorySeries(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'from' => ['required', 'date_format:Y-m-d'],
+            'to' => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
+        ], [
+            'from.required' => 'Indiquez une date de début.',
+            'from.date_format' => 'La date de début est invalide.',
+            'to.required' => 'Indiquez une date de fin.',
+            'to.date_format' => 'La date de fin est invalide.',
+            'to.after_or_equal' => 'La date de fin doit être postérieure ou égale à la date de début.',
+        ]);
+
+        $business = (string) config('cotations.compaction.timezone', 'Europe/Paris');
+        $from = \Carbon\CarbonImmutable::parse($validated['from'], $business)->startOfDay();
+        $to = \Carbon\CarbonImmutable::parse($validated['to'], $business)->startOfDay();
+
+        if ($to->greaterThan(\Carbon\CarbonImmutable::now($business)->startOfDay())) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'La date de fin ne peut pas être dans le futur.']);
+        }
+
+        if ($from->diffInDays($to) > 366) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'La période ne peut pas dépasser un an (366 jours).']);
+        }
+
+        $history = app(CotationMarketHistoryService::class);
+        $days = $history->availableDays($from->toDateString(), $to->toDateString());
+        $days = array_filter($days, fn (string $day): bool => $day >= $from->toDateString() && $day <= $to->toDateString(), ARRAY_FILTER_USE_KEY);
+
+        $base = [
+            'from' => $from->toDateString(),
+            'to' => $to->toDateString(),
+            'dates' => array_keys($days),
+            'cereals' => [],
+        ];
+
+        if ($days === []) {
+            return response()->json($base);
+        }
+
+        $rowsByRefresh = $history->marketRowsForRefreshes(array_column($days, 'refresh_id'));
+        $states = app(CotationConfigHistoryService::class)->statesAt(
+            array_map(fn (array $day): \Carbon\CarbonImmutable => $day['at'], $days),
+            $this->currentCerealConfig(),
+        );
+        $contractLast = $history->contractLastQuotes();
+
+        /** @var array<string, array<string, mixed>> $cereals */
+        $cereals = [];
+        $order = [];
+
+        // Du plus récent au plus ancien : libellés et ordre de la journée la plus récente de la plage.
+        foreach (array_reverse($days, true) as $date => $day) {
+            $built = $this->historyGroupsFor($date, $day['at'], $rowsByRefresh[$day['refresh_id']] ?? [], $states[$date], $contractLast);
+
+            foreach ($built['groups'] as $group) {
+                $code = (string) $group['code'];
+                $order[$code] ??= count($order);
+                $cereals[$code] ??= ['code' => $code, 'name' => $group['name'], 'series' => []];
+
+                foreach (['left', 'right'] as $bucket) {
+                    foreach ($group['harvests'][$bucket]['rows'] as $row) {
+                        if (($row['final_price'] ?? null) === null || empty($row['identity_hash'])) {
+                            continue;
+                        }
+
+                        $key = (string) $row['identity_hash'];
+                        $cereals[$code]['series'][$key] ??= [
+                            'key' => $key,
+                            'harvest_year' => (int) $row['harvest_year'],
+                            'maturity_label' => $row['label'],
+                            'display_label' => $row['display_label'],
+                            'points' => [],
+                        ];
+                        $cereals[$code]['series'][$key]['points'][] = [
+                            'date' => $date,
+                            'price' => round((float) $row['final_price'], 2),
+                            'matif' => $row['matif'] !== null ? round((float) $row['matif'], 2) : null,
+                            'carried_quote_at' => isset($row['carried_quote_at']) ? substr((string) $row['carried_quote_at'], 0, 10) : null,
+                        ];
+                    }
+                }
+            }
+        }
+
+        foreach ($cereals as &$cereal) {
+            foreach ($cereal['series'] as &$series) {
+                usort($series['points'], fn (array $a, array $b): int => strcmp($a['date'], $b['date']));
+            }
+            unset($series);
+            $cereal['series'] = array_values($cereal['series']);
+        }
+        unset($cereal);
+
+        uasort($cereals, fn (array $a, array $b): int => $order[$a['code']] <=> $order[$b['code']]);
+        $base['cereals'] = array_values($cereals);
+
+        return response()->json($base);
+    }
+
+    /**
      * Cotations d'une journée telles qu'à la vue d'origine, reconstituées depuis
      * l'historique existant : cours MATIF du relevé de 15 h
      * (CotationMarketHistoryService) + réglages d'alors (marges, libellés,
@@ -369,15 +479,63 @@ class CotationController extends Controller
 
         $state = app(CotationConfigHistoryService::class)->configAt($selection['recorded_at'], $this->currentCerealConfig());
 
+        $built = $this->historyGroupsFor($date, $selection['recorded_at'], $selection['market_rows'], $state, null);
+        $groups = $built['groups'];
+        $left = $built['left'];
+        $right = $built['right'];
+        $carriedLines = $built['carried_lines'];
+        $state = $built['state'];
+
+        $infoUnreliable = in_array('cereal_info_truncated', $state['warnings'], true);
+
+        $warnings = $this->missingQuoteWarnings($groups, $history, $selection['recorded_at']);
+
+        return response()->json(['version' => [
+            'business_date' => $date,
+            'recorded_at' => $selection['recorded_at']->toIso8601String(),
+            'target_time' => $history->target($date)->format('H:i'),
+            'market' => [
+                'groups' => $groups,
+                'harvest_years' => ['left' => $left, 'right' => $right],
+                'cereal_order' => $this->normalizeCerealOrder($state['cereal_order'], $groups),
+                'cereal_labels' => $state['cereal_labels'],
+                'cereal_table_labels' => $state['cereal_table_labels'],
+                'cereal_info_html' => $infoUnreliable ? '' : CerealInfoSanitizer::sanitize($state['cereal_info']),
+                'options' => [],
+                'custom_cereals' => [],
+                'fetched_at' => $selection['recorded_at']->toIso8601String(),
+            ],
+            'transport_grid' => $state['transport_grid'],
+            'warnings' => array_values(array_filter([
+                $infoUnreliable ? "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères)." : null,
+                $carriedLines > 0 ? $carriedLines.' ligne(s) reprennent le dernier cours connu d\'une échéance échue (date indiquée sous le cours) : ce n\'est pas une nouvelle cotation du contrat.' : null,
+                ...$warnings,
+            ])),
+        ]]);
+    }
+
+    /**
+     * Cartes (produit → récoltes → lignes) d'une journée historique : cours du relevé de 15 h
+     * (+ dernier cours connu des échéances échues) et réglages d'alors, calculés par la même
+     * méthode que l'affichage courant. Partagé par la consultation d'une journée et par les graphiques.
+     *
+     * @param  array<string, array<string, mixed>>  $marketRows  cours du relevé retenu
+     * @param  array<string, mixed>  $state  réglages d'alors (CotationConfigHistoryService)
+     * @param  array<string, array{row:array<string,mixed>, last_any:string}>|null  $contractLast  dernier cours par contrat (null = lecture ici)
+     * @return array{groups: array<int, array<string, mixed>>, left:int, right:int, carried_lines:int, state: array<string, mixed>}
+     */
+    private function historyGroupsFor(string $date, \Carbon\CarbonImmutable $recordedAt, array $marketRows, array $state, ?array $contractLast): array
+    {
+        $history = app(CotationMarketHistoryService::class);
+
         // Lignes créées depuis la date demandée et jamais passées par le journal : absentes à l'époque.
         $state['manual_lines'] = array_filter(
             $state['manual_lines'],
-            fn (array $line): bool => ! isset($line['_created_at']) || $line['_created_at'] <= $selection['recorded_at']->getTimestamp(),
+            fn (array $line): bool => ! isset($line['_created_at']) || $line['_created_at'] <= $recordedAt->getTimestamp(),
         );
 
         $left = (int) $state['harvest_years']['left'];
         $right = (int) $state['harvest_years']['right'];
-        $marketRows = $selection['market_rows'];
 
         // Échéances échues conservées : dernier cours connu du MÊME contrat, au plus tard à 15 h ce jour-là
         // (règle de l'affichage actuel, bornée à la date consultée) ; un contrat actif sans cours n'est pas comblé.
@@ -390,7 +548,9 @@ class CotationController extends Controller
             ->unique()
             ->values()
             ->all();
-        $carried = $history->carriedQuotes($date, $selection['recorded_at'], $wantedHashes);
+        $carried = $wantedHashes === []
+            ? []
+            : $history->carriedFrom($contractLast ?? $history->contractLastQuotes($wantedHashes), $date, $wantedHashes);
         $marketRows += $carried;
         $soldProductSorts = collect($marketRows)->pluck('product_sort', 'product_code')->all();
         $customSorts = collect($state['custom_cereals'])->pluck('sort_order', 'code')->all();
@@ -432,32 +592,7 @@ class CotationController extends Controller
         $groups = $this->applyCerealOrder($groups, $state['cereal_order']);
         $groups = $this->applyCerealLabels($groups, $state['cereal_labels']);
 
-        $infoUnreliable = in_array('cereal_info_truncated', $state['warnings'], true);
-
-        $warnings = $this->missingQuoteWarnings($groups, $history, $selection['recorded_at']);
-
-        return response()->json(['version' => [
-            'business_date' => $date,
-            'recorded_at' => $selection['recorded_at']->toIso8601String(),
-            'target_time' => $history->target($date)->format('H:i'),
-            'market' => [
-                'groups' => $groups,
-                'harvest_years' => ['left' => $left, 'right' => $right],
-                'cereal_order' => $this->normalizeCerealOrder($state['cereal_order'], $groups),
-                'cereal_labels' => $state['cereal_labels'],
-                'cereal_table_labels' => $state['cereal_table_labels'],
-                'cereal_info_html' => $infoUnreliable ? '' : CerealInfoSanitizer::sanitize($state['cereal_info']),
-                'options' => [],
-                'custom_cereals' => [],
-                'fetched_at' => $selection['recorded_at']->toIso8601String(),
-            ],
-            'transport_grid' => $state['transport_grid'],
-            'warnings' => array_values(array_filter([
-                $infoUnreliable ? "Le texte d'information de cette date n'a pas pu être reconstitué (journal tronqué à 4 000 caractères)." : null,
-                $carriedLines > 0 ? $carriedLines.' ligne(s) reprennent le dernier cours connu d\'une échéance échue (date indiquée sous le cours) : ce n\'est pas une nouvelle cotation du contrat.' : null,
-                ...$warnings,
-            ])),
-        ]]);
+        return ['groups' => $groups, 'left' => $left, 'right' => $right, 'carried_lines' => $carriedLines, 'state' => $state];
     }
 
     /**

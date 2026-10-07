@@ -344,6 +344,9 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/cotations/cereal-history/dates', [CotationController::class, 'cerealHistoryDates'])
         ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
         ->name('cotations.cereal-history.dates');
+    Route::get('/cotations/cereal-history/series', [CotationController::class, 'cerealHistorySeries'])
+        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
+        ->name('cotations.cereal-history.series');
     Route::get('/cotations/cereal-history/{date}', [CotationController::class, 'cerealHistoryShow'])
         ->where('date', '\d{4}-\d{2}-\d{2}')
         ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')

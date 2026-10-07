@@ -56,6 +56,57 @@ class CotationConfigHistoryService
         return $state;
     }
 
+    /**
+     * Réglages à plusieurs instants en UNE lecture du journal : on remonte le temps
+     * du plus récent au plus ancien en défaisant les modifications au fur et à mesure.
+     *
+     * @param  array<string, CarbonImmutable>  $instants  clé (ex. date) => instant
+     * @param  array<string, mixed>  $current  cf. configAt()
+     * @return array<string, array<string, mixed>> clé => état
+     */
+    public function statesAt(array $instants, array $current): array
+    {
+        if ($instants === []) {
+            return [];
+        }
+
+        $storage = (string) config('app.timezone');
+        $format = static fn (CarbonImmutable $at): string => $at->setTimezone($storage)->format('Y-m-d H:i:s');
+        uasort($instants, fn (CarbonImmutable $a, CarbonImmutable $b): int => $b <=> $a);
+        $earliest = $format(end($instants));
+
+        $logs = Schema::hasTable('audit_logs')
+            ? DB::table('audit_logs')
+                ->where('module', 'cotations')
+                ->whereIn('action', self::ACTIONS)
+                ->where('created_at', '>', $earliest)
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->get(['created_at', 'payload'])
+            : collect();
+
+        $state = $current;
+        $state['warnings'] = [];
+        $index = 0;
+        $result = [];
+
+        foreach ($instants as $key => $at) {
+            $limit = $format($at);
+
+            while ($index < $logs->count() && (string) $logs[$index]->created_at > $limit) {
+                $payload = is_string($logs[$index]->payload) ? json_decode($logs[$index]->payload, true) : null;
+                if (is_array($payload)) {
+                    $this->undo($state, $payload);
+                }
+                $index++;
+            }
+
+            $result[$key] = $state;
+        }
+
+        return $result;
+    }
+
     /** Premier enregistrement d'audit des cotations (début de la couverture), ou null. */
     public function firstAuditAt(): ?CarbonImmutable
     {
