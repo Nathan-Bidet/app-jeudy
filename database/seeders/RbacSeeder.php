@@ -71,6 +71,7 @@ class RbacSeeder extends Seeder
             'cotations.manage',
             'cotations.cereals.view',
             'cotations.cereals.edit',
+            'cotations.cereals.history.view',
             'cotations.fuel.view',
             'cotations.fuel.edit',
             'cotations.fuel.history.view',

@@ -67,7 +67,7 @@
                             <td class="label">{{ \App\Support\Cotations\CotationPdfFormatter::text($table['labels']['base'] ?? 'Base') }}</td>
                             @foreach ($chunk as $cerealGroup)
                                 @foreach ($cerealGroup['columns'] as $column)
-                                    <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['margin'] }}</td>
+                                    <td class="{{ $loop->first ? 'group-start' : '' }}">{{ $column['base'] }}</td>
                                 @endforeach
                             @endforeach
                         </tr>

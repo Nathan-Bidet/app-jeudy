@@ -1,6 +1,9 @@
 import CerealHistoryBar from '@/Components/Cotations/CerealHistoryBar';
 import CerealHistoryCharts from '@/Components/Cotations/CerealHistoryCharts';
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
+import DangerButton from '@/Components/DangerButton';
+import Modal from '@/Components/Modal';
+import SecondaryButton from '@/Components/SecondaryButton';
 import PdfExportButton from '@/Components/Cotations/PdfExportButton';
 import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
 import AppLayout from '@/Layouts/AppLayout';
@@ -9,6 +12,8 @@ import { Head, useForm } from '@inertiajs/react';
 import {
     ChevronLeft,
     ChevronRight,
+    Eye,
+    EyeOff,
     Fuel,
     GripVertical,
     History,
@@ -23,7 +28,7 @@ import {
     Truck,
     X,
 } from 'lucide-react';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 const BASE_CEREALS = [
     { code: 'ECO', name: 'Colza' },
@@ -39,6 +44,8 @@ const DEFAULT_CEREAL_TABLE_LABELS = {
     final_price: 'Prix final',
 };
 
+// Durée d'affichage des bannières de confirmation (succès / information).
+const NOTICE_DURATION_MS = 10000;
 const COTATION_TABLE_CLASS = 'w-full table-fixed text-[12px] leading-normal sm:text-sm';
 const COTATION_HEADER_ROW_CLASS = 'text-xs font-black uppercase leading-4 tracking-[0.08em] text-[var(--app-muted)]';
 const COTATION_HEADER_CELL_CLASS = 'px-1.5 py-2 sm:px-2.5';
@@ -87,6 +94,12 @@ function customMaturityInputValue(value) {
     const source = String(value || '').trim();
 
     return source.toLowerCase() === CUSTOM_MATURITY_SENTINEL.toLowerCase() ? '' : source;
+}
+
+function xsrfToken() {
+    const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+
+    return match ? decodeURIComponent(match[1]) : '';
 }
 
 function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3', defaultOpen = false, compactMobile = false }) {
@@ -221,27 +234,82 @@ function formatRoundedPrice(value) {
     }).format(Math.round(number))} €`;
 }
 
-function normalizeMarginOperation(operation) {
+function normalizeBaseOperation(operation) {
     return operation === 'add' ? 'add' : 'subtract';
 }
 
-function marginSign(operation) {
-    return normalizeMarginOperation(operation) === 'add' ? '+' : '-';
+function baseSign(operation) {
+    return normalizeBaseOperation(operation) === 'add' ? '+' : '-';
 }
 
-// Mirrors CotationManualPrice::applyMargin() côté serveur : la base reste
+// Mirrors CotationManualPrice::applyBase() côté serveur : la base reste
 // positive, le signe vit uniquement dans l'opération (MATIF − base / MATIF + base).
-function applyMargin(matif, margin, operation) {
-    const base = Math.abs(parseDecimal(margin) ?? 0);
+function applyBase(matif, baseValue, operation) {
+    const base = Math.abs(parseDecimal(baseValue) ?? 0);
 
-    return normalizeMarginOperation(operation) === 'add' ? matif + base : matif - base;
+    return normalizeBaseOperation(operation) === 'add' ? matif + base : matif - base;
 }
 
-function formatMargin(value, operation) {
+// Prix de vente : positif par défaut (la base, elle, est soustraite par défaut).
+function normalizeSaleOperation(operation) {
+    return operation === 'subtract' ? 'subtract' : 'add';
+}
+
+function signedAmount(value, operation, positiveOperation) {
+    const amount = Math.abs(parseDecimal(value) ?? 0);
+
+    return operation === positiveOperation ? amount : -amount;
+}
+
+// Mirrors CotationManualPrice::saleMargin() côté serveur :
+// marge = prix de vente signé − base signée (arrondi pour éviter les dérives flottantes).
+// Indicateur propre au mode modification : ne touche jamais au prix final.
+function computeSaleMargin(salePrice, saleOperation, base, baseOperation) {
+    const sale = signedAmount(salePrice, normalizeSaleOperation(saleOperation), 'add');
+    const baseSigned = signedAmount(base, normalizeBaseOperation(baseOperation), 'add');
+
+    return Math.round((sale - baseSigned) * 10000) / 10000;
+}
+
+// > 30 € vert, de 0 à 30 € inclus jaune, < 0 rouge.
+function saleMarginTone(margin) {
+    if (margin > 30) return 'good';
+    if (margin >= 0) return 'warn';
+
+    return 'bad';
+}
+
+const SALE_MARGIN_TONE_CLASS = {
+    good: 'bg-emerald-500/20 text-emerald-600',
+    warn: 'bg-amber-500/20 text-amber-600',
+    bad: 'bg-red-500/20 text-red-600',
+};
+
+function formatSaleMargin(margin) {
+    return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(margin)} €`;
+}
+
+function formatSignedDecimal(value, operation) {
     const number = parseDecimal(value);
     if (number === null) return '—';
 
-    return `${marginSign(operation)}${new Intl.NumberFormat('fr-FR', {
+    return `${operation === 'add' ? '+' : '-'}${new Intl.NumberFormat('fr-FR', {
+        maximumFractionDigits: 2,
+    }).format(Math.abs(number))} €`;
+}
+
+function normalizeDecimalInput(value) {
+    const cleaned = String(value ?? '').replace(',', '.').replace(/[^\d.]/g, '');
+    const [integer, ...decimals] = cleaned.split('.');
+
+    return decimals.length ? `${integer}.${decimals.join('')}` : integer;
+}
+
+function formatBase(value, operation) {
+    const number = parseDecimal(value);
+    if (number === null) return '—';
+
+    return `${baseSign(operation)}${new Intl.NumberFormat('fr-FR', {
         maximumFractionDigits: 0,
     }).format(Math.abs(number))} €`;
 }
@@ -254,7 +322,7 @@ function parseDecimal(value) {
     return Number.isFinite(number) ? number : null;
 }
 
-function normalizeMarginInput(value) {
+function normalizeBaseInput(value) {
     const digits = String(value ?? '').replace(/[^\d]/g, '');
     if (digits === '') return '';
 
@@ -319,7 +387,7 @@ function resolveFinalPriceFromRows(rowsByKey, referenceKey, stack = [], resolved
         return null;
     }
 
-    const finalPrice = applyMargin(matif, row.margin, row.margin_operation);
+    const finalPrice = applyBase(matif, row.base, row.base_operation);
     resolved.set(referenceKey, finalPrice);
 
     return finalPrice;
@@ -474,16 +542,26 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
         || row.maturity_label
         || row.label
         || '';
+    // Si la ligne référencée n'est plus dans les cartes affichées (céréale masquée ou supprimée),
+    // le serveur a déjà résolu son prix : on reprend ce MATIF plutôt que de le perdre.
     const matifValue = isMatifLine
         ? (selectedOption?.matif ?? draft.matif ?? row.matif ?? '')
-        : (selectedFinalPriceReference?.final_price ?? draft.manual_matif ?? row.manual_matif ?? '');
-    const rawMarginValue = draft.margin ?? row.margin ?? '';
-    const marginValue = rawMarginValue === '' || rawMarginValue === null || rawMarginValue === undefined
+        : (selectedFinalPriceReference?.final_price
+            ?? (finalPriceReferenceKey ? row.matif : null)
+            ?? draft.manual_matif ?? row.manual_matif ?? '');
+    const rawBaseValue = draft.base ?? row.base ?? '';
+    const baseValue = rawBaseValue === '' || rawBaseValue === null || rawBaseValue === undefined
         ? ''
-        : String(Math.abs(parseDecimal(rawMarginValue) ?? 0));
+        : String(Math.abs(parseDecimal(rawBaseValue) ?? 0));
     const matifNumber = parseDecimal(matifValue);
-    const marginOperation = normalizeMarginOperation(draft.margin_operation ?? row.margin_operation);
-    const finalPrice = matifNumber !== null ? applyMargin(matifNumber, marginValue, marginOperation) : null;
+    const baseOperation = normalizeBaseOperation(draft.base_operation ?? row.base_operation);
+    const finalPrice = matifNumber !== null ? applyBase(matifNumber, baseValue, baseOperation) : null;
+    const rawSaleValue = draft.sale_price ?? row.sale_price ?? '';
+    const saleValue = rawSaleValue === '' || rawSaleValue === null || rawSaleValue === undefined
+        ? ''
+        : String(Math.abs(parseDecimal(rawSaleValue) ?? 0));
+    const saleOperation = normalizeSaleOperation(draft.sale_price_operation ?? row.sale_price_operation);
+    const saleMargin = computeSaleMargin(saleValue, saleOperation, baseValue, baseOperation);
 
     return (
         <tr className="border-t border-[var(--app-border)]">
@@ -567,6 +645,34 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                     </div>
                 )}
             </td>
+            {canManage ? (
+                <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
+                    <div className="grid grid-cols-[auto_minmax(4rem,1fr)] items-center gap-0.5">
+                        <button
+                            type="button"
+                            onClick={() => setManualPrice(row, {
+                                sale_price_operation: saleOperation === 'add' ? 'subtract' : 'add',
+                            })}
+                            aria-label={saleOperation === 'add'
+                                ? 'Prix de vente positif : passer en négatif'
+                                : 'Prix de vente négatif : passer en positif'}
+                            title={saleOperation === 'add' ? 'Prix de vente positif' : 'Prix de vente négatif'}
+                            className={`${COTATION_VALUE_CLASS} inline-flex h-7 w-5 items-center justify-center rounded-md text-[var(--app-muted)] hover:bg-[var(--app-surface)] hover:text-[var(--app-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary,currentColor)]`}
+                        >
+                            {saleOperation === 'add' ? '+' : '-'}
+                        </button>
+                        <input
+                            type="text"
+                            inputMode="decimal"
+                            value={saleValue}
+                            placeholder="0"
+                            onChange={(event) => setManualPrice(row, 'sale_price', normalizeDecimalInput(event.target.value))}
+                            aria-label="Prix de vente"
+                            className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1.5 text-center ${COTATION_VALUE_CLASS}`}
+                        />
+                    </div>
+                </td>
+            ) : null}
             <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
                 {canManage && !isMatifLine ? (
                     <div className="grid gap-1">
@@ -623,30 +729,41 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                         <button
                             type="button"
                             onClick={() => setManualPrice(row, {
-                                margin_operation: marginOperation === 'add' ? 'subtract' : 'add',
+                                base_operation: baseOperation === 'add' ? 'subtract' : 'add',
                             })}
-                            aria-label={marginOperation === 'add'
+                            aria-label={baseOperation === 'add'
                                 ? 'Base ajoutée au MATIF : passer en soustraction'
                                 : 'Base soustraite du MATIF : passer en addition'}
-                            title={marginOperation === 'add' ? 'La base est ajoutée au MATIF' : 'La base est soustraite du MATIF'}
+                            title={baseOperation === 'add' ? 'La base est ajoutée au MATIF' : 'La base est soustraite du MATIF'}
                             className={`${COTATION_VALUE_CLASS} inline-flex h-7 w-5 items-center justify-center rounded-md text-[var(--app-muted)] hover:bg-[var(--app-surface)] hover:text-[var(--app-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary,currentColor)]`}
                         >
-                            {marginSign(marginOperation)}
+                            {baseSign(baseOperation)}
                         </button>
                         <input
                             type="number"
                             step="1"
                             min="0"
                             inputMode="numeric"
-                            value={marginValue}
-                            onChange={(event) => setManualPrice(row, 'margin', normalizeMarginInput(event.target.value))}
+                            value={baseValue}
+                            onChange={(event) => setManualPrice(row, 'base', normalizeBaseInput(event.target.value))}
                             className={`w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-1 py-1.5 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none ${COTATION_VALUE_CLASS}`}
                         />
                     </div>
                 ) : (
-                    <span className={COTATION_VALUE_CLASS}>{formatMargin(marginValue, marginOperation)}</span>
+                    <span className={COTATION_VALUE_CLASS}>{formatBase(baseValue, baseOperation)}</span>
                 )}
             </td>
+            {canManage ? (
+                <td className={`${COTATION_BODY_CELL_CLASS} text-center`}>
+                    <span
+                        data-testid="sale-margin"
+                        data-tone={saleMarginTone(saleMargin)}
+                        className={`inline-block min-w-[3.5rem] rounded-md px-2 py-1 font-black ${COTATION_VALUE_CLASS} ${SALE_MARGIN_TONE_CLASS[saleMarginTone(saleMargin)]}`}
+                    >
+                        {formatSaleMargin(saleMargin)}
+                    </span>
+                </td>
+            ) : null}
             <td className={`${COTATION_BODY_CELL_CLASS} text-right`}>
                 <span className={COTATION_FINAL_VALUE_CLASS}>{formatRoundedPrice(finalPrice)}</span>
             </td>
@@ -697,15 +814,29 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                 {title}
             </div>
             {displayedRows.length ? (
-                <div className="w-full max-w-full overflow-hidden">
-                    <table className={COTATION_TABLE_CLASS}>
+                <div className={`w-full max-w-full ${canManage ? 'overflow-x-auto overscroll-x-contain' : 'overflow-hidden'}`}>
+                    <table className={`${COTATION_TABLE_CLASS} ${canManage ? 'min-w-[46rem]' : ''}`}>
                         <colgroup>
-                            <col className={canManage ? 'w-[20%]' : 'w-[24%]'} />
-                            <col className={canManage ? 'w-[20%]' : 'w-[22%]'} />
-                            <col className={canManage ? 'w-[18%]' : 'w-[20%]'} />
-                            <col className={canManage ? 'w-[22%]' : 'w-[16%]'} />
-                            <col className={canManage ? 'w-[14%]' : 'w-[18%]'} />
-                            {canManage ? <col className="w-[6%]" /> : null}
+                            {canManage ? (
+                                <>
+                                    <col className="w-[14%]" />
+                                    <col className="w-[15%]" />
+                                    <col className="w-[14%]" />
+                                    <col className="w-[13%]" />
+                                    <col className="w-[14%]" />
+                                    <col className="w-[10%]" />
+                                    <col className="w-[14%]" />
+                                    <col className="w-[6%]" />
+                                </>
+                            ) : (
+                                <>
+                                    <col className="w-[24%]" />
+                                    <col className="w-[22%]" />
+                                    <col className="w-[20%]" />
+                                    <col className="w-[16%]" />
+                                    <col className="w-[18%]" />
+                                </>
+                            )}
                         </colgroup>
                         <thead>
                             <tr className={COTATION_HEADER_ROW_CLASS}>
@@ -715,12 +846,18 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
                                 <th className={`${COTATION_HEADER_CELL_CLASS} text-left`}>
                                     <HeaderLabel value={tableLabels.maturity} fallback={DEFAULT_CEREAL_TABLE_LABELS.maturity} canManage={canManage} onChange={(value) => setTableLabel?.('maturity', value)} />
                                 </th>
+                                {canManage ? (
+                                    <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>Prix de vente</th>
+                                ) : null}
                                 <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>
                                     <HeaderLabel value={tableLabels.matif} fallback={DEFAULT_CEREAL_TABLE_LABELS.matif} align="center" canManage={canManage} onChange={(value) => setTableLabel?.('matif', value)} />
                                 </th>
                                 <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>
                                     <HeaderLabel value={tableLabels.base} fallback={DEFAULT_CEREAL_TABLE_LABELS.base} align="center" canManage={canManage} onChange={(value) => setTableLabel?.('base', value)} />
                                 </th>
+                                {canManage ? (
+                                    <th className={`${COTATION_HEADER_CELL_CLASS} text-center`}>Marge</th>
+                                ) : null}
                                 <th className={`${COTATION_HEADER_CELL_CLASS} text-right`}>
                                     <HeaderLabel value={tableLabels.final_price} fallback={DEFAULT_CEREAL_TABLE_LABELS.final_price} align="right" canManage={canManage} onChange={(value) => setTableLabel?.('final_price', value)} />
                                 </th>
@@ -761,7 +898,7 @@ function HarvestBlock({ group, harvest, canManage, form, setManualPrice, addManu
     );
 }
 
-function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, setCerealLabel, setCerealTableLabel, cerealLabels = {}, tableLabels = DEFAULT_CEREAL_TABLE_LABELS, finalPriceOptions = [], dragHandle = null, defaultOpen = false }) {
+function CerealCard({ group, canManage, form, setManualPrice, addManualRow, deleteManualRow, optionGroup, customCereal = null, setCustomCereal, setCerealLabel, setCerealTableLabel, cerealLabels = {}, tableLabels = DEFAULT_CEREAL_TABLE_LABELS, finalPriceOptions = [], dragHandle = null, defaultOpen = false, isHidden = false, visibilityPending = false, onToggleVisibility = null, onDelete = null }) {
     const leftHarvest = group?.harvests?.left || {};
     const rightHarvest = group?.harvests?.right || {};
     const leftOptions = optionGroup?.harvests?.left?.rows || [];
@@ -800,8 +937,44 @@ function CerealCard({ group, canManage, form, setManualPrice, addManualRow, dele
             ))}
         </select>
     ) : null;
-    const headerActions = dragHandle || actions ? (
+    const visibilityToggle = canManage && onToggleVisibility ? (
+        <>
+            {isHidden ? (
+                <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--app-surface-soft)] px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-[var(--app-muted)]">
+                    <EyeOff className="h-3.5 w-3.5" strokeWidth={2.3} aria-hidden="true" />
+                    Masquée
+                </span>
+            ) : null}
+            <button
+                type="button"
+                onClick={onToggleVisibility}
+                disabled={visibilityPending}
+                aria-pressed={!isHidden}
+                aria-label={`${isHidden ? 'Afficher' : 'Masquer'} ${group.name || 'cette céréale'}`}
+                title={isHidden ? 'Afficher cette céréale' : 'Masquer cette céréale'}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)] hover:text-[var(--app-text)] disabled:cursor-wait disabled:opacity-60"
+            >
+                {isHidden
+                    ? <EyeOff className="h-5 w-5" strokeWidth={2.3} />
+                    : <Eye className="h-5 w-5" strokeWidth={2.3} />}
+            </button>
+        </>
+    ) : null;
+    const deleteButton = canManage && onDelete ? (
+        <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Supprimer ${group.name || 'cette céréale'}`}
+            title="Supprimer cette céréale"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-muted)] hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+        >
+            <Trash2 className="h-5 w-5" strokeWidth={2.3} />
+        </button>
+    ) : null;
+    const headerActions = dragHandle || actions || visibilityToggle || deleteButton ? (
         <div className="flex flex-wrap items-center gap-2">
+            {visibilityToggle}
+            {deleteButton}
             {dragHandle}
             {actions}
         </div>
@@ -809,7 +982,7 @@ function CerealCard({ group, canManage, form, setManualPrice, addManualRow, dele
 
     return (
         <CollapsibleSection title={group.name || 'Céréale'} titleEditor={titleEditor} actions={headerActions} titleClassName="text-xl" bodyClassName="mt-3" defaultOpen={defaultOpen} compactMobile>
-            <div className="grid w-full max-w-full min-w-0 grid-cols-1 gap-2 sm:gap-3 xl:grid-cols-2">
+            <div className={`grid w-full max-w-full min-w-0 grid-cols-1 gap-2 sm:gap-3 ${canManage ? 'min-[1700px]:grid-cols-2' : 'xl:grid-cols-2'}`}>
                 <HarvestBlock group={group} harvest={leftHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={leftOptions} finalPriceOptions={finalPriceOptions} tableLabels={tableLabels} setTableLabel={(key, value) => setCerealTableLabel(group.code, key, value)} />
                 <HarvestBlock group={group} harvest={rightHarvest} canManage={canManage} form={form} setManualPrice={setManualPrice} addManualRow={addManualRow} deleteManualRow={deleteManualRow} options={rightOptions} finalPriceOptions={finalPriceOptions} tableLabels={tableLabels} setTableLabel={(key, value) => setCerealTableLabel(group.code, key, value)} />
             </div>
@@ -1795,8 +1968,10 @@ function flattenMarketRows(groups = []) {
             matif: row.matif ?? '',
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
             final_price_reference_key: row.final_price_reference_key ?? '',
-            margin: row.margin ?? '',
-            margin_operation: normalizeMarginOperation(row.margin_operation),
+            base: row.base ?? '',
+            base_operation: normalizeBaseOperation(row.base_operation),
+            sale_price: row.sale_price ?? '',
+            sale_price_operation: normalizeSaleOperation(row.sale_price_operation),
             sort_order: row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
         }))
@@ -1866,7 +2041,23 @@ export default function CotationsIndex({
     const [error, setError] = useState('');
     const [mailOpen, setMailOpen] = useState(false);
     const [mailNotice, setMailNotice] = useState(null);
+    const [visibilityPending, setVisibilityPending] = useState(null);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deletePending, setDeletePending] = useState(false);
+    const [deleteError, setDeleteError] = useState('');
+
+    // Bannière de confirmation : succès et informations disparaissent seules après 10 s ; un nouveau
+    // message relance le délai (le timer précédent est annulé). Les erreurs restent affichées.
+    useEffect(() => {
+        if (!mailNotice || mailNotice.type === 'error') return undefined;
+
+        const timeout = window.setTimeout(() => setMailNotice(null), NOTICE_DURATION_MS);
+
+        return () => window.clearTimeout(timeout);
+    }, [mailNotice]);
     const [isEditing, setIsEditing] = useState(false);
+    // Mode réellement demandé au serveur ; modifié uniquement par startEditing / leaveEditing.
+    const editingRef = useRef(false);
     const [isFuelEditing, setIsFuelEditing] = useState(false);
     const [draggedCerealCode, setDraggedCerealCode] = useState(null);
     const [lastAddedCerealCode, setLastAddedCerealCode] = useState(null);
@@ -1874,6 +2065,7 @@ export default function CotationsIndex({
     const canViewFuel = Boolean(permissions?.can_view_fuel);
     const canManage = Boolean(permissions?.can_manage);
     const canManageFuel = Boolean(permissions?.can_manage_fuel);
+    const canViewCerealHistory = Boolean(permissions?.can_view_cereal_history);
     const canViewFuelHistory = Boolean(permissions?.can_view_fuel_history);
     const [targetCerealCode] = useState(() => {
         if (typeof window === 'undefined') return '';
@@ -1968,14 +2160,16 @@ export default function CotationsIndex({
         return () => window.clearTimeout(timeout);
     }, [targetSection]);
 
-    const fetchMarketData = async ({ initial = false } = {}) => {
-        if (!canViewCereals || !routes.market_data) return;
+    // `edit` demande au serveur la vue d'édition (céréales masquées incluses) ; par défaut, le mode courant.
+    // Renvoie les données reçues (ou null en cas d'échec).
+    const fetchMarketData = async ({ initial = false, edit = editingRef.current } = {}) => {
+        if (!canViewCereals || !routes.market_data) return null;
         setError('');
         if (initial) setLoading(true);
         else setRefreshing(true);
 
         try {
-            const response = await fetch(routes.market_data, {
+            const response = await fetch(edit && canManage ? `${routes.market_data}?edit=1` : routes.market_data, {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
             });
@@ -1985,9 +2179,15 @@ export default function CotationsIndex({
                 throw new Error(data?.message || 'Cours indisponibles.');
             }
 
+            // Une réponse arrivée après un changement de mode ne doit pas réintroduire l'autre vue.
+            if (edit !== editingRef.current) return null;
             setMarketData(data);
+
+            return data;
         } catch (exception) {
             setError(exception?.message || 'Cours indisponibles.');
+
+            return null;
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -2000,6 +2200,116 @@ export default function CotationsIndex({
 
         return () => window.clearInterval(interval);
     }, [routes.market_data, canViewCereals]);
+
+    const hiddenCerealCodes = marketData?.hidden_cereal_codes || [];
+
+    // Enregistrement immédiat (état explicite, idempotent) ; en cas d'échec l'état précédent est rétabli.
+    const toggleCerealVisibility = async (group) => {
+        const code = group?.code;
+        if (!code || !routes.cereal_visibility_base || visibilityPending) return;
+
+        const wasHidden = hiddenCerealCodes.includes(code);
+        const applyHidden = (hidden) => setMarketData((current) => {
+            const others = (current?.hidden_cereal_codes || []).filter((item) => item !== code);
+
+            return { ...current, hidden_cereal_codes: hidden ? [...others, code] : others };
+        });
+
+        setVisibilityPending(code);
+        setMailNotice(null);
+        applyHidden(!wasHidden);
+
+        try {
+            const response = await fetch(`${routes.cereal_visibility_base}/${encodeURIComponent(code)}/visibility`, {
+                method: 'PUT',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-XSRF-TOKEN': xsrfToken(),
+                },
+                body: JSON.stringify({ visible: wasHidden }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) {
+                throw new Error(data?.message || 'La visibilité n’a pas pu être enregistrée.');
+            }
+
+            setMarketData((current) => ({ ...current, hidden_cereal_codes: data.hidden_cereal_codes || [] }));
+            setMailNotice({
+                type: 'success',
+                text: wasHidden ? 'Céréale rendue visible dans les cotations.' : 'Céréale masquée des cotations.',
+            });
+        } catch (exception) {
+            applyHidden(wasHidden);
+            setMailNotice({ type: 'error', text: exception?.message || 'La visibilité n’a pas pu être enregistrée.' });
+        } finally {
+            setVisibilityPending(null);
+        }
+    };
+
+    // Retire une céréale de la vue courante et du brouillon d'édition (les données restent en base).
+    const removeCerealLocally = (code) => {
+        setMarketData((current) => ({
+            ...current,
+            groups: (current?.groups || []).filter((group) => group.code !== code),
+            custom_cereals: (current?.custom_cereals || []).filter((cereal) => cereal.code !== code),
+            hidden_cereal_codes: (current?.hidden_cereal_codes || []).filter((item) => item !== code),
+            cereal_order: (current?.cereal_order || []).filter((item) => item !== code),
+        }));
+        form.setData({
+            ...form.data,
+            custom_cereals: (form.data.custom_cereals || []).filter((cereal) => cereal.code !== code),
+            manual_prices: (form.data.manual_prices || []).filter((row) => row.product_code !== code),
+            cereal_order: (form.data.cereal_order || []).filter((item) => item !== code),
+        });
+    };
+
+    const askDeleteCereal = (group) => {
+        setDeleteError('');
+        setDeleteTarget({ code: group.code, name: group.name || 'cette céréale' });
+    };
+
+    const closeDeleteDialog = () => {
+        if (deletePending) return;
+        setDeleteTarget(null);
+        setDeleteError('');
+    };
+
+    // Suppression logique côté serveur ; en cas d'échec la céréale reste affichée et on peut réessayer.
+    const confirmDeleteCereal = async () => {
+        if (!deleteTarget || deletePending) return;
+
+        const { code } = deleteTarget;
+        const unsaved = (form.data.custom_cereals || []).some((cereal) => cereal.code === code && !cereal.id);
+        setDeletePending(true);
+        setDeleteError('');
+
+        try {
+            if (!unsaved) {
+                const response = await fetch(`${routes.cereal_visibility_base}/${encodeURIComponent(code)}`, {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                    headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrfToken() },
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data?.ok) {
+                    throw new Error(data?.message || 'La céréale n’a pas pu être supprimée.');
+                }
+            }
+
+            removeCerealLocally(code);
+            setDeleteTarget(null);
+            setMailNotice({
+                type: 'success',
+                text: unsaved ? 'Céréale supprimée.' : 'Céréale supprimée. Son historique a été conservé.',
+            });
+        } catch (exception) {
+            setDeleteError(exception?.message || 'La céréale n’a pas pu être supprimée.');
+        } finally {
+            setDeletePending(false);
+        }
+    };
 
     const setFormSetting = (id, field, value) => {
         form.setData('settings', form.data.settings.map((row) => (
@@ -2030,8 +2340,10 @@ export default function CotationsIndex({
             matif: row.matif ?? '',
             manual_matif: row.manual_matif ?? (lineTypeFor(row) !== 'matif' && !row.has_euronext ? row.matif ?? '' : ''),
             final_price_reference_key: row.final_price_reference_key ?? '',
-            margin: row.margin ?? '',
-            margin_operation: normalizeMarginOperation(row.margin_operation),
+            base: row.base ?? '',
+            base_operation: normalizeBaseOperation(row.base_operation),
+            sale_price: row.sale_price ?? '',
+            sale_price_operation: normalizeSaleOperation(row.sale_price_operation),
             sort_order: row.sort_order ?? row.sort ?? 0,
             has_euronext: Boolean(row.has_euronext),
             is_new: Boolean(row.is_new),
@@ -2072,8 +2384,10 @@ export default function CotationsIndex({
                 matif: '',
                 manual_matif: '',
                 final_price_reference_key: '',
-                margin: '',
-                margin_operation: 'subtract',
+                base: '',
+                base_operation: 'subtract',
+                sale_price: '0',
+                sale_price_operation: 'add',
                 sort_order: form.data.manual_prices?.length || 0,
                 has_euronext: false,
                 is_new: true,
@@ -2167,23 +2481,48 @@ export default function CotationsIndex({
         });
     };
 
-    const startEditing = () => {
-        resetDrafts();
+    // Entrée en édition : on charge d'abord la vue d'édition (toutes les céréales, masquées comprises).
+    const startEditing = async () => {
+        editingRef.current = true;
+        const data = await fetchMarketData({ edit: true });
+        if (!data) {
+            editingRef.current = false;
+            return;
+        }
+        resetDrafts(data);
         setIsFuelEditing(false);
         setIsEditing(true);
         setLastAddedCerealCode(null);
     };
 
+    // Sortie d'édition : les céréales masquées disparaissent aussitôt, puis la vue de consultation
+    // du serveur (qui fait foi) est rechargée.
+    const leaveEditing = () => {
+        editingRef.current = false;
+        setIsEditing(false);
+        setMarketData((current) => {
+            const hidden = current?.hidden_cereal_codes || [];
+
+            return {
+                ...current,
+                groups: (current?.groups || []).filter((group) => !hidden.includes(group.code)),
+                custom_cereals: (current?.custom_cereals || []).filter((cereal) => !hidden.includes(cereal.code)),
+                hidden_cereal_codes: [],
+            };
+        });
+        fetchMarketData({ edit: false });
+    };
+
     const cancelEditing = () => {
         resetDrafts();
         setLastAddedCerealCode(null);
-        setIsEditing(false);
+        leaveEditing();
     };
 
     const saveSettings = () => {
         form.put(routes.settings_update, {
             preserveScroll: true,
-            onSuccess: () => setIsEditing(false),
+            onSuccess: () => leaveEditing(),
         });
     };
 
@@ -2193,6 +2532,7 @@ export default function CotationsIndex({
 
     const startFuelEditing = () => {
         resetDrafts();
+        if (isEditing) leaveEditing();
         setIsEditing(false);
         setIsFuelEditing(true);
         setFuelHistoryIndex(null);
@@ -2338,7 +2678,7 @@ export default function CotationsIndex({
     };
 
     const openCerealHistory = async () => {
-        if (!routes.cereal_history_dates) return;
+        if (!canViewCerealHistory || !routes.cereal_history_dates) return;
         setCerealHistory((current) => ({ ...current, loading: true, error: '' }));
 
         try {
@@ -2470,7 +2810,7 @@ export default function CotationsIndex({
             </div>
 
             <div className="flex flex-wrap gap-2">
-                {canViewCereals && !isViewingCerealHistory ? (
+                {canViewCerealHistory && !isViewingCerealHistory ? (
                     <button
                         type="button"
                         onClick={openCerealHistory}
@@ -2525,7 +2865,7 @@ export default function CotationsIndex({
     );
 
     return (
-        <AppLayout title="Cotations" header={header}>
+        <AppLayout title="Cotations" header={header} wide={isEditing}>
             <Head title="Cotations" />
 
             <div className={`w-full max-w-full min-w-0 space-y-5 ${isViewingCerealHistory ? 'overflow-x-clip' : 'overflow-x-hidden'}`}>
@@ -2534,6 +2874,27 @@ export default function CotationsIndex({
                         {error}
                     </div>
                 ) : null}
+
+                <Modal show={Boolean(deleteTarget)} maxWidth="md" closeable={!deletePending} onClose={closeDeleteDialog}>
+                    <div className="space-y-3 p-6" role="alertdialog" aria-labelledby="delete-cereal-title">
+                        <h2 id="delete-cereal-title" className="text-lg font-black text-[var(--app-text)]">Supprimer la céréale ?</h2>
+                        <p className="text-sm text-[var(--app-text)]">
+                            Voulez-vous vraiment supprimer la céréale « {deleteTarget?.name} » ?
+                        </p>
+                        <p className="text-sm text-[var(--app-muted)]">
+                            Elle disparaîtra des cotations et des exports actuels. Son historique et ses anciennes données seront conservés.
+                        </p>
+                        {deleteError ? (
+                            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{deleteError}</p>
+                        ) : null}
+                        <div className="flex justify-end gap-2 pt-2">
+                            <SecondaryButton type="button" onClick={closeDeleteDialog} disabled={deletePending}>Annuler</SecondaryButton>
+                            <DangerButton type="button" onClick={confirmDeleteCereal} disabled={deletePending}>
+                                Supprimer la céréale
+                            </DangerButton>
+                        </div>
+                    </div>
+                </Modal>
 
                 {mailNotice ? (
                     <div
@@ -2675,6 +3036,10 @@ export default function CotationsIndex({
                                             tableLabels={cerealTableLabelsFor((isViewingCerealHistory ? displayMarket?.cereal_table_labels : form.data.cereal_table_labels) || {}, group.code)}
                                             finalPriceOptions={finalPriceOptions}
                                             defaultOpen={Boolean(group.code) && (group.code === lastAddedCerealCode || group.code === targetCerealCode)}
+                                            isHidden={isEditing && hiddenCerealCodes.includes(group.code)}
+                                            visibilityPending={visibilityPending === group.code}
+                                            onToggleVisibility={isEditing && group.code ? () => toggleCerealVisibility(group) : null}
+                                            onDelete={isEditing && group.code ? () => askDeleteCereal(group) : null}
                                             dragHandle={isEditing ? (
                                                 <button
                                                     type="button"

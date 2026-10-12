@@ -104,14 +104,14 @@ class CotationPdfFormatter
         return 'COTATIONS '.$date->format('d.m.Y').'.pdf';
     }
 
-    public static function margin(mixed $value, mixed $operation = null): string
+    public static function base(mixed $value, mixed $operation = null): string
     {
         $number = self::toFloat($value);
         if ($number === null) {
             return '—';
         }
 
-        $sign = $operation === CotationManualPrice::MARGIN_ADD ? '+' : '-';
+        $sign = $operation === CotationManualPrice::BASE_ADD ? '+' : '-';
 
         return $sign.number_format(round(abs($number)), 0, ',', ' ').' €';
     }

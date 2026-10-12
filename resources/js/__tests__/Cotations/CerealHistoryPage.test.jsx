@@ -31,7 +31,7 @@ const group = (code, name, price) => ({
     name,
     sort: 10,
     harvests: {
-        left: { year: 2026, rows: [{ identity_hash: `h-${code}`, product_code: code, product_name: name, maturity_label: 'Sept', maturity_year: 2026, harvest_year: 2026, matif: price, margin: 0, final_price: price, line_type: 'matif' }] },
+        left: { year: 2026, rows: [{ identity_hash: `h-${code}`, product_code: code, product_name: name, maturity_label: 'Sept', maturity_year: 2026, harvest_year: 2026, matif: price, base: 0, final_price: price, line_type: 'matif' }] },
         right: { year: 2027, rows: [] },
     },
 });
@@ -57,7 +57,7 @@ const versionFor = (date, wheatName, matif, margin, extra = {}) => ({
         groups: [{
             ...group('EBM', wheatName, matif),
             harvests: {
-                left: { year: 2026, rows: [{ ...group('EBM', wheatName, matif).harvests.left.rows[0], margin, margin_operation: 'subtract', final_price: matif - margin }] },
+                left: { year: 2026, rows: [{ ...group('EBM', wheatName, matif).harvests.left.rows[0], base: margin, base_operation: 'subtract', final_price: matif - margin }] },
                 right: { year: 2027, rows: [] },
             },
         }],
@@ -87,7 +87,7 @@ const props = {
     manualSettings: { display: [] },
     cerealLabels: {},
     cerealTableLabels: {},
-    permissions: { can_view_cereals: true, can_manage: true },
+    permissions: { can_view_cereals: true, can_manage: true, can_view_cereal_history: true },
     routes,
 };
 
@@ -260,8 +260,8 @@ describe('Cotations céréales — le MATIF change avec la date (régression « 
         maturity_year: 2026,
         harvest_year: 2026,
         matif,
-        margin,
-        margin_operation: op,
+        base: margin,
+        base_operation: op,
         final_price: op === 'add' ? matif + margin : matif - margin,
     });
 
@@ -364,8 +364,8 @@ describe('Cotations céréales — échéance échue : dernier cours repris', ()
         const row = {
             ...base.market.groups[0].harvests.left.rows[0],
             matif: 490,
-            margin: 17,
-            margin_operation: 'add',
+            base: 17,
+            base_operation: 'add',
             final_price: 507,
             carried_quote_at: '2026-07-30T15:00:05+02:00',
         };

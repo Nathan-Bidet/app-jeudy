@@ -5,6 +5,7 @@ namespace App\Services\Cotations;
 use App\Models\CotationMarketPrice;
 use App\Models\CotationMarketRefresh;
 use App\Models\CotationManualPrice;
+use App\Models\CotationSetting;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -26,6 +27,60 @@ class CotationMarketService
     ];
 
     private const BASE_PRODUCT_CODES = ['ECO', 'EBM', 'EMA'];
+
+    /**
+     * Céréales supprimées de la gestion courante (suppression logique) : code => date de suppression.
+     * Aucune donnée n'est effacée : les lignes de cotation, les cours et le journal restent en base,
+     * seul ce registre les écarte des vues courantes (édition, consultation, PDF, courriel).
+     * L'historique, lui, ne les écarte qu'à partir de la date de suppression.
+     *
+     * @return array<string, array{deleted_at: Carbon, name: ?string}>
+     */
+    public function deletedCereals(): array
+    {
+        if (! Schema::hasTable('cotation_settings')) {
+            return [];
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_deleted_codes')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+        $deleted = [];
+
+        foreach (is_array($decoded) ? $decoded : [] as $code => $entry) {
+            $at = is_array($entry) && ! empty($entry['deleted_at']) ? Carbon::parse($entry['deleted_at']) : null;
+            if (is_string($code) && $code !== '' && $at !== null) {
+                $deleted[$code] = ['deleted_at' => $at, 'name' => $entry['name'] ?? null];
+            }
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, array<string, mixed>>
+     */
+    private function withoutDeleted(array $groups): array
+    {
+        $deleted = $this->deletedCereals();
+
+        return $deleted === []
+            ? $groups
+            : array_values(array_filter($groups, static fn (array $group): bool => ! isset($deleted[(string) ($group['code'] ?? '')])));
+    }
+
+    /**
+     * Codes de céréales du module : produits MATIF connus et céréales personnalisées.
+     *
+     * @return array<int, string>
+     */
+    public function knownProductCodes(): array
+    {
+        return array_values(array_unique([
+            ...array_keys(self::PRODUCT_CODES),
+            ...array_column($this->customCereals(), 'code'),
+        ]));
+    }
 
     /**
      * In Cotations, the selected harvest year is the displayed maturity year.
@@ -140,7 +195,7 @@ class CotationMarketService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function latestGroups(int $leftHarvestYear, int $rightHarvestYear, bool $includeEmptyProducts = false, bool $includeCustomProducts = false): array
+    public function latestGroups(int $leftHarvestYear, int $rightHarvestYear, bool $includeEmptyProducts = false, bool $includeCustomProducts = false, bool $includeSalePrice = false): array
     {
         $wantedYears = [$leftHarvestYear, $rightHarvestYear];
         $marketRows = $this->latestMarketRowsByIdentity($wantedYears);
@@ -171,8 +226,10 @@ class CotationMarketService
                     'maturity_year',
                     'harvest_year',
                     'manual_matif',
-                    'margin',
-                    'margin_operation',
+                    'base',
+                    'base_operation',
+                    'sale_price',
+                    'sale_price_operation',
                     'sort_order',
             ];
 
@@ -219,8 +276,10 @@ class CotationMarketService
                         'euronext_price' => $market['matif'] ?? null,
                         'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
                         'final_price_reference_key' => $finalPriceReferenceKey,
-                        'margin' => $manual->margin !== null ? abs((float) $manual->margin) : null,
-                        'margin_operation' => CotationManualPrice::normalizeMarginOperation($manual->margin_operation),
+                        'base' => $manual->base !== null ? abs((float) $manual->base) : null,
+                        'base_operation' => CotationManualPrice::normalizeBaseOperation($manual->base_operation),
+                        'sale_price' => $manual->sale_price !== null ? abs((float) $manual->sale_price) : null,
+                        'sale_price_operation' => CotationManualPrice::normalizeSaleOperation($manual->sale_price_operation),
                         'sort' => (int) $manual->sort_order,
                         'last_seen_at' => $market['last_seen_at'] ?? null,
                         'has_euronext' => $lineType === 'matif' && $market !== null,
@@ -228,7 +287,9 @@ class CotationMarketService
             });
         }
 
-        return $this->assembleGroups(
+        // Les prix des céréales supprimées restent utilisés pour résoudre les références (assembleGroups) :
+        // seule leur carte est retirée de la vue courante.
+        return $this->withoutDeleted($this->assembleGroups(
             $configuredRows,
             $marketRows,
             $leftHarvestYear,
@@ -236,7 +297,8 @@ class CotationMarketService
             $includeEmptyProducts,
             $includeCustomProducts,
             $customCerealNameByCode,
-        );
+            $includeSalePrice,
+        ));
     }
 
     /**
@@ -286,6 +348,11 @@ class CotationMarketService
         $market = $marketIdentity ? ($marketRows[$marketIdentity] ?? null) : null;
         $reference = $lineType === 'custom' ? (trim((string) ($snapshot['final_price_reference_key'] ?? '')) ?: null) : null;
         $manualMatif = isset($snapshot['manual_matif']) && $snapshot['manual_matif'] !== null ? (float) $snapshot['manual_matif'] : null;
+        // Journaux d'audit antérieurs au renommage : la Base y était enregistrée sous « margin »
+        // / « margin_operation » (« margin » désigne désormais la marge calculée, non utilisée ici).
+        $isLegacySnapshot = ! array_key_exists('base', $snapshot);
+        $snapshotBase = $isLegacySnapshot ? ($snapshot['margin'] ?? null) : $snapshot['base'];
+        $snapshotBaseOperation = $isLegacySnapshot ? ($snapshot['margin_operation'] ?? null) : ($snapshot['base_operation'] ?? null);
 
         return [
             'identity_hash' => $snapshot['identity_hash'] ?? null,
@@ -305,8 +372,8 @@ class CotationMarketService
             'euronext_price' => $market['matif'] ?? null,
             'manual_matif' => $manualMatif,
             'final_price_reference_key' => $reference,
-            'margin' => isset($snapshot['margin']) && $snapshot['margin'] !== null ? abs((float) $snapshot['margin']) : null,
-            'margin_operation' => CotationManualPrice::normalizeMarginOperation($snapshot['margin_operation'] ?? null),
+            'base' => $snapshotBase !== null ? abs((float) $snapshotBase) : null,
+            'base_operation' => CotationManualPrice::normalizeBaseOperation($snapshotBaseOperation),
             'sort' => (int) ($snapshot['sort_order'] ?? 0),
             'last_seen_at' => $market['last_seen_at'] ?? null,
             'has_euronext' => $lineType === 'matif' && $market !== null,
@@ -324,7 +391,7 @@ class CotationMarketService
      * @param  array<string, string>  $customCerealNameByCode
      * @return array<int, array<string, mixed>>
      */
-    public function assembleGroups(array $configuredRows, array $marketRows, int $leftHarvestYear, int $rightHarvestYear, bool $includeEmptyProducts, bool $includeCustomProducts, array $customCerealNameByCode): array
+    public function assembleGroups(array $configuredRows, array $marketRows, int $leftHarvestYear, int $rightHarvestYear, bool $includeEmptyProducts, bool $includeCustomProducts, array $customCerealNameByCode, bool $includeSalePrice = false): array
     {
         $groups = [];
         $configuredRows = $this->resolveFinalPriceReferences($configuredRows, $marketRows);
@@ -360,8 +427,8 @@ class CotationMarketService
 
             $bucket = (int) $row['harvest_year'] === $leftHarvestYear ? 'left' : 'right';
             $matif = $row['matif'];
-            $margin = $row['margin'] !== null ? abs((float) $row['margin']) : null;
-            $marginOperation = CotationManualPrice::normalizeMarginOperation($row['margin_operation'] ?? null);
+            $base = $row['base'] !== null ? abs((float) $row['base']) : null;
+            $baseOperation = CotationManualPrice::normalizeBaseOperation($row['base_operation'] ?? null);
             $groups[$productKey]['harvests'][$bucket]['rows'][] = [
                 'identity_hash' => $row['identity_hash'],
                 'market_identity_hash' => $row['market_identity_hash'],
@@ -382,9 +449,14 @@ class CotationMarketService
                 'euronext_price' => $row['euronext_price'],
                 'manual_matif' => $row['manual_matif'],
                 'final_price_reference_key' => $row['final_price_reference_key'] ?? null,
-                'margin' => $margin,
-                'margin_operation' => $marginOperation,
-                'final_price' => $matif !== null ? CotationManualPrice::applyMargin((float) $matif, $margin, $marginOperation) : null,
+                'base' => $base,
+                'base_operation' => $baseOperation,
+                'final_price' => $matif !== null ? CotationManualPrice::applyBase((float) $matif, $base, $baseOperation) : null,
+                // Prix de vente : jamais exposé hors mode modification (consultation, export, historique).
+                ...($includeSalePrice ? [
+                    'sale_price' => $row['sale_price'] ?? null,
+                    'sale_price_operation' => CotationManualPrice::normalizeSaleOperation($row['sale_price_operation'] ?? null),
+                ] : []),
                 'sort' => $row['sort'],
                 'last_seen_at' => $row['last_seen_at'],
                 'has_euronext' => (bool) $row['has_euronext'],
@@ -535,8 +607,8 @@ class CotationMarketService
 
         foreach ($marketRows as $row) {
             $rowsByReference[$this->finalPriceReferenceKey($row)] = $row + [
-                'margin' => null,
-                'margin_operation' => CotationManualPrice::MARGIN_SUBTRACT,
+                'base' => null,
+                'base_operation' => CotationManualPrice::BASE_SUBTRACT,
                 'final_price_reference_key' => null,
             ];
         }
@@ -567,10 +639,10 @@ class CotationMarketService
                 return $resolvedFinalPrices[$referenceKey] = null;
             }
 
-            return $resolvedFinalPrices[$referenceKey] = CotationManualPrice::applyMargin(
+            return $resolvedFinalPrices[$referenceKey] = CotationManualPrice::applyBase(
                 (float) $matif,
-                $row['margin'] ?? null,
-                $row['margin_operation'] ?? null,
+                $row['base'] ?? null,
+                $row['base_operation'] ?? null,
             );
         };
 
@@ -620,6 +692,8 @@ class CotationMarketService
             return [];
         }
 
+        $deleted = $this->deletedCereals();
+
         return DB::table('cotation_custom_cereals')
             ->select(['code', 'name', 'base_product_code', 'sort_order'])
             ->orderBy('sort_order')
@@ -631,6 +705,8 @@ class CotationMarketService
                 'base_product_code' => $cereal->base_product_code,
                 'sort' => (int) $cereal->sort_order,
             ])
+            ->reject(fn (array $cereal): bool => isset($deleted[$cereal['code']]))
+            ->values()
             ->all();
     }
 

@@ -26,7 +26,7 @@ function getInitialTheme() {
     // return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export default function AppLayout({ title, header, children }) {
+export default function AppLayout({ title, header, children, wide = false }) {
     const { auth, hours_reminder: hoursReminder } = usePage().props;
     const user = auth?.user;
     const isAdmin = Boolean(auth?.is_admin);
@@ -174,6 +174,8 @@ export default function AppLayout({ title, header, children }) {
                                 ? 'max-w-[1320px] px-0 py-3 sm:px-6 sm:py-6'
                                 : isWidePlanningSection
                                 ? 'max-w-none px-1 py-3 sm:px-2 sm:py-5 lg:px-4'
+                                : wide
+                                ? 'max-w-none p-4 sm:p-6'
                                 : 'max-w-[1320px] p-4 sm:p-6'
                         }`}
                     >

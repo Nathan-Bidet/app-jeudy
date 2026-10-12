@@ -43,6 +43,7 @@ class CotationController extends Controller
             $canEditFuel = (bool) ($user && $access->can($user, 'cotations.fuel.edit'));
             $canViewCereals = (bool) ($user && ($access->can($user, 'cotations.cereals.view') || $canEditCereals));
             $canViewFuel = (bool) ($user && ($access->can($user, 'cotations.fuel.view') || $canEditFuel));
+            $canViewCerealHistory = (bool) ($user && $canViewCereals && $access->can($user, 'cotations.cereals.history.view'));
             $canViewFuelHistory = (bool) ($user && $access->can($user, 'cotations.fuel.history.view'));
             $canAdmin = (bool) ($user && $access->can($user, 'cotations.admin'));
 
@@ -99,12 +100,14 @@ class CotationController extends Controller
                     'can_view_fuel' => $canViewFuel,
                     'can_manage' => $canEditCereals,
                     'can_manage_fuel' => $canEditFuel,
+                    'can_view_cereal_history' => $canViewCerealHistory,
                     'can_view_fuel_history' => $canViewFuelHistory,
                     'can_admin' => $canAdmin,
                 ],
                 'routes' => [
                     'market_data' => route('cotations.market-data'),
                     'settings_update' => route('cotations.settings.update'),
+                    'cereal_visibility_base' => url('/cotations/cereals'),
                     'fuel_settings_update' => route('cotations.fuel-settings.update'),
                     'fuel_history' => route('cotations.fuel-history'),
                     'cereal_history_dates' => route('cotations.cereal-history.dates'),
@@ -156,10 +159,22 @@ class CotationController extends Controller
 
     public function updateSettings(Request $request): RedirectResponse
     {
+        // Un formulaire resté ouvert après la suppression d'une céréale ne doit ni la ressusciter
+        // ni modifier ses données conservées.
+        $deletedCodes = array_keys($this->marketService->deletedCereals());
+        $deletedCustomIds = $deletedCodes === [] || ! Schema::hasTable('cotation_custom_cereals')
+            ? []
+            : CotationCustomCereal::query()->whereIn('code', $deletedCodes)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+
         $request->merge([
-            'manual_prices' => $this->filledManualPriceRows($request->input('manual_prices', [])),
+            'manual_prices' => collect($this->filledManualPriceRows($request->input('manual_prices', [])))
+                ->reject(fn (array $row): bool => in_array((string) ($row['product_code'] ?? ''), $deletedCodes, true))
+                ->values()
+                ->all(),
             'custom_cereals' => collect($request->input('custom_cereals', []))
                 ->filter(fn ($row): bool => is_array($row) && (trim((string) ($row['name'] ?? '')) !== '' || ! empty($row['id'])))
+                ->reject(fn (array $row): bool => in_array((string) ($row['code'] ?? ''), $deletedCodes, true)
+                    || in_array((int) ($row['id'] ?? 0), $deletedCustomIds, true))
                 ->values()
                 ->all(),
         ]);
@@ -188,8 +203,10 @@ class CotationController extends Controller
             'manual_prices.*.harvest_year' => ['required_with:manual_prices', 'integer', 'min:2020', 'max:2100'],
             'manual_prices.*.manual_matif' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
             'manual_prices.*.final_price_reference_key' => ['nullable', 'string', 'max:180'],
-            'manual_prices.*.margin' => ['nullable', 'integer', 'min:0', 'max:9999999'],
-            'manual_prices.*.margin_operation' => ['nullable', Rule::in(CotationManualPrice::MARGIN_OPERATIONS)],
+            'manual_prices.*.base' => ['nullable', 'integer', 'min:0', 'max:9999999'],
+            'manual_prices.*.base_operation' => ['nullable', Rule::in(CotationManualPrice::BASE_OPERATIONS)],
+            'manual_prices.*.sale_price' => ['nullable', 'numeric', 'min:0', 'max:9999999.9999'],
+            'manual_prices.*.sale_price_operation' => ['nullable', Rule::in(CotationManualPrice::BASE_OPERATIONS)],
             'manual_prices.*.sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
             'deleted_manual_price_ids' => ['nullable', 'array'],
             'deleted_manual_price_ids.*' => ['integer', 'min:1'],
@@ -305,7 +322,11 @@ class CotationController extends Controller
         $customCerealNamesByCode = Schema::hasTable('cotation_custom_cereals')
             ? CotationCustomCereal::query()->pluck('name', 'code')->all()
             : [];
-        $manualChanges = $this->updateManualPrices($manualRows, $request, $customCerealNamesByCode);
+        // Prix de vente, base et marge calculée d'une ligne sont écrits ensemble (hook `saving` du modèle) ;
+        // la transaction rend l'ensemble des lignes atomique.
+        $manualChanges = \Illuminate\Support\Facades\DB::transaction(
+            fn (): array => $this->updateManualPrices($manualRows, $request, $customCerealNamesByCode),
+        );
         $hasManualChanges = $manualChanges !== [] || $manualDeletes !== [] || $customCerealChanges !== [] || $cerealOrderChange !== null || $cerealLabelsChange !== null || $cerealTableLabelsChange !== null || $cerealInfoChange !== null || $transportGridChange !== null || $fuelGridChange !== null;
 
         $this->auditLogService->log([
@@ -589,6 +610,15 @@ class CotationController extends Controller
         }
         unset($group);
 
+        // Consultation de l'historique : une céréale masquée aujourd'hui n'est pas montrée. Une céréale
+        // supprimée reste visible pour les journées antérieures à sa suppression.
+        $groups = $this->withoutHiddenCereals($groups, $this->hiddenCerealCodes());
+        $deleted = $this->marketService->deletedCereals();
+        $groups = array_values(array_filter($groups, static function (array $group) use ($deleted, $recordedAt): bool {
+            $entry = $deleted[(string) ($group['code'] ?? '')] ?? null;
+
+            return $entry === null || $entry['deleted_at']->getTimestamp() > $recordedAt->getTimestamp();
+        }));
         $groups = $this->applyCerealOrder($groups, $state['cereal_order']);
         $groups = $this->applyCerealLabels($groups, $state['cereal_labels']);
 
@@ -761,8 +791,12 @@ class CotationController extends Controller
         $rightYear = (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1);
 
         $cerealOrder = $this->cerealOrderConfig();
+        // Les céréales masquées sont écartées ici, côté serveur : nom, récoltes, échéances et prix.
         $groups = $this->applyCerealOrder(
-            $this->marketService->latestGroups($leftYear, $rightYear, false, false),
+            $this->withoutHiddenCereals(
+                $this->marketService->latestGroups($leftYear, $rightYear, false, false),
+                $this->hiddenCerealCodes(),
+            ),
             $cerealOrder,
         );
         $groups = $this->applyCerealLabels($groups, $this->cerealLabelsConfig());
@@ -897,7 +931,7 @@ class CotationController extends Controller
                         'free_text' => (string) ($row['display_label'] ?? ''),
                         'label' => $this->maturityShortLabel((string) ($row['maturity_label'] ?: ($row['label'] ?: 'Échéance'))),
                         'matif' => CotationPdfFormatter::price($row['matif'] ?? null),
-                        'margin' => CotationPdfFormatter::margin($row['margin'] ?? null, $row['margin_operation'] ?? null),
+                        'base' => CotationPdfFormatter::base($row['base'] ?? null, $row['base_operation'] ?? null),
                         'final_price' => CotationPdfFormatter::price($row['final_price'] ?? null),
                     ];
                 }
@@ -976,19 +1010,38 @@ class CotationController extends Controller
         $access = app(AccessManager::class);
         $user = $request?->user();
         $canManage = (bool) ($user && $access->can($user, 'cotations.cereals.edit'));
+        // Le droit de modifier ne suffit pas : seul le mode édition réellement demandé (?edit=1) donne
+        // accès aux céréales masquées, aux lignes vides et au prix de vente. Consultation = même
+        // filtre pour tous, administrateurs compris.
+        $editMode = $canManage && $request?->boolean('edit') === true;
         $cerealOrder = $this->cerealOrderConfig();
         $cerealLabels = $this->cerealLabelsConfig();
         $cerealTableLabels = $this->cerealTableLabelsConfig();
-        $groups = $this->applyCerealOrder($this->marketService->latestGroups(
+        $hiddenCodes = $this->hiddenCerealCodes();
+        $groups = $this->marketService->latestGroups(
             (int) ($displaySettings['harvest_left_year'] ?? now()->year),
             (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
-            $canManage,
-        ), $cerealOrder);
-        $groups = $this->applyCerealLabels($groups, $cerealLabels);
-        $options = $this->applyCerealLabels($this->marketService->marketOptions(
+            $editMode,
+            false,
+            $editMode,
+        );
+        $options = $this->marketService->marketOptions(
             (int) ($displaySettings['harvest_left_year'] ?? now()->year),
             (int) ($displaySettings['harvest_right_year'] ?? now()->year + 1),
-        ), $cerealLabels);
+        );
+        $customCereals = $this->customCerealsPayload();
+        // Consultation : les céréales masquées ne quittent pas le serveur (cartes, options MATIF,
+        // céréales personnalisées). Le mode édition reçoit tout, avec la liste des codes masqués.
+        if (! $editMode) {
+            $groups = $this->withoutHiddenCereals($groups, $hiddenCodes);
+            $options = $this->withoutHiddenCereals($options, $hiddenCodes);
+            $customCereals = array_values(array_filter(
+                $customCereals,
+                fn (array $cereal): bool => ! in_array((string) ($cereal['code'] ?? ''), $hiddenCodes, true),
+            ));
+        }
+        $groups = $this->applyCerealLabels($this->applyCerealOrder($groups, $cerealOrder), $cerealLabels);
+        $options = $this->applyCerealLabels($options, $cerealLabels);
 
         return [
             'source' => 'database',
@@ -1008,7 +1061,8 @@ class CotationController extends Controller
             'groups' => $groups,
             'cereal_order' => $this->normalizeCerealOrder($cerealOrder, $groups),
             'options' => $options,
-            'custom_cereals' => $this->customCerealsPayload(),
+            'custom_cereals' => $customCereals,
+            'hidden_cereal_codes' => $editMode ? $hiddenCodes : [],
             'cereal_labels' => $cerealLabels,
             'cereal_table_labels' => $cerealTableLabels,
             'cereal_info_html' => $this->cerealInfoConfig(),
@@ -1497,6 +1551,200 @@ class CotationController extends Controller
         ] : null;
     }
 
+    /**
+     * Codes des céréales masquées en consultation et dans les PDF (partagé entre tous les
+     * utilisateurs). Stocké comme l'ordre des céréales : les produits MATIF n'ont pas de table propre.
+     *
+     * @return array<int, string>
+     */
+    private function hiddenCerealCodes(): array
+    {
+        if (! Schema::hasTable('cotation_settings')) {
+            return [];
+        }
+
+        $note = CotationSetting::query()->where('key', 'cereal_hidden_codes')->value('note');
+        $decoded = $note ? json_decode((string) $note, true) : null;
+
+        return collect(is_array($decoded) ? $decoded : [])
+            ->map(fn (mixed $code): string => trim((string) $code))
+            ->filter(fn (string $code): bool => $code !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @param  array<int, string>  $hiddenCodes
+     * @return array<int, array<string, mixed>>
+     */
+    private function withoutHiddenCereals(array $groups, array $hiddenCodes): array
+    {
+        if ($hiddenCodes === []) {
+            return $groups;
+        }
+
+        return array_values(array_filter(
+            $groups,
+            static fn (array $group): bool => ! in_array((string) ($group['code'] ?? ''), $hiddenCodes, true),
+        ));
+    }
+
+    /**
+     * Affiche ou masque une céréale (état explicite, donc idempotent : un double clic ne peut pas
+     * laisser un état incohérent). N'altère aucune donnée de cotation.
+     */
+    public function updateCerealVisibility(Request $request, string $code): JsonResponse
+    {
+        $validated = $request->validate([
+            'visible' => ['required', 'boolean'],
+        ], [
+            'visible.required' => 'Indiquez si la céréale doit être affichée.',
+            'visible.boolean' => 'La visibilité demandée est invalide.',
+        ]);
+
+        $code = trim($code);
+        if (isset($this->marketService->deletedCereals()[$code])) {
+            return response()->json(['message' => 'Cette céréale a été supprimée.'], 404);
+        }
+        if (! in_array($code, $this->marketService->knownProductCodes(), true)
+            && ! CotationManualPrice::query()->where('product_code', $code)->exists()) {
+            return response()->json(['message' => 'Céréale introuvable : enregistrez d’abord les modifications en cours.'], 404);
+        }
+
+        $visible = (bool) $validated['visible'];
+
+        $result = \Illuminate\Support\Facades\DB::transaction(function () use ($code, $visible, $request): array {
+            // Verrou sur la ligne de réglage : deux requêtes simultanées s'appliquent l'une après l'autre.
+            $setting = CotationSetting::query()->where('key', 'cereal_hidden_codes')->lockForUpdate()->first()
+                ?? new CotationSetting(['key' => 'cereal_hidden_codes']);
+            $before = $this->hiddenCerealCodes();
+            $after = $visible
+                ? array_values(array_diff($before, [$code]))
+                : array_values(array_unique([...$before, $code]));
+
+            if ($before !== $after || ! $setting->exists) {
+                $setting->forceFill([
+                    'section' => 'cereal_visibility',
+                    'label' => 'Céréales masquées',
+                    'unit' => null,
+                    'value' => null,
+                    'note' => json_encode($after, JSON_UNESCAPED_UNICODE),
+                    'sort_order' => 31,
+                    'updated_by' => $request->user()?->id,
+                ])->save();
+            }
+
+            return ['before' => $before, 'after' => $after];
+        });
+
+        if ($result['before'] !== $result['after']) {
+            $name = $this->cerealLabelsConfig()[$code]
+                ?? CotationCustomCereal::query()->where('code', $code)->value('name')
+                ?? $code;
+
+            $this->auditLogService->log([
+                'action' => 'update_cotation_cereal_visibility',
+                'module' => 'cotations',
+                'description' => sprintf('Céréale « %s » %s', $name, $visible ? 'rendue visible' : 'masquée'),
+                'payload' => [
+                    'cereal_code' => $code,
+                    'cereal_name' => $name,
+                    'before' => ['visible' => ! $visible],
+                    'after' => ['visible' => $visible],
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'code' => $code,
+            'visible' => $visible,
+            'hidden_cereal_codes' => $result['after'],
+        ]);
+    }
+
+    /**
+     * Supprime une céréale de la gestion courante (suppression logique, réversible en base).
+     * Cotations, cours, journal d'audit et historique sont conservés ; la céréale quitte l'édition,
+     * la consultation, le PDF et le courriel. Les céréales qui en dépendent ne sont pas touchées.
+     */
+    public function destroyCereal(Request $request, string $code): JsonResponse
+    {
+        $code = trim($code);
+        $isCustom = Schema::hasTable('cotation_custom_cereals') && CotationCustomCereal::query()->where('code', $code)->exists();
+        $knownCode = $isCustom
+            || in_array($code, $this->marketService->knownProductCodes(), true)
+            || CotationManualPrice::query()->where('product_code', $code)->exists();
+
+        if (! $knownCode) {
+            return response()->json(['message' => 'Céréale introuvable : enregistrez d’abord les modifications en cours.'], 404);
+        }
+
+        $name = CotationCustomCereal::query()->where('code', $code)->value('name')
+            ?? $this->cerealLabelsConfig()[$code]
+            ?? $code;
+
+        $result = \Illuminate\Support\Facades\DB::transaction(function () use ($code, $name, $request): array {
+            $setting = CotationSetting::query()->where('key', 'cereal_deleted_codes')->lockForUpdate()->first()
+                ?? new CotationSetting(['key' => 'cereal_deleted_codes']);
+            $registry = $this->marketService->deletedCereals();
+
+            // Déjà supprimée (double clic, deux administrateurs) : succès sans nouvelle écriture.
+            if (isset($registry[$code])) {
+                return ['already' => true, 'deleted_at' => $registry[$code]['deleted_at']];
+            }
+
+            $deletedAt = now();
+            $entries = collect($registry)
+                ->map(fn (array $entry): array => ['deleted_at' => $entry['deleted_at']->toIso8601String(), 'name' => $entry['name']])
+                ->all();
+            $entries[$code] = ['deleted_at' => $deletedAt->toIso8601String(), 'name' => $name, 'deleted_by' => $request->user()?->id];
+
+            $setting->forceFill([
+                'section' => 'cereal_visibility',
+                'label' => 'Céréales supprimées',
+                'unit' => null,
+                'value' => null,
+                'note' => json_encode($entries, JSON_UNESCAPED_UNICODE),
+                'sort_order' => 32,
+                'updated_by' => $request->user()?->id,
+            ])->save();
+
+            return ['already' => false, 'deleted_at' => $deletedAt];
+        });
+
+        if (! $result['already']) {
+            $lines = CotationManualPrice::query()->where('product_code', $code);
+            $dependents = Schema::hasTable('cotation_custom_cereals')
+                ? CotationCustomCereal::query()->where('base_product_code', $code)->pluck('code')->all()
+                : [];
+
+            $this->auditLogService->log([
+                'action' => 'delete_cotation_cereal',
+                'module' => 'cotations',
+                'description' => sprintf('Céréale « %s » supprimée (historique conservé)', $name),
+                'payload' => [
+                    'cereal_code' => $code,
+                    'cereal_name' => $name,
+                    'cereal_type' => $isCustom ? 'custom' : 'matif',
+                    'deleted_at' => $result['deleted_at']->toIso8601String(),
+                    'preserved_manual_lines' => (clone $lines)->count(),
+                    'preserved_manual_line_ids' => (clone $lines)->pluck('id')->all(),
+                    'dependent_custom_cereals' => $dependents,
+                    'soft_delete' => true,
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'code' => $code,
+            'already_deleted' => $result['already'],
+        ]);
+    }
+
     private function cerealInfoConfig(): string
     {
         if (! Schema::hasTable('cotation_settings')) {
@@ -1842,7 +2090,8 @@ class CotationController extends Controller
             ->filter(function (array $row): bool {
                 return $this->hasDecimalInput($row['manual_matif'] ?? null)
                     || $this->hasDecimalInput($row['final_price_reference_key'] ?? null)
-                    || $this->hasDecimalInput($row['margin'] ?? null)
+                    || $this->hasDecimalInput($row['base'] ?? null)
+                    || $this->hasDecimalInput($row['sale_price'] ?? null)
                     || $this->hasDecimalInput($row['manual_id'] ?? null)
                     || $this->hasDecimalInput($row['display_label'] ?? null)
                     || $this->hasDecimalInput($row['maturity_label'] ?? null);
@@ -1908,10 +2157,17 @@ class CotationController extends Controller
                 'maturity_year' => (int) $row['maturity_year'],
                 'harvest_year' => (int) $row['harvest_year'],
                 'manual_matif' => $lineType === 'custom' ? $this->nullableDecimal($row['manual_matif'] ?? null) : null,
-                'margin' => $this->nullablePositiveInteger($row['margin'] ?? null),
+                'base' => $this->nullablePositiveInteger($row['base'] ?? null),
                 // Champ absent (ancien client) : on conserve le signe déjà enregistré.
-                'margin_operation' => CotationManualPrice::normalizeMarginOperation(
-                    $row['margin_operation'] ?? $manual->margin_operation,
+                'base_operation' => CotationManualPrice::normalizeBaseOperation(
+                    $row['base_operation'] ?? $manual->base_operation,
+                ),
+                // Champs absents (ancien client) : on conserve les valeurs déjà enregistrées.
+                'sale_price' => array_key_exists('sale_price', $row)
+                    ? $this->nullableDecimal($row['sale_price'])
+                    : $manual->sale_price,
+                'sale_price_operation' => CotationManualPrice::normalizeSaleOperation(
+                    $row['sale_price_operation'] ?? $manual->sale_price_operation,
                 ),
                 'sort_order' => (int) ($row['sort_order'] ?? 0),
                 'updated_by' => $request->user()?->id,
@@ -2024,6 +2280,7 @@ class CotationController extends Controller
 
         return CotationCustomCereal::query()
             ->select(['id', 'code', 'name', 'base_product_code', 'sort_order'])
+            ->whereNotIn('code', array_keys($this->marketService->deletedCereals()))
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get()
@@ -2087,8 +2344,11 @@ class CotationController extends Controller
             'harvest_year' => $manual->harvest_year,
             'manual_matif' => $manual->manual_matif !== null ? (float) $manual->manual_matif : null,
             'final_price_reference_key' => Schema::hasColumn('cotation_manual_prices', 'final_price_reference_key') ? $manual->final_price_reference_key : null,
+            'base' => $manual->base !== null ? (float) $manual->base : null,
+            'base_operation' => CotationManualPrice::normalizeBaseOperation($manual->base_operation),
+            'sale_price' => $manual->sale_price !== null ? (float) $manual->sale_price : null,
+            'sale_price_operation' => CotationManualPrice::normalizeSaleOperation($manual->sale_price_operation),
             'margin' => $manual->margin !== null ? (float) $manual->margin : null,
-            'margin_operation' => CotationManualPrice::normalizeMarginOperation($manual->margin_operation),
             'sort_order' => $manual->sort_order,
         ];
     }

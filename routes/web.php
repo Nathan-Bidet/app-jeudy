@@ -342,14 +342,14 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
         ->name('cotations.market-data');
     Route::get('/cotations/cereal-history/dates', [CotationController::class, 'cerealHistoryDates'])
-        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
+        ->middleware('sector.access:cotations.cereals.history.view')
         ->name('cotations.cereal-history.dates');
     Route::get('/cotations/cereal-history/series', [CotationController::class, 'cerealHistorySeries'])
-        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
+        ->middleware('sector.access:cotations.cereals.history.view')
         ->name('cotations.cereal-history.series');
     Route::get('/cotations/cereal-history/{date}', [CotationController::class, 'cerealHistoryShow'])
         ->where('date', '\d{4}-\d{2}-\d{2}')
-        ->middleware('sector.access:cotations.cereals.view|cotations.cereals.edit')
+        ->middleware('sector.access:cotations.cereals.history.view')
         ->name('cotations.cereal-history.show');
     Route::get('/cotations/export-pdf', [CotationController::class, 'exportPdf'])
         ->middleware('sector.access:cotations.cereals.edit')
@@ -382,6 +382,16 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
     Route::get('/cotations/fuel-history', [CotationController::class, 'fuelHistory'])
         ->middleware('sector.access:cotations.fuel.history.view')
         ->name('cotations.fuel-history');
+    Route::delete('/cotations/cereals/{code}', [CotationController::class, 'destroyCereal'])
+        ->where('code', '[A-Za-z0-9_\-]{1,32}')
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.cereals.destroy');
+    Route::put('/cotations/cereals/{code}/visibility', [CotationController::class, 'updateCerealVisibility'])
+        ->where('code', '[A-Za-z0-9_\-]{1,16}')
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.cereals.visibility');
     Route::put('/cotations/settings', [CotationController::class, 'updateSettings'])
         ->middleware('sector.access:cotations.cereals.edit')
         ->middleware('throttle:admin-sensitive')
