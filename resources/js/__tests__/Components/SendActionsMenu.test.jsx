@@ -108,3 +108,104 @@ describe('SendActionsMenu', () => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 });
+
+describe('SendActionsMenu — lisibilité dans une ligne colorée', () => {
+    // Régression : dans une ligne dont la règle impose un texte blanc (fond vert),
+    // le menu (fond clair) héritait de cette couleur et devenait illisible.
+    const renderInColoredRow = (props) =>
+        render(
+            <div style={{ color: '#ffffff', backgroundColor: '#166534' }}>
+                <SendActionsMenu {...props} />
+            </div>,
+        );
+
+    it('fixe sa propre couleur de texte (thème) au lieu d’hériter de la ligne', () => {
+        renderInColoredRow({ smsHref: 'sms:0612345678', mailHref: 'mailto:a@b.com' });
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByRole('menu').className).toContain('text-[var(--app-text)]');
+        expect(screen.getByRole('menu').className).toContain('bg-[var(--app-surface)]');
+    });
+
+    it('garde une couleur explicite pour les options désactivées et les notes', () => {
+        renderInColoredRow({ smsHref: null, mailHref: 'mailto:a@b.com', mailHasRecipient: false });
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        expect(screen.getByText('Aucun numéro de portable renseigné').className).toContain('text-[var(--app-muted)]');
+        expect(screen.getByText('Adresse à renseigner dans votre messagerie').className).toContain('text-[var(--app-muted)]');
+    });
+
+    it('rend focus et survol visibles sur les options, et se ferme à Échap en rendant le focus', () => {
+        renderInColoredRow({ smsHref: 'sms:0612345678', mailHref: 'mailto:a@b.com' });
+        const trigger = screen.getByRole('button', { name: /Envoyer/ });
+        fireEvent.click(trigger);
+
+        screen.getAllByRole('menuitem').forEach((item) => {
+            expect(item.className).toContain('hover:bg-[var(--app-surface-soft)]');
+            expect(item.className).toContain('focus-visible:bg-[var(--app-surface-soft)]');
+        });
+
+        fireEvent.keyDown(document, { key: 'Escape' });
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        expect(trigger).toHaveFocus();
+    });
+
+    it('ferme le menu après sélection d’une option', () => {
+        renderInColoredRow({ smsHref: 'sms:0612345678', mailHref: 'mailto:a@b.com' });
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+        fireEvent.click(screen.getByRole('menuitem', { name: /Envoyer par SMS/ }));
+
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+});
+
+describe('SendActionsMenu — positionnement', () => {
+    it('est rendu dans <body> (hors des conteneurs overflow du tableau) en position fixe', () => {
+        const { container } = render(
+            <div style={{ overflow: 'hidden' }}>
+                <SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />
+            </div>,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        const menu = screen.getByRole('menu');
+        expect(container.contains(menu)).toBe(false);
+        expect(document.body.contains(menu)).toBe(true);
+        expect(menu.style.position).toBe('fixed');
+        expect(menu.className).toContain('text-[var(--app-text)]');
+    });
+
+    it('place le focus sur la première option et navigue aux flèches', () => {
+        render(<SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        const [sms, mail] = screen.getAllByRole('menuitem');
+        expect(sms).toHaveFocus();
+        fireEvent.keyDown(sms, { key: 'ArrowDown' });
+        expect(mail).toHaveFocus();
+        fireEvent.keyDown(mail, { key: 'ArrowDown' });
+        expect(sms).toHaveFocus();
+        fireEvent.keyDown(sms, { key: 'ArrowUp' });
+        expect(mail).toHaveFocus();
+    });
+
+    it('se ferme au clic extérieur mais pas au clic dans le menu', () => {
+        render(<SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        fireEvent.mouseDown(screen.getByRole('menu'));
+        expect(screen.getByRole('menu')).toBeInTheDocument();
+
+        fireEvent.mouseDown(document.body);
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('conserve les deux options avec leur pictogramme', () => {
+        render(<SendActionsMenu smsHref="sms:0612345678" mailHref="mailto:a@b.com" />);
+        fireEvent.click(screen.getByRole('button', { name: /Envoyer/ }));
+
+        screen.getAllByRole('menuitem').forEach((item) => {
+            expect(item.querySelector('svg')).not.toBeNull();
+        });
+    });
+});

@@ -55,6 +55,21 @@ return [
     | en base64 : 15 Mo bruts restent donc sous 25 Mo une fois encodés).
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Historique des cotations de céréales
+    |--------------------------------------------------------------------------
+    |
+    | Le relevé consulté pour une journée est celui de 15 h (heure cible du
+    | compactage, cotations.compaction.target_time, fuseau métier). Il est
+    | accepté s'il tombe à moins de `tolerance_minutes` de 15 h 00 ; au-delà la
+    | journée est signalée « sans relevé de 15 h » (jamais un autre horaire).
+    |
+    */
+    'history' => [
+        'tolerance_minutes' => (int) env('COTATIONS_HISTORY_TOLERANCE_MINUTES', 10),
+    ],
+
     'mail' => [
         // Destinataire prérempli dans le champ « À » de la modale d'envoi (modifiable
         // par l'utilisateur ; vide pour ne rien préremplir).

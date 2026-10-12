@@ -274,7 +274,7 @@ class CotationMailController extends Controller
 
     private function defaultSubject(): string
     {
-        return 'Cotation du '.now(config('app.timezone'))->format('d/m/Y');
+        return 'COTATIONS '.now(config('app.timezone'))->format('d.m.Y');
     }
 
     private function infoHtml(): string

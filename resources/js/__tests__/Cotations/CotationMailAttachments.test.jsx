@@ -5,7 +5,7 @@ import '@testing-library/jest-dom';
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 
 const LIMITS = { max_files: 2, max_file_bytes: 1024 * 1024, max_total_bytes: 1.5 * 1024 * 1024, extensions: ['pdf', 'png', 'txt'] };
-const DRAFT = { subject: 'Cotation du 30/09/2026', body_html: '<p>Bonjour</p>', is_empty: false, draft_id: 'draft-1', limits: LIMITS };
+const DRAFT = { subject: 'COTATIONS 30.09.2026', body_html: '<p>Bonjour</p>', is_empty: false, draft_id: 'draft-1', limits: LIMITS };
 const PDF = { id: 1, kind: 'pdf', name: 'COTATIONS 30.09.2026.pdf', type: 'application/pdf', size: 20480 };
 const PDF_2 = { ...PDF, id: 2, size: 30720 };
 

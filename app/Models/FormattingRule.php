@@ -17,6 +17,7 @@ class FormattingRule extends Model
         'pattern',
         'text_color',
         'bg_color',
+        'phone_color',
         'priority',
         'is_active',
         'applies_to_a_prevoir',

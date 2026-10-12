@@ -62,9 +62,9 @@ function plainBookButton(task) {
  * pour le SMS que si pickAprevoirSmsNumber le reconnaît comme un mobile
  * français complet (jamais un fixe, jamais une correspondance partielle).
  */
-function sendMenuFor(moduleTitle, group, task) {
+function sendMenuFor(moduleTitle, group, task, placeResolver) {
     const assignee = group?.assignee;
-    const lines = buildAprevoirTaskMessageLines(group, task);
+    const lines = buildAprevoirTaskMessageLines(group, task, placeResolver);
     const smsNumber = pickAprevoirSmsNumber(assignee);
     const smsHref = smsNumber ? buildSmsHref(smsNumber, lines) : null;
     // L'e-mail reste toujours proposable : sans adresse, le lien mailto:
@@ -328,7 +328,7 @@ function TaskDataRow({
                 <div className="flex flex-col items-center gap-1">
                     <div>{group?.date_label || group?.date || '—'}</div>
                     <div>{plainBookButton(task)}</div>
-                    {sendMenuFor(moduleTitle, group, task)}
+                    {sendMenuFor(moduleTitle, group, task, placeResolver)}
                 </div>
             </td>
             <td className="px-3 py-3 text-center font-semibold">{task.fin_label || '—'}</td>
@@ -377,15 +377,15 @@ function TaskDataRow({
                 {task.loading_place || task.delivery_place ? (
                     <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs opacity-95">
                         {task.loading_place ? (
-                                <span className="inline-flex items-center gap-1">
+                                <span className="inline-flex items-start gap-1">
                                     <span className="font-semibold">Chargement :</span>
-                                <PlaceActionsLink text={task.loading_place} placeResolver={placeResolver} buttonClassName="text-xs" />
+                                <PlaceActionsLink text={task.loading_place} placeResolver={placeResolver} showDepotAddress buttonClassName="text-xs" />
                                 </span>
                         ) : null}
                         {task.delivery_place ? (
-                            <span className="inline-flex items-center gap-1">
+                            <span className="inline-flex items-start gap-1">
                                 <span className="font-semibold">Livraison :</span>
-                                <PlaceActionsLink text={task.delivery_place} placeResolver={placeResolver} buttonClassName="text-xs" />
+                                <PlaceActionsLink text={task.delivery_place} placeResolver={placeResolver} showDepotAddress buttonClassName="text-xs" />
                             </span>
                         ) : null}
                     </div>

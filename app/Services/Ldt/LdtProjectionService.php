@@ -507,6 +507,7 @@ class LdtProjectionService
                     'rule_pattern' => $style['matchedPattern'] ?? null,
                     'text_color' => $style['textColor'] ?? null,
                     'bg_color' => $style['bgColor'] ?? null,
+                    'phone_color' => $style['phoneColor'] ?? null,
                 ];
             }
         }
@@ -521,6 +522,7 @@ class LdtProjectionService
             'rule_pattern' => $winner['rule_pattern'],
             'text_color' => $winner['text_color'],
             'bg_color' => $winner['bg_color'],
+            'phone_color' => $winner['phone_color'],
         ];
     }
 

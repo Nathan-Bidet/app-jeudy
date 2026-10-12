@@ -418,7 +418,7 @@ class CotationHistoryCompactor
         );
     }
 
-    private function businessTimezone(): string
+    public function businessTimezone(): string
     {
         return (string) config('cotations.compaction.timezone', 'Europe/Paris');
     }

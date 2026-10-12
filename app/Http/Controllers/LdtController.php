@@ -398,7 +398,7 @@ class LdtController extends Controller
     }
 
     /**
-     * @return array{rule_id:?int,rule_name:?string,rule_pattern:?string,text_color:?string,bg_color:?string}|null
+     * @return array{rule_id:?int,rule_name:?string,rule_pattern:?string,text_color:?string,bg_color:?string,phone_color:?string}|null
      */
     private function resolveLineStyle(string $taskText, ?string $comment): ?array
     {
@@ -418,6 +418,7 @@ class LdtController extends Controller
             'rule_pattern' => $resolved['matchedPattern'] ?? null,
             'text_color' => $resolved['textColor'] ?? null,
             'bg_color' => $resolved['bgColor'] ?? null,
+            'phone_color' => $resolved['phoneColor'] ?? null,
         ];
     }
 

@@ -9,6 +9,10 @@ use App\Models\LeaveType;
 use App\Models\LeaveUserValidator;
 use App\Models\User;
 use App\Notifications\LeaveRequestApprovedNotification;
+use App\Notifications\LeaveRequestDeletedNotification;
+use App\Services\Leaves\LeaveDeletionAuthorizer;
+use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Support\Facades\DB;
 use App\Notifications\LeaveRequestModificationAcceptedNotification;
 use App\Notifications\LeaveRequestModificationProposedNotification;
 use App\Notifications\LeaveRequestModificationRefusedNotification;
@@ -190,8 +194,12 @@ class LeaveRequestController extends Controller
          * ne doit pas voir ne descend jusqu'au navigateur.
          */
         $validatorIdentity = app(ValidatorIdentity::class);
+        $deletionAuthorizer = app(LeaveDeletionAuthorizer::class);
+        // Une seule requête d'affectations pour toutes les lignes (pas de N+1).
+        $assignedTargetIds = $isAdmin ? [] : $deletionAuthorizer->assignedTargetIds($user);
+        $mayDeleteAssigned = ! $isAdmin && $assignedTargetIds !== [] && $deletionAuthorizer->hasPermission($user);
 
-        $formatLeaveRequest = static function (LeaveRequest $leaveRequest, bool $includeValidationDetail = true) use ($viewerId, $isAdmin, $user, $validatorIdentity): array {
+        $formatLeaveRequest = static function (LeaveRequest $leaveRequest, bool $includeValidationDetail = true) use ($mayDeleteAssigned, $viewerId, $isAdmin, $user, $validatorIdentity, $deletionAuthorizer, $assignedTargetIds): array {
             $target = $leaveRequest->target;
             $proposedBy = $leaveRequest->proposedBy;
             $leaveType = $leaveRequest->leaveType;
@@ -238,6 +246,12 @@ class LeaveRequestController extends Controller
 
                 // Vrai tant que CE lecteur peut encore se prononcer. Il devient
                 // faux dès qu'il a tranché, sans dépendre de l'autre valideur.
+                // Bouton « Supprimer » de l'historique des demandes à valider : même
+                // décision que le serveur à la suppression (absent de « Mes demandes »).
+                ...($includeValidationDetail ? [
+                    'can_delete' => $isAdmin || ($mayDeleteAssigned && $deletionAuthorizer->canDelete($user, $leaveRequest, $assignedTargetIds)),
+                ] : []),
+
                 'awaiting_my_decision' => $isAdmin
                     ? $leaveRequest->undecidedLevels() !== []
                     : $leaveRequest->undecidedLevelsFor($viewerId) !== [],
@@ -1026,18 +1040,35 @@ class LeaveRequestController extends Controller
 
     public function destroy(Request $request, int $id): RedirectResponse
     {
-        abort_unless((bool) $request->user()?->hasRole('admin'), 403);
+        $actor = $request->user();
+        abort_unless($actor, 403);
 
-        $leaveRequest = LeaveRequest::query()->findOrFail($id);
+        // Autorisation revérifiée à chaque appel (permission + affectation +
+        // statut, ou administrateur) ; une demande inexistante donne un 404.
+        $leaveRequest = LeaveRequest::query()->with(['target', 'requester'])->findOrFail($id);
+        abort_unless(app(LeaveDeletionAuthorizer::class)->canDelete($actor, $leaveRequest), 403);
+
         $before = $this->leaveRequestAuditSnapshot($leaveRequest);
-        $leaveRequest->delete();
+        $wasApproved = $leaveRequest->status === ValidationStage::APPROVED;
+
+        // Le calendrier, les exports et le décompte des heures sont calculés
+        // depuis les demandes : supprimer la ligne suffit à les mettre à jour.
+        // Aucun compteur de solde n'est stocké (LeaveType::max_days est un plafond).
+        // Les notifications en base qui pointent vers la demande disparue sont retirées.
+        DB::transaction(function () use ($leaveRequest): void {
+            DatabaseNotification::query()->where('data->leave_request_id', (int) $leaveRequest->id)->delete();
+            $leaveRequest->delete();
+        });
+
+        $this->notifyDeletion($leaveRequest, $actor, $wasApproved);
 
         $this->auditLogService->log([
             'action' => 'cancel_leave_request',
             'module' => 'leaves',
             'description' => sprintf(
-                '%s a annulé la demande de congé de %s',
-                $this->userLabel($request->user()),
+                '%s a supprimé %s de %s',
+                $this->userLabel($actor),
+                $wasApproved ? 'le congé validé' : 'la demande de congé',
                 $this->userLabel($leaveRequest->target)
             ),
             'payload' => [
@@ -1047,7 +1078,27 @@ class LeaveRequestController extends Controller
             ],
         ]);
 
-        return back()->with('success', 'Demande de congé supprimée.');
+        return back()->with('success', $wasApproved ? 'Congé validé supprimé.' : 'Demande de congé supprimée.');
+    }
+
+    /**
+     * Informe le collaborateur concerné et le demandeur (sauf l'auteur de la
+     * suppression) qu'un tiers a supprimé le congé.
+     */
+    private function notifyDeletion(LeaveRequest $leaveRequest, User $actor, bool $wasApproved): void
+    {
+        $recipients = collect([$leaveRequest->target, $leaveRequest->requester])
+            ->filter()
+            ->reject(fn (User $user) => (int) $user->id === (int) $actor->id)
+            ->unique('id');
+
+        foreach ($recipients as $recipient) {
+            $recipient->notify(new LeaveRequestDeletedNotification(
+                $leaveRequest->start_at?->toDateString(),
+                $leaveRequest->end_at?->toDateString(),
+                $wasApproved,
+            ));
+        }
     }
 
     public function show(Request $request, int $id): JsonResponse

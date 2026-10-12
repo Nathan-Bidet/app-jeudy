@@ -273,12 +273,21 @@ export default function LeavesIndex({
         });
     };
 
-    const deleteRequest = (id) => {
-        if (!window.confirm('Supprimer cette demande de congé ?')) {
+    // Confirmation explicite, qui distingue une demande en attente d'un congé déjà validé.
+    const deleteRequest = (request) => {
+        const approved = request.status === 'approved';
+        const who = request.target_label ? ` de ${request.target_label}` : '';
+        const period = `du ${formatDateFr(request.start_at)} au ${formatDateFr(request.end_at)}`;
+        const message = approved
+            ? `Supprimer le congé DÉJÀ VALIDÉ${who} ${period} ? Il disparaîtra du calendrier et des décomptes.`
+            : `Supprimer la demande de congé en attente${who} ${period} ?`;
+
+        if (!window.confirm(message)) {
             return;
         }
 
-        router.delete(route('leaves.destroy', id));
+        // Reste sur place : filtres et état de l'historique conservés, la ligne disparaît au rafraîchissement des props.
+        router.delete(route('leaves.destroy', request.id), { preserveState: true, preserveScroll: true });
     };
 
     // Ce qui reste à traiter. `pending_validator_2` est l'ancien état du
@@ -436,7 +445,7 @@ export default function LeavesIndex({
                                             <button
                                                 type="button"
                                                 className="rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)]"
-                                                onClick={() => deleteRequest(request.id)}
+                                                onClick={() => deleteRequest(request)}
                                             >
                                                 Supprimer
                                             </button>
@@ -563,11 +572,11 @@ export default function LeavesIndex({
                                                     Modifier la période
                                                 </button>
                                             ) : null}
-                                            {canDeleteLeaveRequests ? (
+                                            {canDeleteLeaveRequests || request.can_delete ? (
                                                 <button
                                                     type="button"
                                                     className="w-full rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-text)] sm:w-auto"
-                                                    onClick={() => deleteRequest(request.id)}
+                                                    onClick={() => deleteRequest(request)}
                                                 >
                                                     Supprimer
                                                 </button>
