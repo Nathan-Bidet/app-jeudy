@@ -279,3 +279,210 @@ describe('Cotations céréales — suppression', () => {
     });
 });
 
+describe('Cotations céréales — céréales supprimées', () => {
+    const deletedList = [
+        { code: 'EOB', name: 'Orge', type: 'matif', deleted_at: '2026-10-12T12:30:00Z', deleted_by_name: 'Administrateur' },
+        { code: 'C1', name: 'Sarrasin', type: 'custom', deleted_at: '2026-10-11T09:00:00Z', deleted_by_name: null },
+    ];
+    const editionWithDeleted = (list) => ({ ...edition, deleted_cereals: list });
+
+    // restoreResult : réponse du POST /restore ; après restauration, la vue d'édition contient l'Orge.
+    const mockRestore = (restoreResult, list = deletedList) => {
+        calls = [];
+        let restored = false;
+        global.fetch = vi.fn(async (url, options = {}) => {
+            calls.push({ url, method: options.method || 'GET', body: options.body });
+            if (options.method === 'POST') {
+                restored = restoreResult.status === 200;
+                return { ok: restoreResult.status === 200, status: restoreResult.status, json: async () => restoreResult.body };
+            }
+            const body = String(url).includes('edit=1')
+                ? (restored
+                    ? { ...editionWithDeleted([]), groups: [...edition.groups, group('EOB', 'Orge')], cereal_order: ['ECO', 'EBM', 'EMA', 'EOB'] }
+                    : editionWithDeleted(list))
+                : consultation;
+            return { ok: true, status: 200, json: async () => body };
+        });
+    };
+    const openEdit = async () => {
+        render(<CotationsIndex {...props} />);
+        await screen.findByText('Colza');
+        fireEvent.click(screen.getByRole('button', { name: /Modifier/ }));
+        await screen.findByText('Masquée');
+    };
+
+    it('section repliée par défaut avec le nombre, absente de la consultation, détails à l’ouverture', async () => {
+        mockRestore({ status: 200, body: { ok: true } });
+        render(<CotationsIndex {...props} />);
+        await screen.findByText('Colza');
+        expect(screen.queryByText(/Céréales supprimées/i)).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: /Modifier/ }));
+        const header = await screen.findByText('Céréales supprimées (2)');
+        expect(screen.queryByTestId('deleted-cereal')).toBeNull();
+
+        fireEvent.click(header);
+        const items = await screen.findAllByTestId('deleted-cereal');
+        expect(items).toHaveLength(2);
+        expect(items[0]).toHaveTextContent('Orge');
+        expect(items[0]).toHaveTextContent('Type : MATIF');
+        expect(items[0]).toHaveTextContent('Par : Administrateur');
+        expect(items[0]).toHaveTextContent(/Supprimée le : \d{2}\/\d{2}\/2026 à \d{2}:\d{2}/);
+        expect(items[1]).toHaveTextContent('Type : Personnalisée');
+        // Auteur inconnu : rien d'inventé.
+        expect(items[1]).toHaveTextContent('Par : non renseigné');
+    });
+
+    it('affiche « Aucune céréale supprimée. » quand le registre est vide', async () => {
+        mockRestore({ status: 200, body: { ok: true } }, []);
+        await openEdit();
+
+        fireEvent.click(screen.getByText('Céréales supprimées (0)'));
+        expect(await screen.findByText('Aucune céréale supprimée.')).toBeInTheDocument();
+    });
+
+    it('restaurer : confirmation, une seule requête malgré les clics répétés, la céréale revient en édition', async () => {
+        mockRestore({ status: 200, body: { ok: true, deleted_cereals: [deletedList[1]] } });
+        await openEdit();
+        fireEvent.click(screen.getByText('Céréales supprimées (2)'));
+        fireEvent.click(await screen.findByRole('button', { name: 'Restaurer Orge' }));
+
+        const dialog = await screen.findByRole('alertdialog');
+        expect(within(dialog).getByText('Restaurer cette céréale ?')).toBeInTheDocument();
+        expect(within(dialog).getByText(/« Orge »/)).toBeInTheDocument();
+        expect(calls.some((call) => call.method === 'POST')).toBe(false);
+
+        const confirm = within(dialog).getByRole('button', { name: 'Restaurer la céréale' });
+        fireEvent.click(confirm);
+        fireEvent.click(confirm);
+
+        expect(await screen.findByText('Céréale restaurée avec succès.')).toBeInTheDocument();
+        expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+        expect(calls.find((call) => call.method === 'POST').url).toBe('/cotations/cereals/EOB/restore');
+        // Céréale non éditable par son titre (produit MATIF hors Colza/Blé/Maïs) : titre en texte.
+        await waitFor(() => expect(screen.getAllByText('Orge').length).toBeGreaterThan(0));
+        // La section (restée ouverte) ne contient plus que Sarrasin.
+        const remaining = screen.getAllByTestId('deleted-cereal');
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0]).toHaveTextContent('Sarrasin');
+        expect(screen.getByText('Céréales supprimées (1)')).toBeInTheDocument();
+    });
+
+    it('échec : la céréale reste dans les supprimées et l’erreur est expliquée', async () => {
+        mockRestore({ status: 500, body: { message: 'Restauration impossible.' } });
+        await openEdit();
+        fireEvent.click(screen.getByText('Céréales supprimées (2)'));
+        fireEvent.click(await screen.findByRole('button', { name: 'Restaurer Orge' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Restaurer la céréale' }));
+
+        expect(await screen.findByText('Restauration impossible.')).toBeInTheDocument();
+        expect(screen.getByText('Céréales supprimées (2)')).toBeInTheDocument();
+    });
+});
+
+describe('Cotations céréales — bandeau repliable', () => {
+    const customEdition = {
+        ...edition,
+        groups: [...edition.groups, group('C1', 'Sarrasin')],
+        custom_cereals: [{ id: 1, code: 'C1', name: 'Sarrasin', base_product_code: 'EBM', sort_order: 100 }],
+        cereal_order: ['ECO', 'EBM', 'EMA', 'C1'],
+    };
+    const mockEdition = () => {
+        calls = [];
+        global.fetch = vi.fn(async (url, options = {}) => {
+            calls.push({ url, method: options.method || 'GET' });
+            if (options.method === 'PUT') {
+                return { ok: true, status: 200, json: async () => ({ ok: true, code: 'ECO', visible: false, hidden_cereal_codes: ['EMA', 'ECO'] }) };
+            }
+            return { ok: true, status: 200, json: async () => (String(url).includes('edit=1') ? customEdition : consultation) };
+        });
+    };
+    const toggleOf = (section) => section.querySelector('[data-toggle-main]');
+    const expanded = (section) => toggleOf(section).getAttribute('aria-expanded') === 'true';
+    const sectionOf = (element) => element.closest('section');
+    const headerOf = (section) => toggleOf(section).parentElement;
+
+    it('consultation : un clic sur la zone libre du bandeau déplie, un second replie, sans double déclenchement', async () => {
+        render(<CotationsIndex {...props} />);
+        const section = sectionOf(await screen.findByText('Colza'));
+        expect(expanded(section)).toBe(false);
+
+        fireEvent.click(headerOf(section));
+        expect(expanded(section)).toBe(true);
+        fireEvent.click(headerOf(section));
+        expect(expanded(section)).toBe(false);
+
+        // La flèche (commande principale) bascule exactement une fois.
+        fireEvent.click(section.querySelector('svg.lucide-chevron-right'));
+        expect(expanded(section)).toBe(true);
+        fireEvent.click(toggleOf(section));
+        expect(expanded(section)).toBe(false);
+    });
+
+    it('édition : la zone libre bascule, les commandes du bandeau restent indépendantes', async () => {
+        mockEdition();
+        render(<CotationsIndex {...props} />);
+        await screen.findByText('Colza');
+        fireEvent.click(screen.getByRole('button', { name: /Modifier/ }));
+        const section = sectionOf(await screen.findByDisplayValue('Colza'));
+
+        // Zones libres : en-tête, texte d'information à côté du nom.
+        fireEvent.click(headerOf(section));
+        expect(expanded(section)).toBe(true);
+        fireEvent.click(screen.getAllByText(/Céréale MATIF d'origine/)[0]);
+        expect(expanded(section)).toBe(false);
+
+        // Champ du nom, œil, corbeille, poignée : aucun changement d'état.
+        fireEvent.click(screen.getByDisplayValue('Colza'));
+        expect(expanded(section)).toBe(false);
+        fireEvent.click(within(section).getByRole('button', { name: /Masquer Colza/ }));
+        expect(expanded(section)).toBe(false);
+        await waitFor(() => expect(calls.some((call) => call.method === 'PUT')).toBe(true));
+        fireEvent.click(within(section).getByRole('button', { name: /Supprimer Colza/ }));
+        expect(expanded(section)).toBe(false);
+        expect(await screen.findByText('Supprimer la céréale ?')).toBeInTheDocument();
+        const handle = within(section).getByRole('button', { name: /Déplacer Colza/ });
+        fireEvent.dragStart(handle, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+        fireEvent.click(handle);
+        expect(expanded(section)).toBe(false);
+    });
+
+    it('édition : céréale masquée et céréale personnalisée se déplient ; le sélecteur de référence ne déplie pas', async () => {
+        mockEdition();
+        render(<CotationsIndex {...props} />);
+        await screen.findByText('Colza');
+        fireEvent.click(screen.getByRole('button', { name: /Modifier/ }));
+        const hidden = sectionOf(await screen.findByDisplayValue('Maïs'));
+        const custom = sectionOf(await screen.findByDisplayValue('Sarrasin'));
+
+        fireEvent.click(headerOf(hidden));
+        expect(expanded(hidden)).toBe(true);
+        expect(within(hidden).getByText('Masquée')).toBeInTheDocument();
+
+        const select = within(custom).getByLabelText('Céréale de base');
+        fireEvent.click(select);
+        fireEvent.change(select, { target: { value: 'EMA' } });
+        expect(expanded(custom)).toBe(false);
+        fireEvent.click(headerOf(custom));
+        expect(expanded(custom)).toBe(true);
+    });
+
+    it('clavier : Entrée et Espace sur la commande principale, une seule bascule, aria-expanded cohérent', async () => {
+        mockEdition();
+        render(<CotationsIndex {...props} />);
+        await screen.findByText('Colza');
+        fireEvent.click(screen.getByRole('button', { name: /Modifier/ }));
+        const section = sectionOf(await screen.findByDisplayValue('Colza'));
+        const main = toggleOf(section);
+
+        fireEvent.keyDown(main, { key: 'Enter' });
+        expect(main).toHaveAttribute('aria-expanded', 'true');
+        fireEvent.keyDown(main, { key: ' ' });
+        expect(main).toHaveAttribute('aria-expanded', 'false');
+        // Saisie dans le champ du nom : Espace/Entrée ne plient pas la céréale.
+        fireEvent.keyDown(screen.getByDisplayValue('Colza'), { key: ' ' });
+        fireEvent.keyDown(screen.getByDisplayValue('Colza'), { key: 'Enter' });
+        expect(main).toHaveAttribute('aria-expanded', 'false');
+    });
+});
+

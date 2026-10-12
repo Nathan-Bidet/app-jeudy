@@ -613,12 +613,7 @@ class CotationController extends Controller
         // Consultation de l'historique : une céréale masquée aujourd'hui n'est pas montrée. Une céréale
         // supprimée reste visible pour les journées antérieures à sa suppression.
         $groups = $this->withoutHiddenCereals($groups, $this->hiddenCerealCodes());
-        $deleted = $this->marketService->deletedCereals();
-        $groups = array_values(array_filter($groups, static function (array $group) use ($deleted, $recordedAt): bool {
-            $entry = $deleted[(string) ($group['code'] ?? '')] ?? null;
-
-            return $entry === null || $entry['deleted_at']->getTimestamp() > $recordedAt->getTimestamp();
-        }));
+        $groups = array_values(array_filter($groups, fn (array $group): bool => ! $this->marketService->wasDeletedAt((string) ($group['code'] ?? ''), $recordedAt)));
         $groups = $this->applyCerealOrder($groups, $state['cereal_order']);
         $groups = $this->applyCerealLabels($groups, $state['cereal_labels']);
 
@@ -1063,6 +1058,7 @@ class CotationController extends Controller
             'options' => $options,
             'custom_cereals' => $customCereals,
             'hidden_cereal_codes' => $editMode ? $hiddenCodes : [],
+            'deleted_cereals' => $editMode ? $this->deletedCerealsList() : [],
             'cereal_labels' => $cerealLabels,
             'cereal_table_labels' => $cerealTableLabels,
             'cereal_info_html' => $this->cerealInfoConfig(),
@@ -1532,6 +1528,14 @@ class CotationController extends Controller
 
         $before = $this->cerealOrderConfig();
         $normalized = $this->normalizeCerealOrder($order);
+        // Le formulaire ne contient pas les céréales supprimées : on garde leur place dans l'ordre
+        // enregistré pour qu'une restauration les remette à leur emplacement d'origine.
+        foreach (array_keys($this->marketService->deletedCereals()) as $deletedCode) {
+            $position = array_search($deletedCode, $before, true);
+            if ($position !== false && ! in_array($deletedCode, $normalized, true)) {
+                array_splice($normalized, min($position, count($normalized)), 0, [$deletedCode]);
+            }
+        }
         $setting = CotationSetting::query()->firstOrNew(['key' => 'cereal_display_order']);
         $setting->forceFill([
             'section' => 'display',
@@ -1689,18 +1693,24 @@ class CotationController extends Controller
         $result = \Illuminate\Support\Facades\DB::transaction(function () use ($code, $name, $request): array {
             $setting = CotationSetting::query()->where('key', 'cereal_deleted_codes')->lockForUpdate()->first()
                 ?? new CotationSetting(['key' => 'cereal_deleted_codes']);
-            $registry = $this->marketService->deletedCereals();
+            $registry = $this->marketService->deletionRegistry();
 
             // Déjà supprimée (double clic, deux administrateurs) : succès sans nouvelle écriture.
-            if (isset($registry[$code])) {
-                return ['already' => true, 'deleted_at' => $registry[$code]['deleted_at']];
+            $current = $this->marketService->deletedCereals();
+            if (isset($current[$code])) {
+                return ['already' => true, 'deleted_at' => $current[$code]['deleted_at']];
             }
 
+            // Nouvelle période de suppression ; les périodes passées (et leurs restaurations) sont conservées.
             $deletedAt = now();
-            $entries = collect($registry)
-                ->map(fn (array $entry): array => ['deleted_at' => $entry['deleted_at']->toIso8601String(), 'name' => $entry['name']])
-                ->all();
-            $entries[$code] = ['deleted_at' => $deletedAt->toIso8601String(), 'name' => $name, 'deleted_by' => $request->user()?->id];
+            $entries = $registry;
+            $entries[$code] = [
+                'name' => $name,
+                'periods' => [
+                    ...($registry[$code]['periods'] ?? []),
+                    ['deleted_at' => $deletedAt->toIso8601String(), 'deleted_by' => $request->user()?->id, 'restored_at' => null, 'restored_by' => null],
+                ],
+            ];
 
             $setting->forceFill([
                 'section' => 'cereal_visibility',
@@ -1742,7 +1752,108 @@ class CotationController extends Controller
             'ok' => true,
             'code' => $code,
             'already_deleted' => $result['already'],
+            'deleted_cereals' => $this->deletedCerealsList(),
         ]);
+    }
+
+    /**
+     * Restaure une céréale supprimée : même code, mêmes lignes, même ordre, même visibilité.
+     * Ferme la période de suppression en cours (elle reste dans le registre pour l'historique).
+     */
+    public function restoreCereal(Request $request, string $code): JsonResponse
+    {
+        $code = trim($code);
+        if (! isset($this->marketService->deletionRegistry()[$code])) {
+            return response()->json(['message' => 'Cette céréale n’a jamais été supprimée.'], 404);
+        }
+
+        $result = \Illuminate\Support\Facades\DB::transaction(function () use ($code, $request): array {
+            $setting = CotationSetting::query()->where('key', 'cereal_deleted_codes')->lockForUpdate()->first();
+            $registry = $this->marketService->deletionRegistry();
+            $periods = $registry[$code]['periods'] ?? [];
+            $last = $periods === [] ? null : $periods[array_key_last($periods)];
+
+            // Déjà restaurée (double clic, deux administrateurs) : succès sans nouvelle écriture.
+            if ($setting === null || $last === null || $last['restored_at'] !== null) {
+                return ['already' => true, 'period' => $last];
+            }
+
+            $restoredAt = now();
+            $periods[array_key_last($periods)]['restored_at'] = $restoredAt->toIso8601String();
+            $periods[array_key_last($periods)]['restored_by'] = $request->user()?->id;
+            $registry[$code]['periods'] = $periods;
+
+            $setting->forceFill([
+                'note' => json_encode($registry, JSON_UNESCAPED_UNICODE),
+                'updated_by' => $request->user()?->id,
+            ])->save();
+
+            return ['already' => false, 'period' => $periods[array_key_last($periods)]];
+        });
+
+        if (! $result['already']) {
+            $isCustom = Schema::hasTable('cotation_custom_cereals') && CotationCustomCereal::query()->where('code', $code)->exists();
+            $name = CotationCustomCereal::query()->where('code', $code)->value('name')
+                ?? $this->cerealLabelsConfig()[$code]
+                ?? $this->marketService->deletionRegistry()[$code]['name']
+                ?? $code;
+
+            $this->auditLogService->log([
+                'action' => 'restore_cotation_cereal',
+                'module' => 'cotations',
+                'description' => sprintf('Céréale « %s » restaurée', $name),
+                'payload' => [
+                    'cereal_code' => $code,
+                    'cereal_name' => $name,
+                    'cereal_type' => $isCustom ? 'custom' : 'matif',
+                    'before' => ['deleted' => true, 'deleted_at' => $result['period']['deleted_at'], 'deleted_by' => $result['period']['deleted_by']],
+                    'after' => ['deleted' => false, 'restored_at' => $result['period']['restored_at']],
+                    'hidden' => in_array($code, $this->hiddenCerealCodes(), true),
+                    'preserved_manual_lines' => CotationManualPrice::query()->where('product_code', $code)->count(),
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'code' => $code,
+            'already_restored' => $result['already'],
+            'deleted_cereals' => $this->deletedCerealsList(),
+        ]);
+    }
+
+    /**
+     * Céréales actuellement supprimées, de la plus récente à la plus ancienne (édition uniquement).
+     *
+     * @return array<int, array{code: string, name: string, type: string, deleted_at: string, deleted_by_name: ?string}>
+     */
+    private function deletedCerealsList(): array
+    {
+        $deleted = $this->marketService->deletedCereals();
+        if ($deleted === []) {
+            return [];
+        }
+
+        $customs = Schema::hasTable('cotation_custom_cereals')
+            ? CotationCustomCereal::query()->whereIn('code', array_keys($deleted))->pluck('name', 'code')->all()
+            : [];
+        $users = \App\Models\User::query()
+            ->whereIn('id', array_filter(array_column($deleted, 'deleted_by')))
+            ->get()
+            ->keyBy('id');
+
+        return collect($deleted)
+            ->map(fn (array $entry, string $code): array => [
+                'code' => $code,
+                'name' => (string) ($customs[$code] ?? $entry['name'] ?? $code),
+                'type' => isset($customs[$code]) ? 'custom' : 'matif',
+                'deleted_at' => $entry['deleted_at']->toIso8601String(),
+                // Jamais inventé : null quand l'utilisateur est inconnu (anciens enregistrements).
+                'deleted_by_name' => $entry['deleted_by'] ? $this->userLabel($users->get($entry['deleted_by'])) : null,
+            ])
+            ->sortByDesc('deleted_at')
+            ->values()
+            ->all();
     }
 
     private function cerealInfoConfig(): string

@@ -29,14 +29,14 @@ class CotationMarketService
     private const BASE_PRODUCT_CODES = ['ECO', 'EBM', 'EMA'];
 
     /**
-     * Céréales supprimées de la gestion courante (suppression logique) : code => date de suppression.
-     * Aucune donnée n'est effacée : les lignes de cotation, les cours et le journal restent en base,
-     * seul ce registre les écarte des vues courantes (édition, consultation, PDF, courriel).
-     * L'historique, lui, ne les écarte qu'à partir de la date de suppression.
+     * Registre durable des suppressions / restaurations de céréales (cotation_settings, clé
+     * cereal_deleted_codes) : code => nom + périodes successives. Une restauration ferme la période
+     * en cours sans rien effacer, ce qui permet plusieurs cycles et des historiques fidèles.
+     * Les anciennes entrées (une seule suppression à plat) sont lues comme une période ouverte.
      *
-     * @return array<string, array{deleted_at: Carbon, name: ?string}>
+     * @return array<string, array{name: ?string, periods: array<int, array{deleted_at: string, deleted_by: ?int, restored_at: ?string, restored_by: ?int}>}>
      */
-    public function deletedCereals(): array
+    public function deletionRegistry(): array
     {
         if (! Schema::hasTable('cotation_settings')) {
             return [];
@@ -44,16 +44,78 @@ class CotationMarketService
 
         $note = CotationSetting::query()->where('key', 'cereal_deleted_codes')->value('note');
         $decoded = $note ? json_decode((string) $note, true) : null;
-        $deleted = [];
+        $registry = [];
 
         foreach (is_array($decoded) ? $decoded : [] as $code => $entry) {
-            $at = is_array($entry) && ! empty($entry['deleted_at']) ? Carbon::parse($entry['deleted_at']) : null;
-            if (is_string($code) && $code !== '' && $at !== null) {
-                $deleted[$code] = ['deleted_at' => $at, 'name' => $entry['name'] ?? null];
+            if (! is_string($code) || $code === '' || ! is_array($entry)) {
+                continue;
+            }
+
+            $periods = isset($entry['periods']) && is_array($entry['periods'])
+                ? $entry['periods']
+                : [['deleted_at' => $entry['deleted_at'] ?? null, 'deleted_by' => $entry['deleted_by'] ?? null]];
+
+            $clean = [];
+            foreach ($periods as $period) {
+                if (! is_array($period) || empty($period['deleted_at'])) {
+                    continue;
+                }
+                $clean[] = [
+                    'deleted_at' => (string) $period['deleted_at'],
+                    'deleted_by' => isset($period['deleted_by']) ? (int) $period['deleted_by'] : null,
+                    'restored_at' => ! empty($period['restored_at']) ? (string) $period['restored_at'] : null,
+                    'restored_by' => isset($period['restored_by']) ? (int) $period['restored_by'] : null,
+                ];
+            }
+
+            if ($clean !== []) {
+                $registry[$code] = ['name' => $entry['name'] ?? null, 'periods' => $clean];
+            }
+        }
+
+        return $registry;
+    }
+
+    /**
+     * Céréales actuellement supprimées de la gestion courante (suppression logique) : code => période
+     * en cours. Aucune donnée n'est effacée : lignes de cotation, cours et journal restent en base ;
+     * seul ce registre écarte la céréale des vues courantes (édition, consultation, PDF, courriel).
+     *
+     * @return array<string, array{deleted_at: Carbon, name: ?string, deleted_by: ?int}>
+     */
+    public function deletedCereals(): array
+    {
+        $deleted = [];
+
+        foreach ($this->deletionRegistry() as $code => $entry) {
+            $last = end($entry['periods']);
+            if ($last['restored_at'] === null) {
+                $deleted[$code] = [
+                    'deleted_at' => Carbon::parse($last['deleted_at']),
+                    'name' => $entry['name'],
+                    'deleted_by' => $last['deleted_by'],
+                ];
             }
         }
 
         return $deleted;
+    }
+
+    /**
+     * La céréale était-elle supprimée à cet instant ? (historique : toutes les périodes comptent,
+     * donc une restauration ultérieure ne fait pas réapparaître la céréale dans le passé.)
+     */
+    public function wasDeletedAt(string $code, \DateTimeInterface $at): bool
+    {
+        foreach ($this->deletionRegistry()[$code]['periods'] ?? [] as $period) {
+            $from = Carbon::parse($period['deleted_at'])->getTimestamp();
+            $to = $period['restored_at'] !== null ? Carbon::parse($period['restored_at'])->getTimestamp() : PHP_INT_MAX;
+            if ($from <= $at->getTimestamp() && $at->getTimestamp() < $to) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

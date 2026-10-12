@@ -3,6 +3,7 @@ import CerealHistoryCharts from '@/Components/Cotations/CerealHistoryCharts';
 import CotationMailModal from '@/Components/Cotations/CotationMailModal';
 import DangerButton from '@/Components/DangerButton';
 import Modal from '@/Components/Modal';
+import PrimaryButton from '@/Components/PrimaryButton';
 import SecondaryButton from '@/Components/SecondaryButton';
 import PdfExportButton from '@/Components/Cotations/PdfExportButton';
 import RichTextEditor from '@/Components/Cotations/CotationRichTextEditor';
@@ -102,21 +103,38 @@ function xsrfToken() {
     return match ? decodeURIComponent(match[1]) : '';
 }
 
+// Éléments qui gardent leur propre comportement : un clic dessus ne replie/déplie jamais la section.
+const COLLAPSIBLE_INTERACTIVE_SELECTOR = 'button, input, select, textarea, a, label, summary, [role="button"], [draggable="true"], [data-no-toggle]';
+
 function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, actions = null, titleClassName = 'text-lg', bodyClassName = 'mt-3', defaultOpen = false, compactMobile = false }) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
+    const toggle = () => setIsOpen((value) => !value);
+
+    // Un seul gestionnaire pour tout le bandeau : tout clic sur une zone libre (ou sur la commande
+    // principale marquée data-toggle-main) bascule l'état ; les autres commandes sont ignorées.
+    const handleHeaderClick = (event) => {
+        const interactive = event.target.closest?.(COLLAPSIBLE_INTERACTIVE_SELECTOR);
+        if (interactive && !interactive.hasAttribute('data-toggle-main')) return;
+        // Clic dans un portail React (fenêtre ouverte depuis une action du bandeau) : hors bandeau.
+        if (!event.currentTarget.contains(event.target)) return;
+        toggle();
+    };
 
     return (
         <section className={`w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-sm ${compactMobile ? 'p-3 sm:p-4' : 'p-4'}`}>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div
+                onClick={handleHeaderClick}
+                className="flex cursor-pointer flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            >
                 {titleEditor ? (
                     <div
                         role="button"
                         tabIndex={0}
-                        onClick={() => setIsOpen((value) => !value)}
+                        data-toggle-main
                         onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
+                            if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                                 event.preventDefault();
-                                setIsOpen((value) => !value);
+                                toggle();
                             }
                         }}
                         aria-expanded={isOpen}
@@ -124,7 +142,7 @@ function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, a
                     >
                         <span className="flex min-w-0 max-w-full flex-1 items-center gap-2">
                             {Icon ? <Icon className="h-5 w-5 shrink-0 text-[var(--brand-brown)]" strokeWidth={2.3} /> : null}
-                            <span className="min-w-0 max-w-full flex-1" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                            <span className="min-w-0 max-w-full flex-1" onKeyDown={(event) => event.stopPropagation()}>
                                 {titleEditor}
                             </span>
                         </span>
@@ -136,7 +154,7 @@ function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, a
                 ) : (
                     <button
                         type="button"
-                        onClick={() => setIsOpen((value) => !value)}
+                        data-toggle-main
                         aria-expanded={isOpen}
                         className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
                     >
@@ -153,11 +171,7 @@ function CollapsibleSection({ title, titleEditor = null, icon: Icon, children, a
                     </button>
                 )}
 
-                {actions ? (
-                    <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
-                        {actions}
-                    </div>
-                ) : null}
+                {actions ? <div className="shrink-0">{actions}</div> : null}
             </div>
 
             {isOpen ? (
@@ -1906,6 +1920,52 @@ function FuelGridSection({
     );
 }
 
+function formatDeletedAt(value) {
+    const date = new Date(value);
+    if (!value || Number.isNaN(date.getTime())) return 'date inconnue';
+    const day = new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+    const time = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(date);
+
+    return `${day} à ${time}`;
+}
+
+// Céréales supprimées (suppression logique) : consultables et restaurables depuis l'édition.
+function DeletedCerealsSection({ cereals = [], onRestore }) {
+    return (
+        <CollapsibleSection title={`Céréales supprimées (${cereals.length})`} icon={Trash2}>
+            {cereals.length === 0 ? (
+                <p className="text-sm text-[var(--app-muted)]">Aucune céréale supprimée.</p>
+            ) : (
+                <ul className="space-y-2">
+                    {cereals.map((cereal) => (
+                        <li
+                            key={cereal.code}
+                            data-testid="deleted-cereal"
+                            className="flex flex-col gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                            <div className="min-w-0 space-y-0.5 text-sm">
+                                <p className="break-words font-black uppercase tracking-[0.04em] text-[var(--app-text)]">{cereal.name}</p>
+                                <p className="text-[var(--app-muted)]">Type : {cereal.type === 'custom' ? 'Personnalisée' : 'MATIF'}</p>
+                                <p className="text-[var(--app-muted)]">Supprimée le : {formatDeletedAt(cereal.deleted_at)}</p>
+                                <p className="text-[var(--app-muted)]">Par : {cereal.deleted_by_name || 'non renseigné'}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => onRestore(cereal)}
+                                aria-label={`Restaurer ${cereal.name}`}
+                                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--brand-brown)]"
+                            >
+                                <RotateCcw className="h-4 w-4" strokeWidth={2.3} aria-hidden="true" />
+                                Restaurer
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </CollapsibleSection>
+    );
+}
+
 function HarvestSettings({ rows = [], canManage, form, setFormSetting }) {
     if (!canManage || rows.length === 0) return null;
 
@@ -2045,6 +2105,9 @@ export default function CotationsIndex({
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deletePending, setDeletePending] = useState(false);
     const [deleteError, setDeleteError] = useState('');
+    const [restoreTarget, setRestoreTarget] = useState(null);
+    const [restorePending, setRestorePending] = useState(false);
+    const [restoreError, setRestoreError] = useState('');
 
     // Bannière de confirmation : succès et informations disparaissent seules après 10 s ; un nouveau
     // message relance le délai (le timer précédent est annulé). Les erreurs restent affichées.
@@ -2286,6 +2349,7 @@ export default function CotationsIndex({
         setDeleteError('');
 
         try {
+            let deletedCereals = null;
             if (!unsaved) {
                 const response = await fetch(`${routes.cereal_visibility_base}/${encodeURIComponent(code)}`, {
                     method: 'DELETE',
@@ -2296,9 +2360,11 @@ export default function CotationsIndex({
                 if (!response.ok || !data?.ok) {
                     throw new Error(data?.message || 'La céréale n’a pas pu être supprimée.');
                 }
+                deletedCereals = data.deleted_cereals ?? null;
             }
 
             removeCerealLocally(code);
+            if (deletedCereals) setMarketData((current) => ({ ...current, deleted_cereals: deletedCereals }));
             setDeleteTarget(null);
             setMailNotice({
                 type: 'success',
@@ -2308,6 +2374,69 @@ export default function CotationsIndex({
             setDeleteError(exception?.message || 'La céréale n’a pas pu être supprimée.');
         } finally {
             setDeletePending(false);
+        }
+    };
+
+    const askRestoreCereal = (cereal) => {
+        setRestoreError('');
+        setRestoreTarget(cereal);
+    };
+
+    const closeRestoreDialog = () => {
+        if (restorePending) return;
+        setRestoreTarget(null);
+        setRestoreError('');
+    };
+
+    // Restauration côté serveur (même identité, mêmes données) puis rechargement de la vue d'édition ;
+    // la céréale rejoint le brouillon sans écraser les modifications en cours des autres.
+    const confirmRestoreCereal = async () => {
+        if (!restoreTarget || restorePending) return;
+
+        const { code } = restoreTarget;
+        setRestorePending(true);
+        setRestoreError('');
+
+        try {
+            const response = await fetch(`${routes.cereal_visibility_base}/${encodeURIComponent(code)}/restore`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrfToken() },
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result?.ok) {
+                throw new Error(result?.message || 'La céréale n’a pas pu être restaurée.');
+            }
+
+            const data = await fetchMarketData({ edit: true });
+            if (data) {
+                const group = (data.groups || []).find((item) => item.code === code);
+                const customCereal = flattenCustomCereals((data.custom_cereals || []).filter((item) => item.code === code));
+                const order = [...(form.data.cereal_order || [])];
+                if (!order.includes(code)) {
+                    const position = (data.cereal_order || []).indexOf(code);
+                    order.splice(position >= 0 ? Math.min(position, order.length) : order.length, 0, code);
+                }
+                form.setData({
+                    ...form.data,
+                    manual_prices: [
+                        ...(form.data.manual_prices || []).filter((row) => row.product_code !== code),
+                        ...flattenMarketRows(group ? [group] : []),
+                    ],
+                    custom_cereals: [
+                        ...(form.data.custom_cereals || []).filter((item) => item.code !== code),
+                        ...customCereal,
+                    ],
+                    cereal_order: order,
+                });
+            }
+            setMarketData((current) => ({ ...current, deleted_cereals: result.deleted_cereals ?? [] }));
+            setRestoreTarget(null);
+            setMailNotice({ type: 'success', text: 'Céréale restaurée avec succès.' });
+        } catch (exception) {
+            setRestoreError(exception?.message || 'La céréale n’a pas pu être restaurée.');
+        } finally {
+            setRestorePending(false);
         }
     };
 
@@ -2896,6 +3025,27 @@ export default function CotationsIndex({
                     </div>
                 </Modal>
 
+                <Modal show={Boolean(restoreTarget)} maxWidth="md" closeable={!restorePending} onClose={closeRestoreDialog}>
+                    <div className="space-y-3 p-6" role="alertdialog" aria-labelledby="restore-cereal-title">
+                        <h2 id="restore-cereal-title" className="text-lg font-black text-[var(--app-text)]">Restaurer cette céréale ?</h2>
+                        <p className="text-sm text-[var(--app-text)]">
+                            Voulez-vous restaurer la céréale « {restoreTarget?.name} » ?
+                        </p>
+                        <p className="text-sm text-[var(--app-muted)]">
+                            Elle sera de nouveau disponible dans les cotations avec ses anciennes données. Son historique sera intégralement conservé.
+                        </p>
+                        {restoreError ? (
+                            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{restoreError}</p>
+                        ) : null}
+                        <div className="flex justify-end gap-2 pt-2">
+                            <SecondaryButton type="button" onClick={closeRestoreDialog} disabled={restorePending}>Annuler</SecondaryButton>
+                            <PrimaryButton type="button" onClick={confirmRestoreCereal} disabled={restorePending}>
+                                Restaurer la céréale
+                            </PrimaryButton>
+                        </div>
+                    </div>
+                </Modal>
+
                 {mailNotice ? (
                     <div
                         role="status"
@@ -3072,6 +3222,10 @@ export default function CotationsIndex({
                                 Aucun cours disponible pour le moment.
                             </div>
                         )}
+
+                        {isEditing && !isViewingCerealHistory ? (
+                            <DeletedCerealsSection cereals={marketData?.deleted_cereals || []} onRestore={askRestoreCereal} />
+                        ) : null}
 
                         <TransportGridSection
                             grid={displayTransportGrid}

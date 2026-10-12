@@ -387,6 +387,11 @@ Route::middleware(['auth', 'verified', 'twofactor'])->group(function () {
         ->middleware('sector.access:cotations.cereals.edit')
         ->middleware('throttle:admin-sensitive')
         ->name('cotations.cereals.destroy');
+    Route::post('/cotations/cereals/{code}/restore', [CotationController::class, 'restoreCereal'])
+        ->where('code', '[A-Za-z0-9_\-]{1,32}')
+        ->middleware('sector.access:cotations.cereals.edit')
+        ->middleware('throttle:admin-sensitive')
+        ->name('cotations.cereals.restore');
     Route::put('/cotations/cereals/{code}/visibility', [CotationController::class, 'updateCerealVisibility'])
         ->where('code', '[A-Za-z0-9_\-]{1,16}')
         ->middleware('sector.access:cotations.cereals.edit')
