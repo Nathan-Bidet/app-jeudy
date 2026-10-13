@@ -6,9 +6,12 @@ use App\Models\CotationMarketPrice;
 use App\Models\CotationMarketRefresh;
 use App\Models\CotationManualPrice;
 use App\Models\CotationSetting;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -202,26 +205,25 @@ class CotationMarketService
         'DÉCEMBRE' => ['number' => 12, 'label' => 'Décembre'],
     ];
 
+    /**
+     * Interroge la source et enregistre les cours. Ne lève pas d'exception : le résultat est la ligne
+     * d'historique `cotation_market_refreshes` (is_success, error_message) et, en cas d'échec,
+     * `failureKind` distingue l'indisponibilité temporaire de l'échec définitif.
+     */
     public function refreshFromEuronext(): CotationMarketRefresh
     {
+        // Message provisoire : il subsiste si le processus est interrompu avant la fin (arrêt du
+        // conteneur, kill), ce qui laisse sinon une ligne en échec sans aucune explication.
         $refresh = CotationMarketRefresh::query()->create([
             'source_url' => self::EURONEXT_URL,
             'is_success' => false,
+            'error_message' => 'Actualisation interrompue avant la fin (processus arrêté ?)',
             'fetched_at' => now(),
         ]);
 
         try {
-            $response = Http::timeout(10)->acceptJson()->get(self::EURONEXT_URL);
+            $response = $this->fetchSource();
             $refresh->http_status = $response->status();
-
-            if (! $response->successful()) {
-                $refresh->forceFill([
-                    'error_message' => 'HTTP '.$response->status(),
-                    'row_count' => 0,
-                ])->save();
-
-                return $refresh;
-            }
 
             $body = (string) $response->body();
             $contentType = strtolower((string) $response->header('content-type', ''));
@@ -231,27 +233,124 @@ class CotationMarketService
                 : $this->extractHtmlRows($body);
             $prices = $this->normalizeRows($rows);
 
-            if ($prices !== []) {
-                CotationMarketPrice::query()->insert(array_map(fn (array $price): array => [
-                    ...$price,
-                    'refresh_id' => $refresh->id,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ], $prices));
+            // HTTP 200 sans aucun cours : la source répond mais ne fournit rien (constaté lors d'un
+            // incident de la source). Ce n'est pas une actualisation réussie : les cotations ne
+            // seraient pas mises à jour alors que la tâche paraîtrait saine.
+            if ($prices === []) {
+                throw new CotationSourceException('Réponse HTTP '.$response->status().' sans aucun cours exploitable', true, $response->status());
             }
+
+            CotationMarketPrice::query()->insert(array_map(fn (array $price): array => [
+                ...$price,
+                'refresh_id' => $refresh->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ], $prices));
 
             $refresh->forceFill([
                 'is_success' => true,
+                'error_message' => null,
                 'row_count' => count($prices),
             ])->save();
+        } catch (CotationSourceException $exception) {
+            $this->recordRefreshFailure(
+                $refresh,
+                $exception,
+                $exception->transient ? CotationMarketRefresh::FAILURE_TRANSIENT : CotationMarketRefresh::FAILURE_DEFINITIVE,
+                $exception->httpStatus,
+                $exception->attempts,
+            );
         } catch (Throwable $exception) {
-            $refresh->forceFill([
-                'error_message' => mb_substr($exception->getMessage(), 0, 4000),
-                'row_count' => 0,
-            ])->save();
+            // Erreur technique (lecture de la réponse, base de données...) : jamais temporaire.
+            $this->recordRefreshFailure($refresh, $exception, CotationMarketRefresh::FAILURE_DEFINITIVE, $refresh->http_status, 1);
         }
 
         return $refresh;
+    }
+
+    /**
+     * Date du dernier relevé ayant réellement fourni des cours, antérieur à l'actualisation donnée.
+     */
+    public function lastSuccessfulRefreshAt(CotationMarketRefresh $before): ?Carbon
+    {
+        $at = CotationMarketRefresh::query()
+            ->where('is_success', true)
+            ->where('row_count', '>', 0)
+            ->where('id', '<', $before->id)
+            ->max('fetched_at');
+
+        return $at ? Carbon::parse($at) : null;
+    }
+
+    /**
+     * Récupère la réponse de la source. Les indisponibilités temporaires (connexion impossible ou
+     * délai dépassé, HTTP 408/425/429/5xx) sont retentées après une courte pause, dans la limite de
+     * cotations.refresh.attempts ; la durée totale reste sous la minute séparant deux exécutions.
+     *
+     * @throws CotationSourceException
+     */
+    private function fetchSource(): Response
+    {
+        $maxAttempts = max(1, (int) config('cotations.refresh.attempts', 3));
+        $attempt = 0;
+
+        while (true) {
+            $attempt++;
+
+            try {
+                $response = Http::connectTimeout((int) config('cotations.refresh.connect_timeout', 5))
+                    ->timeout((int) config('cotations.refresh.timeout', 10))
+                    ->acceptJson()
+                    ->get(self::EURONEXT_URL);
+
+                if ($response->successful()) {
+                    return $response;
+                }
+
+                $status = $response->status();
+                $failure = new CotationSourceException(
+                    'HTTP '.$status,
+                    in_array($status, [408, 425, 429], true) || $status >= 500,
+                    $status,
+                );
+            } catch (ConnectionException $exception) {
+                $failure = new CotationSourceException($exception->getMessage(), true, null, 1, $exception);
+            }
+
+            $failure->attempts = $attempt;
+
+            if (! $failure->transient || $attempt >= $maxAttempts) {
+                throw $failure;
+            }
+
+            usleep(max(0, (int) config('cotations.refresh.retry_delay_ms', 1000)) * 1000);
+        }
+    }
+
+    private function recordRefreshFailure(CotationMarketRefresh $refresh, Throwable $exception, string $kind, ?int $httpStatus, int $attempts): void
+    {
+        $refresh->failureKind = $kind;
+        $refresh->forceFill([
+            'http_status' => $httpStatus,
+            'error_message' => mb_substr($exception->getMessage(), 0, 4000),
+            'row_count' => 0,
+        ])->save();
+
+        $context = [
+            'refresh_id' => $refresh->id,
+            'source_url' => self::EURONEXT_URL,
+            'http_status' => $httpStatus,
+            'attempts' => $attempts,
+            'error' => $exception->getMessage(),
+        ];
+
+        if ($kind === CotationMarketRefresh::FAILURE_TRANSIENT) {
+            Log::warning('Cotations : source des cours temporairement indisponible', $context);
+
+            return;
+        }
+
+        Log::error('Cotations : échec définitif de l\'actualisation des cours', $context + ['exception' => $exception]);
     }
 
     /**

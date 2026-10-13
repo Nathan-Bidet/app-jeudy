@@ -31,9 +31,12 @@ Schedule::command('validation:send-pending-reminders')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Verrou limité à 10 minutes (24 h par défaut) : si le processus est tué en cours d'exécution,
+// l'actualisation reprend rapidement au lieu de rester bloquée jusqu'à l'expiration du verrou.
+// Une exécution normale dure quelques secondes, au pire ~40 s avec les nouvelles tentatives.
 Schedule::command('cotations:refresh')
     ->everyMinute()
-    ->withoutOverlapping()
+    ->withoutOverlapping(10)
     ->timezone(config('app.timezone', 'Europe/Paris'));
 
 // Compactage quotidien de l'historique des cotations. `cotations:refresh`

@@ -3,6 +3,34 @@
 return [
     /*
     |--------------------------------------------------------------------------
+    | Actualisation des cours (cotations:refresh)
+    |--------------------------------------------------------------------------
+    |
+    | La source (EURONEXT_URL du CotationMarketService) est un service tiers
+    | interrogé chaque minute : des indisponibilités brèves (HTTP 5xx, délai
+    | dépassé, connexion refusée, réponse vide) sont normales et ne doivent pas
+    | être traitées comme une panne de l'application.
+    |
+    | - Une indisponibilité temporaire est retentée `attempts` fois dans la même
+    |   exécution, puis consignée en avertissement ; la tâche suit son cours et
+    |   réessaie à la minute suivante.
+    | - Si aucun cours exploitable n'a pu être récupéré depuis
+    |   `alert_after_minutes` minutes, la commande échoue (code 1) et l'incident
+    |   est consigné en erreur. 0 = échec dès la première indisponibilité.
+    | - Un échec définitif (erreur HTTP 4xx, exception technique) fait toujours
+    |   échouer la commande.
+    |
+    */
+    'refresh' => [
+        'attempts' => (int) env('COTATIONS_REFRESH_ATTEMPTS', 3),
+        'retry_delay_ms' => (int) env('COTATIONS_REFRESH_RETRY_DELAY_MS', 1000),
+        'connect_timeout' => (int) env('COTATIONS_REFRESH_CONNECT_TIMEOUT', 5),
+        'timeout' => (int) env('COTATIONS_REFRESH_TIMEOUT', 10),
+        'alert_after_minutes' => (int) env('COTATIONS_REFRESH_ALERT_AFTER_MINUTES', 15),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Compactage de l'historique des cotations
     |--------------------------------------------------------------------------
     |
