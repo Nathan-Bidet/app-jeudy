@@ -262,6 +262,8 @@ class CotationController extends Controller
             ...$this->fuelGridValidationRules(),
         ], $this->cotationValidationMessages(), $this->cotationValidationAttributes());
 
+        $this->assertSelectableMarketLines($validated['manual_prices'] ?? [], $validated['custom_cereals'] ?? []);
+
         $before = $settings->mapWithKeys(fn (CotationSetting $setting): array => [
             (string) $setting->id => $this->settingSnapshot($setting),
         ])->all();
@@ -2209,6 +2211,56 @@ class CotationController extends Controller
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Une échéance MATIF ne peut être choisie que si elle est encore proposée par la source et qu'elle
+     * appartient à la céréale MATIF d'origine de la ligne : jamais en fonction de l'année de récolte.
+     * Une échéance déjà enregistrée sur la ligne (échue, ou d'une ancienne référence) reste acceptée
+     * telle quelle : seule une nouvelle sélection est contrôlée. Exécuté avant toute écriture.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @param  array<int, array<string, mixed>>  $customCereals
+     */
+    private function assertSelectableMarketLines(array $rows, array $customCereals): void
+    {
+        $submittedBases = [];
+        foreach ($customCereals as $cereal) {
+            if (! empty($cereal['code']) && ! empty($cereal['base_product_code'])) {
+                $submittedBases[mb_strtoupper((string) $cereal['code'], 'UTF-8')] = (string) $cereal['base_product_code'];
+            }
+        }
+
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            $hash = ($row['line_type'] ?? '') === 'matif' ? trim((string) ($row['market_identity_hash'] ?? '')) : '';
+            if ($hash === '') {
+                continue;
+            }
+
+            $manual = $this->hasDecimalInput($row['manual_id'] ?? null)
+                ? CotationManualPrice::query()->find((int) $row['manual_id'])
+                : null;
+            if ($manual && $manual->market_identity_hash === $hash) {
+                continue;
+            }
+
+            $productCode = mb_strtoupper(trim((string) $row['product_code']), 'UTF-8');
+            $base = $submittedBases[$productCode] ?? $this->marketService->baseProductCodeFor($productCode);
+            // Céréale inconnue (personnalisée créée dans cette requête sans code transmis) : rien à comparer.
+            if ($base === null) {
+                continue;
+            }
+
+            if (! in_array($hash, $this->marketService->activeIdentityHashes($base), true)) {
+                $errors["manual_prices.$index.market_identity_hash"] = 'Cette échéance MATIF n\'est plus proposée ou ne correspond pas à la céréale MATIF d\'origine.';
+            }
+        }
+
+        if ($errors !== []) {
+            throw \Illuminate\Validation\ValidationException::withMessages($errors);
+        }
     }
 
     /**

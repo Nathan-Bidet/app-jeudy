@@ -148,8 +148,10 @@ class CotationMarketService
     }
 
     /**
-     * In Cotations, the selected harvest year is the displayed maturity year.
-     * Example: Mars 2027 is shown only when filtering Récolte 2027.
+     * La récolte d'une ligne de livraison et l'échéance MATIF qu'elle référence sont indépendantes :
+     * n'importe quelle échéance active de la céréale MATIF d'origine peut être choisie pour n'importe
+     * quelle récolte. Le `harvest_year` d'un cours de marché (= son année d'échéance) ne sert plus que de
+     * composante technique de son identité (identityHash) ; il ne filtre plus aucune option.
      */
 
     private const FUTURES_MONTHS = [
@@ -359,7 +361,7 @@ class CotationMarketService
     public function latestGroups(int $leftHarvestYear, int $rightHarvestYear, bool $includeEmptyProducts = false, bool $includeCustomProducts = false, bool $includeSalePrice = false): array
     {
         $wantedYears = [$leftHarvestYear, $rightHarvestYear];
-        $marketRows = $this->latestMarketRowsByIdentity($wantedYears);
+        $marketRows = $this->latestMarketRowsByIdentity();
         $configuredRows = [];
         $groups = [];
 
@@ -642,60 +644,54 @@ class CotationMarketService
     /**
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * Échéances MATIF proposées à la sélection, par céréale : celles que la source fournit réellement,
+     * c'est-à-dire présentes dans la dernière actualisation réussie (les échéances échues ne le sont plus).
+     * Indépendantes de l'année de récolte : les deux colonnes (récolte gauche et droite) reçoivent la même
+     * liste, et une céréale personnalisée reprend celle de sa céréale MATIF d'origine.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     public function marketOptions(int $leftHarvestYear, int $rightHarvestYear): array
     {
-        $baseGroups = [];
+        $rowsByProduct = [];
 
-        foreach ($this->latestMarketRowsByIdentity([$leftHarvestYear, $rightHarvestYear]) as $row) {
-            if (! in_array($row['product_code'], self::BASE_PRODUCT_CODES, true)) {
-                continue;
-            }
-
-            $productKey = $row['product_code'];
-            $baseGroups[$productKey] ??= [
-                'code' => $row['product_code'],
-                'name' => $row['product_name'],
-                'sort' => $row['product_sort'],
-                'base_product_code' => $row['product_code'],
-                'harvests' => [
-                    'left' => ['year' => $leftHarvestYear, 'rows' => []],
-                    'right' => ['year' => $rightHarvestYear, 'rows' => []],
-                ],
-            ];
-
-            $bucket = (int) $row['harvest_year'] === $leftHarvestYear ? 'left' : 'right';
-            $baseGroups[$productKey]['harvests'][$bucket]['rows'][] = $row;
+        foreach ($this->activeMarketRows() as $row) {
+            $rowsByProduct[$row['product_code']][] = $row;
         }
+
+        foreach ($rowsByProduct as &$rows) {
+            usort($rows, static fn (array $left, array $right): int => ($left['sort'] <=> $right['sort']) ?: strcmp((string) $left['label'], (string) $right['label']));
+        }
+        unset($rows);
+
+        $harvestsFor = static fn (array $rows): array => [
+            'left' => ['year' => $leftHarvestYear, 'rows' => $rows],
+            'right' => ['year' => $rightHarvestYear, 'rows' => $rows],
+        ];
+
+        $groups = [];
 
         foreach (self::BASE_PRODUCT_CODES as $code) {
-            $baseGroups[$code] ??= $this->blankGroup($code, self::PRODUCT_CODES[$code], $leftHarvestYear, $rightHarvestYear);
+            $first = $rowsByProduct[$code][0] ?? null;
+            $groups[$code] = [
+                'code' => $code,
+                'name' => $first['product_name'] ?? self::PRODUCT_CODES[$code]['name'],
+                'sort' => $first['product_sort'] ?? self::PRODUCT_CODES[$code]['sort'],
+                'base_product_code' => $code,
+                'harvests' => $harvestsFor($rowsByProduct[$code] ?? []),
+            ];
         }
 
-        $groups = $baseGroups;
-
         foreach ($this->customCereals() as $cereal) {
-            $base = $baseGroups[$cereal['base_product_code']] ?? [
-                'harvests' => [
-                    'left' => ['year' => $leftHarvestYear, 'rows' => []],
-                    'right' => ['year' => $rightHarvestYear, 'rows' => []],
-                ],
-            ];
-
             $groups[$cereal['code']] = [
                 'code' => $cereal['code'],
                 'name' => $cereal['name'],
                 'sort' => $cereal['sort'],
                 'base_product_code' => $cereal['base_product_code'],
-                'harvests' => $base['harvests'],
+                'harvests' => $harvestsFor($rowsByProduct[$cereal['base_product_code']] ?? []),
             ];
         }
-
-        foreach ($groups as &$group) {
-            foreach (['left', 'right'] as $bucket) {
-                usort($group['harvests'][$bucket]['rows'], static fn (array $left, array $right): int => ($left['sort'] <=> $right['sort']) ?: strcmp((string) $left['label'], (string) $right['label']));
-            }
-        }
-        unset($group);
 
         usort($groups, static fn (array $left, array $right): int => ($left['sort'] <=> $right['sort']) ?: strcmp((string) $left['name'], (string) $right['name']));
 
@@ -703,10 +699,95 @@ class CotationMarketService
     }
 
     /**
-     * @param  array<int, int>  $wantedYears
+     * Céréale MATIF d'origine d'un code de céréale : lui-même pour une céréale MATIF de base, la
+     * référence choisie pour une céréale personnalisée ; null si le code est inconnu.
+     */
+    public function baseProductCodeFor(string $productCode): ?string
+    {
+        $code = mb_strtoupper(trim($productCode), 'UTF-8');
+
+        if (in_array($code, self::BASE_PRODUCT_CODES, true)) {
+            return $code;
+        }
+
+        foreach ($this->customCereals() as $cereal) {
+            if ($cereal['code'] === $code) {
+                return $cereal['base_product_code'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Identités des échéances actives (proposées à la sélection) d'une céréale MATIF de base.
+     *
+     * @return array<int, string>
+     */
+    public function activeIdentityHashes(string $baseProductCode): array
+    {
+        return array_keys(array_filter(
+            $this->activeMarketRows(),
+            static fn (array $row): bool => $row['product_code'] === $baseProductCode,
+        ));
+    }
+
+    /**
+     * Dernière actualisation ayant réellement fourni des cours : référence de ce qui est « actif ».
+     */
+    private function activeRefreshId(): ?int
+    {
+        if (! Schema::hasTable('cotation_market_refreshes')) {
+            return null;
+        }
+
+        $id = CotationMarketRefresh::query()
+            ->where('is_success', true)
+            ->where('row_count', '>', 0)
+            ->max('id');
+
+        return $id ? (int) $id : null;
+    }
+
+    /**
+     * Cours de la dernière actualisation utile (échéances encore cotées), par identité.
+     *
      * @return array<string, array<string, mixed>>
      */
-    private function latestMarketRowsByIdentity(array $wantedYears): array
+    private function activeMarketRows(): array
+    {
+        $refreshId = $this->activeRefreshId();
+
+        if ($refreshId === null || ! Schema::hasTable('cotation_market_prices')) {
+            return [];
+        }
+
+        $rows = [];
+
+        DB::table('cotation_market_prices')
+            ->select([
+                'id', 'product_code', 'product_name', 'product_sort', 'contract_code', 'maturity_label',
+                'maturity_month', 'maturity_year', 'harvest_year', 'price', 'maturity_sort', 'created_at',
+            ])
+            ->where('refresh_id', $refreshId)
+            ->whereIn('product_code', self::BASE_PRODUCT_CODES)
+            ->orderBy('id')
+            ->get()
+            ->each(function (object $price) use (&$rows): void {
+                $row = $this->marketRowFromPrice($price);
+                $rows[$row['identity_hash']] ??= $row;
+            });
+
+        return $rows;
+    }
+
+    /**
+     * Dernier cours connu de chaque échéance MATIF, y compris les échéances échues (qui ne sont plus
+     * proposées mais restent consultables sur les lignes qui les référencent). Aucun filtre d'année.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function latestMarketRowsByIdentity(): array
     {
         $rows = [];
 
@@ -716,7 +797,6 @@ class CotationMarketService
 
         $latestIds = DB::table('cotation_market_prices')
             ->selectRaw('MAX(id) as id')
-            ->whereIn('harvest_year', $wantedYears)
             ->whereIn('product_code', self::BASE_PRODUCT_CODES)
             ->groupBy('product_code', 'harvest_year', 'maturity_year', 'maturity_month', 'maturity_label')
             ->pluck('id')

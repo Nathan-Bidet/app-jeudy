@@ -546,6 +546,16 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
     const lineType = lineTypeFor(draft);
     const isMatifLine = lineType === 'matif';
     const selectedOption = isMatifLine ? options.find((option) => option.identity_hash === draft.market_identity_hash) : null;
+    // Échéance déjà enregistrée mais plus proposée (échue, ou référence d'une ancienne céréale MATIF) :
+    // elle reste affichée et sélectionnée, avec son dernier cours connu, sans être remplacée.
+    const unavailableOption = isMatifLine && draft.market_identity_hash && !selectedOption
+        ? {
+            identity_hash: draft.market_identity_hash,
+            label: `${draft.maturity_label || row.maturity_label || row.label || 'Échéance'} (plus cotée)`,
+            matif: draft.matif ?? row.matif ?? null,
+        }
+        : null;
+    const selectableOptions = unavailableOption ? [unavailableOption, ...options] : options;
     const finalPriceReferenceOptions = finalPriceOptions.filter((option) => option.product_code !== (draft.product_code || row.product_code));
     const finalPriceReferenceKey = !isMatifLine ? String(draft.final_price_reference_key ?? row.final_price_reference_key ?? '').trim() : '';
     const selectedFinalPriceReference = finalPriceReferenceKey
@@ -607,6 +617,8 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                             value={isMatifLine ? draft.market_identity_hash || '' : 'custom'}
                             onChange={(event) => {
                                 const option = options.find((item) => item.identity_hash === event.target.value);
+                                // Reselectionner l'échéance non cotée déjà enregistrée ne change rien.
+                                if (!option && unavailableOption && event.target.value === unavailableOption.identity_hash) return;
                                 setManualPrice(row, option ? {
                                     line_type: 'matif',
                                     market_identity_hash: option.identity_hash,
@@ -614,7 +626,8 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                                     maturity_label: option.maturity_label || option.label || '',
                                     maturity_month: option.maturity_month ?? '',
                                     maturity_year: option.maturity_year ?? row.harvest_year ?? '',
-                                    harvest_year: option.harvest_year ?? row.harvest_year ?? '',
+                                    // La récolte de la ligne ne dépend pas de l'échéance choisie : on la conserve.
+                                    harvest_year: draft.harvest_year ?? row.harvest_year ?? '',
                                     manual_matif: '',
                                     final_price_reference_key: '',
                                     matif: option.matif,
@@ -635,7 +648,7 @@ function MarketRow({ row, canManage, form, setManualPrice, deleteManualRow, opti
                             className="w-full min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-1.5 text-xs font-bold sm:text-sm"
                         >
                             <option value="custom">Option personnalisée</option>
-                            {options.map((option) => (
+                            {selectableOptions.map((option) => (
                                 <option key={option.identity_hash} value={option.identity_hash}>
                                     {option.label} - {formatPrice(option.matif)}
                                 </option>
